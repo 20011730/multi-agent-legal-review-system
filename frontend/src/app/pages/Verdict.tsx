@@ -34,9 +34,19 @@ interface RiskItem {
   description: string;
 }
 
+interface FinalDecision {
+  verdict: VerdictLevel;
+  riskLevel: string;
+  risks: RiskItem[];
+  summary: string;
+  recommendation: string;
+  revisedContent: string;
+}
+
 export function Verdict() {
   const navigate = useNavigate();
   const [reviewData, setReviewData] = useState<ReviewData | null>(null);
+  const [finalDecision, setFinalDecision] = useState<FinalDecision | null>(null);
 
   useEffect(() => {
     const data = sessionStorage.getItem("reviewData");
@@ -45,15 +55,20 @@ export function Verdict() {
       return;
     }
     setReviewData(JSON.parse(data));
+
+    const fdData = sessionStorage.getItem("finalDecision");
+    if (fdData) {
+      setFinalDecision(JSON.parse(fdData));
+    }
   }, [navigate]);
 
   if (!reviewData) {
     return null;
   }
 
-  const verdict: VerdictLevel = "conditional";
-  
-  const risks: RiskItem[] = [
+  const verdict: VerdictLevel = finalDecision?.verdict || "conditional";
+
+  const risks: RiskItem[] = finalDecision?.risks || [
     {
       category: "법률 리스크",
       level: "high",
@@ -157,6 +172,8 @@ export function Verdict() {
               className="bg-blue-600 hover:bg-blue-700 text-white"
               onClick={() => {
                 sessionStorage.removeItem("reviewData");
+                sessionStorage.removeItem("sessionId");
+                sessionStorage.removeItem("finalDecision");
                 navigate("/input");
               }}
             >
@@ -226,9 +243,8 @@ export function Verdict() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-gray-700 leading-relaxed">
-              제출된 마케팅 문구에 대한 법률·리스크·윤리 검토 결과, 여러 개선사항이 확인되었습니다. 
-              하단의 수정안을 반영한 후 사용할 것을 권고드립니다. 특히 법률 리스크가 높게 평가된 
-              부분은 반드시 수정이 필요하며, 법무팀의 최종 검토를 거쳐 주시기 바랍니다.
+              {finalDecision?.summary ||
+                "제출된 마케팅 문구에 대한 법률·리스크·윤리 검토 결과, 여러 개선사항이 확인되었습니다. 하단의 수정안을 반영한 후 사용할 것을 권고드립니다. 특히 법률 리스크가 높게 평가된 부분은 반드시 수정이 필요하며, 법무팀의 최종 검토를 거쳐 주시기 바랍니다."}
             </p>
           </CardContent>
         </Card>
@@ -345,9 +361,8 @@ export function Verdict() {
             <CardContent>
               <div className="p-4 bg-white rounded-lg border border-green-200">
                 <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap font-mono">
-                  {`자사 테스트 결과 기존 대비 2배 향상된 성능을 확인했습니다. 혁신적인 기술로 더 나은 사용 경험을 제공합니다.
-
-지금 구매 시 특별 할인 50% 및 추가 사은품을 드립니다. (재고 소진 시까지, 상세 조건은 페이지 하단 참조)`}
+                  {finalDecision?.revisedContent ||
+                    "자사 테스트 결과 기존 대비 2배 향상된 성능을 확인했습니다. 혁신적인 기술로 더 나은 사용 경험을 제공합니다.\n\n지금 구매 시 특별 할인 50% 및 추가 사은품을 드립니다. (재고 소진 시까지, 상세 조건은 페이지 하단 참조)"}
                 </p>
               </div>
               <div className="mt-4 space-y-2">
