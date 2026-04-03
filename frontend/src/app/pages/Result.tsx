@@ -75,92 +75,6 @@ const agents: Agent[] = [
   },
 ];
 
-// Mock discussion messages organized by rounds
-const generateDiscussionByRounds = () => {
-  return [
-    // Round 1
-    [
-      {
-        agentId: "legal",
-        timestamp: 1,
-        type: "analysis" as const,
-        round: 1,
-        content:
-          "검토 시작: 표시·광고의 공정화에 관한 법률 제3조 및 제4조를 기준으로 분석하겠습니다. '업계 1위 제품보다 2배 빠른 성능'이라는 표현에 대한 객관적 근거 자료 확인이 필요합니다.",
-      },
-      {
-        agentId: "risk",
-        timestamp: 2,
-        type: "analysis" as const,
-        round: 1,
-        content:
-          "비교 광고 측면에서 리스크를 검토하겠습니다. 특정 경쟁사를 직접 지칭하지는 않았으나, '업계 1위'라는 표현이 특정 업체를 암시할 수 있습니다. 경쟁사의 대응 가능성을 고려해야 합니다.",
-      },
-      {
-        agentId: "ethics",
-        timestamp: 3,
-        type: "concern" as const,
-        round: 1,
-        content:
-          "'타사 제품은 구시대 유물'이라는 표현에서 과도한 비하 표현이 감지됩니다. 경쟁사에 대한 존중 부족은 기업 이미지에 부정적 영향을 줄 수 있습니다.",
-      },
-    ],
-    // Round 2
-    [
-      {
-        agentId: "legal",
-        timestamp: 4,
-        type: "concern" as const,
-        round: 2,
-        content:
-          "표시광고법 제3조 제1항 제1호 '거짓·과장 광고'에 해당할 가능성이 있습니다. '2배 빠른 성능'에 대한 시험·조사 기관의 객관적 검증 자료가 없다면 법적 분쟁 소지가 있습니다. 공정거래위원회 제재 사례 검토 필요.",
-      },
-      {
-        agentId: "risk",
-        timestamp: 5,
-        type: "concern" as const,
-        round: 2,
-        content:
-          "'한정 수량', '지금 구매', '놓치면 후회' 등 긴박감 조성 표현이 과도합니다. 실제 재고 상황과 무관한 허위 희소성 강조는 소비자 기만으로 간주될 수 있으며, 소비자 불만 및 환불 요구 증가 가능성이 있습니다.",
-      },
-      {
-        agentId: "ethics",
-        timestamp: 6,
-        type: "analysis" as const,
-        round: 2,
-        content:
-          "소비자 자율성 존중 관점에서 검토합니다. '서둘러 주문', '후회합니다' 등의 압박적 표현은 소비자의 합리적 판단을 방해할 수 있습니다. ESG 경영 측면에서 소비자 중심적 커뮤니케이션이 필요합니다.",
-      },
-    ],
-    // Round 3
-    [
-      {
-        agentId: "legal",
-        timestamp: 7,
-        type: "recommendation" as const,
-        round: 3,
-        content:
-          "법적 안전성 확보를 위해 다음을 권고합니다: 1) 성능 비교 데이터의 출처 명시 2) '당사 기준' 또는 '특정 조건 하' 등 한정 표현 추가 3) 비교 대상 제품의 구체적 명시 또는 일반화된 표현으로 수정",
-      },
-      {
-        agentId: "risk",
-        timestamp: 8,
-        type: "recommendation" as const,
-        round: 3,
-        content:
-          "리스크 완화 방안: 1) 경쟁사 비하 표현 전면 삭제 2) 할인율 및 사은품 관련 상세 조건 명시 3) 한정 수량의 실제 물량 및 기간 구체화 4) 사후 소비자 불만 대응 프로세스 사전 준비",
-      },
-      {
-        agentId: "ethics",
-        timestamp: 9,
-        type: "recommendation" as const,
-        round: 3,
-        content:
-          "윤리적 개선 방안: 1) 자사 제품의 강점을 긍정적으로 표현 (비교 대신 절대적 가치 강조) 2) 소비자 선택권 존중하는 톤앤매너 적용 3) 압박적 표현 대신 혜택 중심 정보 제공 4) 공정하고 투명한 커뮤니케이션 원칙 준수",
-      },
-    ],
-  ];
-};
 
 export function Result() {
   const navigate = useNavigate();
@@ -176,10 +90,10 @@ export function Result() {
   const [waitingForUserInput, setWaitingForUserInput] =
     useState(false);
   const [userInput, setUserInput] = useState("");
-  const [allRounds] = useState(generateDiscussionByRounds());
+  const [allRounds, setAllRounds] = useState<Message[][]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize and load participation mode
+  // Initialize and load participation mode + fetch debate result
   useEffect(() => {
     const reviewData = sessionStorage.getItem("reviewData");
     if (!reviewData) {
@@ -189,6 +103,42 @@ export function Result() {
 
     const data = JSON.parse(reviewData);
     setParticipationMode(data.participationMode || "observe");
+
+    const sessionId = sessionStorage.getItem("sessionId");
+    if (!sessionId) return;
+
+    fetch(`http://localhost:8080/api/sessions/${sessionId}/debates/latest`)
+      .then((res) => res.json())
+      .then((result) => {
+        // messages를 round 기준으로 그룹핑
+        const grouped: Record<number, Message[]> = {};
+        result.messages.forEach((msg: any) => {
+          const round = msg.round || 1;
+          if (!grouped[round]) grouped[round] = [];
+          grouped[round].push({
+            agentId: msg.agentId,
+            timestamp: Date.now() + grouped[round].length,
+            content: msg.content,
+            type: msg.type || "analysis",
+            round,
+          });
+        });
+
+        const rounds = Object.keys(grouped)
+          .sort((a, b) => Number(a) - Number(b))
+          .map((key) => grouped[Number(key)]);
+
+        setAllRounds(rounds);
+
+        // finalDecision을 sessionStorage에 저장 (Verdict 페이지에서 사용)
+        if (result.finalDecision) {
+          sessionStorage.setItem(
+            "finalDecision",
+            JSON.stringify(result.finalDecision),
+          );
+        }
+      })
+      .catch((err) => console.error("토론 결과 조회 실패:", err));
   }, [navigate]);
 
   // Handle message progression
@@ -198,7 +148,12 @@ export function Result() {
       return;
     }
 
-    // Check if we have valid round data
+    // API 응답이 아직 안 왔으면 대기
+    if (allRounds.length === 0) {
+      return;
+    }
+
+    // 모든 라운드를 다 보여줬으면 완료
     if (currentRound > allRounds.length) {
       setIsComplete(true);
       setProgress(100);
@@ -210,7 +165,7 @@ export function Result() {
     // If we've shown all messages in this round
     if (currentMessageIndex >= currentRoundMessages.length) {
       // Check if this is the last round
-      if (currentRound >= 3) {
+      if (currentRound >= allRounds.length) {
         setIsComplete(true);
         setProgress(100);
         return;
@@ -260,7 +215,6 @@ export function Result() {
   const handleUserSubmit = () => {
     if (!userInput.trim()) return;
 
-    // Add user message
     const userMessage: Message = {
       agentId: "user",
       timestamp: Date.now(),
@@ -271,23 +225,15 @@ export function Result() {
 
     setMessages((msgs) => [...msgs, userMessage]);
     setUserInput("");
+    setCurrentRound((prev) => prev + 1);
+    setCurrentMessageIndex(0);
     setWaitingForUserInput(false);
-
-    // Move to next round
-    setTimeout(() => {
-      setCurrentRound(currentRound + 1);
-      setCurrentMessageIndex(0);
-    }, 500);
   };
 
   const handleSkipInput = () => {
+    setCurrentRound((prev) => prev + 1);
+    setCurrentMessageIndex(0);
     setWaitingForUserInput(false);
-
-    // Move to next round
-    setTimeout(() => {
-      setCurrentRound(currentRound + 1);
-      setCurrentMessageIndex(0);
-    }, 500);
   };
 
   const getAgent = (agentId: string) => {

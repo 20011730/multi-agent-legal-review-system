@@ -4,3 +4,17 @@ server:
 spring:
   application:
     name: legal-review-backend
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/legalreview
+    username: legalreview
+    password: legalreview
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true

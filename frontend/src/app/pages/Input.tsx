@@ -46,10 +46,28 @@ export function InputPage() {
     }
   }, [navigate]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Store form data in sessionStorage for other pages to access
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
     sessionStorage.setItem("reviewData", JSON.stringify(formData));
+
+    try {
+      const res = await fetch("http://localhost:8080/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+      const data = await res.json();
+      sessionStorage.setItem("sessionId", String(data.sessionId));
+    } catch (err) {
+      console.error("세션 생성 실패:", err);
+    }
+
+    setIsSubmitting(false);
     navigate("/result");
   };
 
