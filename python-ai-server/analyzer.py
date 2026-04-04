@@ -3,8 +3,12 @@
 추후 로컬 LLM 또는 외부 모델 호출로 교체 가능하도록 분리.
 """
 
+import logging
 import re
-from schemas import AnalyzeRequest, AnalyzeResponse, AgentMessage, FinalDecision, RiskItem
+from schemas import AnalyzeRequest, AnalyzeResponse, AgentMessage, FinalDecision, RiskItem, EvidenceItem
+from services.evidence_service import collect_evidences
+
+logger = logging.getLogger(__name__)
 
 
 # 위험 표현 패턴 사전
@@ -47,18 +51,48 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     review_type = request.reviewType
     situation = request.situation
 
-    # 1. 위험 표현 탐지
+    # 1. 법령/판례 근거 수집 (실패해도 분석은 계속 진행)
+    evidences_raw = []
+    try:
+        evidences_raw = collect_evidences(content, situation, review_type, max_results=5)
+        logger.info("법령/판례 근거 %d건 수집 완료", len(evidences_raw))
+    except Exception as e:
+        logger.error("법령/판례 근거 수집 실패 (분석은 계속 진행): %s", e)
+
+    # evidence dict -> EvidenceItem 변환
+    evidence_items = [
+        EvidenceItem(
+            sourceType=ev.get("sourceType", "LAW"),
+            title=ev.get("title", ""),
+            referenceId=ev.get("referenceId", ""),
+            articleOrCourt=ev.get("articleOrCourt", ""),
+            summary=ev.get("summary", ""),
+            url=ev.get("url", ""),
+            relevanceReason=ev.get("relevanceReason", ""),
+            relevanceScore=ev.get("relevanceScore", 0),
+            quotedText=ev.get("quotedText", ""),
+            metadata=ev.get("metadata"),
+        )
+        for ev in evidences_raw
+    ]
+
+    # 2. 위험 표현 탐지
     detected = _detect_risks(content)
     risk_score = _calculate_risk_score(detected)
     law_ref = REVIEW_TYPE_LAWS.get(review_type, "관련 법령")
 
-    # 2. 메시지 생성 (3라운드 × 3에이전트)
-    messages = _generate_messages(content, situation, review_type, detected, law_ref)
+    # 실제 검색된 법령명이 있으면 law_ref를 보강
+    law_titles = [ev.get("title", "") for ev in evidences_raw if ev.get("sourceType") == "LAW"]
+    if law_titles:
+        law_ref = law_titles[0]  # 가장 관련도 높은 법령명 사용
 
-    # 3. 최종 판정 생성
+    # 3. 메시지 생성 (3라운드 × 3에이전트) — evidence 정보 반영
+    messages = _generate_messages(content, situation, review_type, detected, law_ref, evidences_raw)
+
+    # 4. 최종 판정 생성
     final_decision = _generate_final_decision(content, detected, risk_score, law_ref)
 
-    return AnalyzeResponse(messages=messages, finalDecision=final_decision)
+    return AnalyzeResponse(messages=messages, finalDecision=final_decision, evidences=evidence_items)
 
 
 def _detect_risks(content: str) -> dict[str, list[str]]:
@@ -103,9 +137,11 @@ def _generate_messages(
     review_type: str,
     detected: dict,
     law_ref: str,
+    evidences: "list[dict] | None" = None,
 ) -> list[AgentMessage]:
     """3라운드 × 3에이전트 = 9개 메시지 생성."""
     messages = []
+    evidences = evidences or []
 
     detected_labels = [RISK_PATTERNS[k]["label"] for k in detected]
     detected_examples = []
@@ -114,6 +150,12 @@ def _generate_messages(
 
     example_str = ", ".join(f"'{e}'" for e in detected_examples[:4]) if detected_examples else "특이 표현 없음"
     label_str = ", ".join(detected_labels) if detected_labels else "주요 위험 요소 미탐지"
+
+    # 근거 참조 문자열 생성
+    law_evidences = [ev for ev in evidences if ev.get("sourceType") == "LAW"]
+    case_evidences = [ev for ev in evidences if ev.get("sourceType") == "CASE"]
+    law_citation = law_evidences[0]["title"] if law_evidences else law_ref
+    case_citation = f" 관련 판례: {case_evidences[0]['title']}({case_evidences[0].get('referenceId', '')})" if case_evidences else ""
 
     review_type_kr = {
         "marketing": "마케팅·광고 문구",
@@ -132,12 +174,13 @@ def _generate_messages(
     # ── 라운드 1: 초기 분석 ──
     messages.append(AgentMessage(
         agentId="legal", agentName="법률 전문가",
-        content=f"{law_ref}을 기준으로 분석하겠습니다. "
+        content=f"{law_citation}을 기준으로 분석하겠습니다. "
                 f"제출된 {review_type_kr}에서 {example_str} 등의 표현이 확인됩니다. "
-                f"{'객관적 근거 자료 없이 사용된 비교·과장 표현은 법적 분쟁 소지가 있습니다.' if has_exaggeration else '법률적 검토를 진행합니다.'}",
+                f"{'객관적 근거 자료 없이 사용된 비교·과장 표현은 법적 분쟁 소지가 있습니다.' if has_exaggeration else '법률적 검토를 진행합니다.'}"
+                f"{case_citation}",
         type="analysis", round=1,
         stance="CON" if has_exaggeration else "NEUTRAL",
-        evidenceSummary=f"{law_ref} 위반 가능성 검토 필요"
+        evidenceSummary=f"{law_citation} 위반 가능성 검토 필요"
     ))
 
     messages.append(AgentMessage(
@@ -166,8 +209,9 @@ def _generate_messages(
     messages.append(AgentMessage(
         agentId="legal", agentName="법률 전문가",
         content=f"{'과장 광고에 해당할 가능성이 있습니다. ' if has_exaggeration else ''}"
-                f"{'비교 광고 시 객관적 검증 자료가 반드시 필요합니다. 공정거래위원회 제재 사례에 비추어 볼 때 시정명령 및 과징금 부과 가능성이 있습니다.' if has_exaggeration else f'{law_ref} 관련 세부 조항을 검토한 결과, 일부 표현의 법적 적절성 확인이 필요합니다.'}"
-                f"{'할인·사은품 관련 표현의 상세 조건이 명시되어야 합니다.' if has_discount else ''}",
+                f"{'비교 광고 시 객관적 검증 자료가 반드시 필요합니다. 공정거래위원회 제재 사례에 비추어 볼 때 시정명령 및 과징금 부과 가능성이 있습니다.' if has_exaggeration else f'{law_citation} 관련 세부 조항을 검토한 결과, 일부 표현의 법적 적절성 확인이 필요합니다.'}"
+                f"{'할인·사은품 관련 표현의 상세 조건이 명시되어야 합니다.' if has_discount else ''}"
+                f"{case_citation}",
         type="concern", round=2,
         stance="CON" if has_exaggeration else "NEUTRAL",
         evidenceSummary="법적 제재 가능성 및 시정 조치 리스크"

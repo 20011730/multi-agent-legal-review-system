@@ -1,10 +1,23 @@
+import logging
+import os
+
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from schemas import AnalyzeRequest, AnalyzeResponse
 from analyzer import analyze
 
-app = FastAPI(title="Legal Review AI Server", version="0.1.0")
+# 환경변수 로드 (.env 파일)
+load_dotenv()
+
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
+app = FastAPI(title="Legal Review AI Server", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,7 +29,12 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    law_api_key = os.getenv("LAW_API_KEY")
+    return {
+        "status": "ok",
+        "version": "0.2.0",
+        "lawApiConfigured": bool(law_api_key),
+    }
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)

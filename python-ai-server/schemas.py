@@ -1,41 +1,13 @@
-from pydantic import BaseModel
+"""
+하위 호환용 re-export.
+실제 모델은 models/schemas.py에 정의되어 있다.
+"""
 
-
-class AnalyzeRequest(BaseModel):
-    sessionId: int
-    companyName: str
-    industry: str
-    reviewType: str
-    situation: str
-    content: str
-    participationMode: str
-
-
-class AgentMessage(BaseModel):
-    agentId: str
-    agentName: str
-    content: str
-    type: str
-    round: int
-    stance: str
-    evidenceSummary: str
-
-
-class RiskItem(BaseModel):
-    category: str
-    level: str
-    description: str
-
-
-class FinalDecision(BaseModel):
-    verdict: str
-    riskLevel: str
-    risks: list[RiskItem]
-    summary: str
-    recommendation: str
-    revisedContent: str
-
-
-class AnalyzeResponse(BaseModel):
-    messages: list[AgentMessage]
-    finalDecision: FinalDecision
+from models.schemas import (  # noqa: F401
+    AnalyzeRequest,
+    AnalyzeResponse,
+    AgentMessage,
+    FinalDecision,
+    RiskItem,
+    EvidenceItem,
+)
