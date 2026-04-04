@@ -4,18 +4,20 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Separator } from "../components/ui/separator";
-import { 
-  Scale, 
-  ArrowLeft, 
-  FileText, 
-  AlertTriangle, 
-  CheckCircle2, 
+import {
+  Scale,
+  ArrowLeft,
+  FileText,
+  AlertTriangle,
+  CheckCircle2,
   XCircle,
   TrendingDown,
   TrendingUp,
   Minus,
   Download,
-  RotateCcw
+  RotateCcw,
+  BookOpen,
+  ExternalLink,
 } from "lucide-react";
 
 interface ReviewData {
@@ -43,10 +45,21 @@ interface FinalDecision {
   revisedContent: string;
 }
 
+interface EvidenceItem {
+  sourceType: string;
+  title: string;
+  referenceId?: string;
+  articleOrCourt?: string;
+  summary?: string;
+  url?: string;
+  relevanceReason?: string;
+}
+
 export function Verdict() {
   const navigate = useNavigate();
   const [reviewData, setReviewData] = useState<ReviewData | null>(null);
   const [finalDecision, setFinalDecision] = useState<FinalDecision | null>(null);
+  const [evidences, setEvidences] = useState<EvidenceItem[]>([]);
 
   useEffect(() => {
     const data = sessionStorage.getItem("reviewData");
@@ -59,6 +72,11 @@ export function Verdict() {
     const fdData = sessionStorage.getItem("finalDecision");
     if (fdData) {
       setFinalDecision(JSON.parse(fdData));
+    }
+
+    const evData = sessionStorage.getItem("evidences");
+    if (evData) {
+      try { setEvidences(JSON.parse(evData)); } catch { /* ignore */ }
     }
   }, [navigate]);
 
@@ -174,6 +192,7 @@ export function Verdict() {
                 sessionStorage.removeItem("reviewData");
                 sessionStorage.removeItem("sessionId");
                 sessionStorage.removeItem("finalDecision");
+                sessionStorage.removeItem("evidences");
                 navigate("/input");
               }}
             >
@@ -278,6 +297,71 @@ export function Verdict() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Legal Evidences */}
+        {evidences.length > 0 && (
+          <Card className="border-gray-200 mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BookOpen className="w-5 h-5 text-indigo-600" />
+                법령·판례 근거
+              </CardTitle>
+              <CardDescription>분석에 참조된 법령 및 판례 자료</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {evidences.map((ev, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200"
+                  >
+                    <Badge
+                      className={`text-xs flex-shrink-0 mt-0.5 ${
+                        ev.sourceType === "LAW"
+                          ? "bg-blue-600"
+                          : "bg-purple-600"
+                      }`}
+                    >
+                      {ev.sourceType === "LAW" ? "법령" : "판례"}
+                    </Badge>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium text-sm text-gray-900 truncate">
+                          {ev.title}
+                        </span>
+                        {ev.url && (
+                          <a
+                            href={ev.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-shrink-0 text-blue-600 hover:text-blue-800"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
+                      {ev.articleOrCourt && (
+                        <p className="text-xs text-gray-500 mb-1">
+                          {ev.sourceType === "LAW" ? "소관: " : "법원: "}
+                          {ev.articleOrCourt}
+                          {ev.referenceId ? ` | ${ev.referenceId}` : ""}
+                        </p>
+                      )}
+                      {ev.summary && (
+                        <p className="text-xs text-gray-600">{ev.summary}</p>
+                      )}
+                      {ev.relevanceReason && (
+                        <p className="text-xs text-indigo-600 mt-1">
+                          {ev.relevanceReason}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Key Issues */}
         <Card className="border-gray-200 mb-6">

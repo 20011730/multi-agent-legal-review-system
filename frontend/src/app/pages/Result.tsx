@@ -137,6 +137,14 @@ export function Result() {
             JSON.stringify(result.finalDecision),
           );
         }
+
+        // 법령/판례 근거를 sessionStorage에 저장 (Verdict 페이지에서 사용)
+        if (result.evidences && result.evidences.length > 0) {
+          sessionStorage.setItem(
+            "evidences",
+            JSON.stringify(result.evidences),
+          );
+        }
       })
       .catch((err) => console.error("토론 결과 조회 실패:", err));
   }, [navigate]);
