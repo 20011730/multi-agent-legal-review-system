@@ -19,11 +19,13 @@ public class SessionController {
     /**
      * 세션 생성 API
      * 프론트 /input 페이지에서 호출
+     * X-User-Id 헤더로 사용자 식별 (JWT 도입 전 임시 방식)
      */
     @PostMapping
     public ResponseEntity<SessionCreateResponse> createSession(
-            @Valid @RequestBody SessionCreateRequest request) {
-        SessionCreateResponse response = sessionService.createSession(request);
+            @Valid @RequestBody SessionCreateRequest request,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        SessionCreateResponse response = sessionService.createSession(request, userId);
         return ResponseEntity.ok(response);
     }
 

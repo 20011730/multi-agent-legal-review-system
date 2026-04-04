@@ -13,8 +13,9 @@ export function Login() {
     password: "",
   });
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -24,22 +25,37 @@ export function Login() {
       return;
     }
 
-    // Check credentials
-    const users = JSON.parse(localStorage.getItem("legalreview_users") || "[]");
-    const user = users.find(
-      (u: any) => u.email === formData.email && u.password === formData.password
-    );
+    if (isSubmitting) return;
+    setIsSubmitting(true);
 
-    if (!user) {
-      setError("이메일 또는 비밀번호가 올바르지 않습니다");
-      return;
+    try {
+      const res = await fetch("http://localhost:8080/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "로그인에 실패했습니다");
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Store current user session
+      localStorage.setItem("legalreview_currentUser", JSON.stringify(data));
+
+      // Redirect to profile or home
+      navigate("/profile");
+    } catch (err) {
+      console.error("로그인 요청 실패:", err);
+      setError("서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.");
+      setIsSubmitting(false);
     }
-
-    // Store current user session
-    localStorage.setItem("legalreview_currentUser", JSON.stringify(user));
-
-    // Redirect to profile or home
-    navigate("/profile");
   };
 
   return (
@@ -127,8 +143,9 @@ export function Login() {
           <Button
             type="submit"
             className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            disabled={isSubmitting}
           >
-            로그인
+            {isSubmitting ? "로그인 중..." : "로그인"}
           </Button>
 
           <div className="text-center text-sm text-gray-600">

@@ -1,20 +1,25 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 spring:
   application:
     name: legal-review-backend
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/legalreview
-    username: legalreview
-    password: legalreview
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/legalreview}
+    username: ${DB_USERNAME:legalreview}
+    password: ${DB_PASSWORD:legalreview}
     driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
       ddl-auto: update
     show-sql: true
+    open-in-view: false
     properties:
       hibernate:
         format_sql: true
+
+app:
+  ai:
+    base-url: ${AI_SERVER_URL:http://localhost:8001}
