@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -21,6 +22,7 @@ public class SessionService {
     private final ReviewSessionRepository sessionRepository;
     private final DebateMessageRepository messageRepository;
     private final FinalDecisionRepository finalDecisionRepository;
+    private final EvidenceRepository evidenceRepository;
     private final UserRepository userRepository;
     private final AiAnalysisClient aiAnalysisClient;
 
@@ -55,6 +57,12 @@ public class SessionService {
 
             // 4. 최종 판정 저장
             saveFinalDecision(session, aiResponse.finalDecision());
+
+            // 5. 법령/판례 근거 저장
+            if (aiResponse.evidences() != null && !aiResponse.evidences().isEmpty()) {
+                saveEvidences(session, aiResponse.evidences());
+                log.info("법령/판례 근거 {}건 저장 (sessionId={})", aiResponse.evidences().size(), session.getId());
+            }
 
             session.setStatus("COMPLETED");
         } catch (Exception e) {
@@ -108,7 +116,10 @@ public class SessionService {
                 fd.getRevisedContent()
         );
 
-        return new DebateResultResponse(sessionId, 1L, session.getStatus(), messageDtos, fdDto);
+        // 법령/판례 근거 조회
+        List<EvidenceDto> evidenceDtos = loadEvidenceDtos(sessionId);
+
+        return new DebateResultResponse(sessionId, 1L, session.getStatus(), messageDtos, fdDto, evidenceDtos);
     }
 
     // ========== AI 응답 → DB 저장 ==========
@@ -152,6 +163,43 @@ public class SessionService {
             }
             finalDecisionRepository.save(fd);
         }
+    }
+
+    // ========== 법령/판례 근거 저장/조회 ==========
+
+    private void saveEvidences(ReviewSession session, List<Map<String, Object>> evidences) {
+        for (Map<String, Object> ev : evidences) {
+            Evidence evidence = new Evidence();
+            evidence.setSession(session);
+            evidence.setSourceType((String) ev.getOrDefault("sourceType", "LAW"));
+            evidence.setTitle((String) ev.getOrDefault("title", ""));
+            evidence.setReferenceId((String) ev.getOrDefault("referenceId", ""));
+            evidence.setArticleOrCourt((String) ev.getOrDefault("articleOrCourt", ""));
+            evidence.setSummary((String) ev.getOrDefault("summary", ""));
+            evidence.setUrl((String) ev.getOrDefault("url", ""));
+            evidence.setRelevanceReason((String) ev.getOrDefault("relevanceReason", ""));
+            evidence.setQuotedText((String) ev.getOrDefault("quotedText", ""));
+            evidenceRepository.save(evidence);
+        }
+    }
+
+    private List<EvidenceDto> loadEvidenceDtos(Long sessionId) {
+        List<Evidence> evidences = evidenceRepository.findBySessionIdOrderByIdAsc(sessionId);
+        if (evidences == null || evidences.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return evidences.stream()
+                .map(ev -> new EvidenceDto(
+                        ev.getSourceType(),
+                        ev.getTitle(),
+                        ev.getReferenceId(),
+                        ev.getArticleOrCourt(),
+                        ev.getSummary(),
+                        ev.getUrl(),
+                        ev.getRelevanceReason(),
+                        ev.getQuotedText()
+                ))
+                .toList();
     }
 
     // ========== 폴백 더미 데이터 (AI 서버 장애 시) ==========

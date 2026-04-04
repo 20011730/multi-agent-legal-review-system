@@ -14,4 +14,5 @@ public class DebateResultResponse {
     private String status;
     private List<AgentMessageDto> messages;
     private FinalDecisionDto finalDecision;
+    private List<EvidenceDto> evidences;
 }

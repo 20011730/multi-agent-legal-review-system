@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -16,6 +17,7 @@ public class ReviewService {
     private final ReviewSessionRepository sessionRepository;
     private final DebateMessageRepository messageRepository;
     private final FinalDecisionRepository finalDecisionRepository;
+    private final EvidenceRepository evidenceRepository;
 
     /**
      * 사용자의 검토 기록 목록 조회 (최신순)
@@ -69,6 +71,23 @@ public class ReviewService {
             );
         }
 
+        // 법령/판례 근거 조회
+        List<Evidence> evidences = evidenceRepository.findBySessionIdOrderByIdAsc(sessionId);
+        List<EvidenceDto> evidenceDtos = evidences != null
+                ? evidences.stream()
+                    .map(ev -> new EvidenceDto(
+                            ev.getSourceType(),
+                            ev.getTitle(),
+                            ev.getReferenceId(),
+                            ev.getArticleOrCourt(),
+                            ev.getSummary(),
+                            ev.getUrl(),
+                            ev.getRelevanceReason(),
+                            ev.getQuotedText()
+                    ))
+                    .toList()
+                : new ArrayList<>();
+
         return new ReviewDetailResponse(
                 session.getId(),
                 session.getCompanyName(),
@@ -80,7 +99,8 @@ public class ReviewService {
                 session.getStatus(),
                 session.getCreatedAt().toString(),
                 messageDtos,
-                fdDto
+                fdDto,
+                evidenceDtos
         );
     }
 }
