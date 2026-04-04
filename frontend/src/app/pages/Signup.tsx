@@ -17,8 +17,9 @@ export function Signup() {
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -44,32 +45,40 @@ export function Signup() {
       return;
     }
 
-    // Check if user already exists
-    const users = JSON.parse(localStorage.getItem("legalreview_users") || "[]");
-    if (users.find((u: any) => u.email === formData.email)) {
-      setError("이미 등록된 이메일 주소입니다");
-      return;
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch("http://localhost:8080/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+          companyName: formData.companyName,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "회원가입에 실패했습니다");
+        setIsSubmitting(false);
+        return;
+      }
+
+      setSuccess(true);
+
+      // Redirect to login after 2 seconds
+      setTimeout(() => {
+        navigate("/login");
+      }, 2000);
+    } catch (err) {
+      console.error("회원가입 요청 실패:", err);
+      setError("서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.");
+      setIsSubmitting(false);
     }
-
-    // Create new user
-    const newUser = {
-      id: Date.now().toString(),
-      name: formData.name,
-      email: formData.email,
-      password: formData.password, // In production, this should be hashed
-      companyName: formData.companyName,
-      createdAt: new Date().toISOString(),
-    };
-
-    users.push(newUser);
-    localStorage.setItem("legalreview_users", JSON.stringify(users));
-
-    setSuccess(true);
-
-    // Redirect to login after 2 seconds
-    setTimeout(() => {
-      navigate("/login");
-    }, 2000);
   };
 
   if (success) {
@@ -223,7 +232,6 @@ export function Signup() {
               <p className="font-medium mb-1">데모 버전 안내</p>
               <p className="text-blue-800">
                 본 시스템은 데모용입니다. 실제 개인정보나 민감한 기업 정보는 입력하지 마세요.
-                데이터는 브라우저 localStorage에 저장됩니다.
               </p>
             </div>
           </div>
@@ -231,8 +239,9 @@ export function Signup() {
           <Button
             type="submit"
             className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            disabled={isSubmitting}
           >
-            회원가입
+            {isSubmitting ? "처리 중..." : "회원가입"}
           </Button>
 
           <div className="text-center text-sm text-gray-600">
