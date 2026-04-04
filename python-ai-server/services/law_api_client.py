@@ -12,7 +12,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "http://www.law.go.kr/DRF/lawSearch.do"
+# ── 설정 ────────────────────────────────────────────────────
+# LAW_API_BASE_URL: 기본값 사용 시 .env 에 설정하지 않아도 됨
+# LAW_API_KEY:      미설정 시 법령 검색을 건너뛰고 빈 리스트를 반환 (fallback)
+BASE_URL = os.getenv("LAW_API_BASE_URL", "http://www.law.go.kr/DRF/lawSearch.do")
 TIMEOUT = 10.0  # seconds
 
 
