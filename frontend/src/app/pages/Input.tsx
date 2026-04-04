@@ -28,22 +28,24 @@ export function InputPage() {
       return;
     }
 
-    // Load company profile if exists
+    // Load company profile from backend
     const user = JSON.parse(userStr);
-    const profileStr = localStorage.getItem(`legalreview_profile_${user.id}`);
-    if (profileStr) {
-      const profile = JSON.parse(profileStr);
-      setFormData((prev) => ({
-        ...prev,
-        companyName: profile.companyName || user.companyName,
-        industry: profile.industry || "",
-      }));
-    } else {
-      setFormData((prev) => ({
-        ...prev,
-        companyName: user.companyName,
-      }));
-    }
+    fetch(`http://localhost:8080/api/users/${user.id}/profile`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (data) {
+          setFormData((prev) => ({
+            ...prev,
+            companyName: data.companyName || user.companyName || "",
+            industry: data.industry || "",
+          }));
+        } else {
+          setFormData((prev) => ({ ...prev, companyName: user.companyName || "" }));
+        }
+      })
+      .catch(() => {
+        setFormData((prev) => ({ ...prev, companyName: user.companyName || "" }));
+      });
   }, [navigate]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -56,9 +58,15 @@ export function InputPage() {
     sessionStorage.setItem("reviewData", JSON.stringify(formData));
 
     try {
+      const user = JSON.parse(localStorage.getItem("legalreview_currentUser") || "{}");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (user.id) {
+        headers["X-User-Id"] = String(user.id);
+      }
+
       const res = await fetch("http://localhost:8080/api/sessions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(formData),
       });
       const data = await res.json();

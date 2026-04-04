@@ -75,6 +75,9 @@ export function CompanyProfile() {
     reviewTypes: [],
   });
   const [isSaved, setIsSaved] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     // Check if user is logged in
@@ -87,14 +90,37 @@ export function CompanyProfile() {
     const user = JSON.parse(userStr);
     setCurrentUser(user);
 
-    // Load existing profile
-    const profileStr = localStorage.getItem(`legalreview_profile_${user.id}`);
-    if (profileStr) {
-      setProfile(JSON.parse(profileStr));
-    } else {
-      // Initialize with user's company name
-      setProfile((prev) => ({ ...prev, companyName: user.companyName }));
-    }
+    // Load profile from backend
+    fetch(`http://localhost:8080/api/users/${user.id}/profile`)
+      .then((res) => {
+        if (!res.ok) throw new Error("프로필 조회 실패");
+        return res.json();
+      })
+      .then((data) => {
+        setProfile({
+          companyName: data.companyName || user.companyName || "",
+          industry: data.industry || "",
+          companySize: data.companySize || "",
+          website: data.website || "",
+          description: data.description || "",
+          reviewTypes: data.reviewTypes || [],
+          mainProducts: data.mainProducts || "",
+          targetMarket: data.targetMarket || "",
+          competitorInfo: data.competitorInfo || "",
+          standardContracts: data.standardContracts || "",
+          keyPartners: data.keyPartners || "",
+          regulatoryRequirements: data.regulatoryRequirements || "",
+          irContact: data.irContact || "",
+          prHistory: data.prHistory || "",
+          stakeholders: data.stakeholders || "",
+        });
+      })
+      .catch((err) => {
+        console.error("프로필 조회 실패:", err);
+        // 서버 연결 실패 시 사용자 기본 정보로 초기화
+        setProfile((prev) => ({ ...prev, companyName: user.companyName || "" }));
+      })
+      .finally(() => setIsLoading(false));
   }, [navigate]);
 
   const handleLogout = () => {
@@ -111,16 +137,47 @@ export function CompanyProfile() {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
 
     if (!currentUser) return;
+    if (!profile.companyName.trim()) {
+      setError("기업명을 입력해주세요");
+      return;
+    }
 
-    // Save profile
-    localStorage.setItem(`legalreview_profile_${currentUser.id}`, JSON.stringify(profile));
+    setIsSaving(true);
 
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 3000);
+    try {
+      const res = await fetch(`http://localhost:8080/api/users/${currentUser.id}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || "프로필 저장에 실패했습니다");
+        setIsSaving(false);
+        return;
+      }
+
+      const data = await res.json();
+
+      // localStorage의 currentUser 정보도 동기화 (companyName 변경 반영)
+      const updatedUser = { ...currentUser, companyName: data.companyName };
+      localStorage.setItem("legalreview_currentUser", JSON.stringify(updatedUser));
+      setCurrentUser(updatedUser);
+
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 3000);
+    } catch (err) {
+      console.error("프로필 저장 실패:", err);
+      setError("서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const getRelevantFields = () => {
@@ -136,8 +193,12 @@ export function CompanyProfile() {
 
   const relevantFields = getRelevantFields();
 
-  if (!currentUser) {
-    return null;
+  if (!currentUser || isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 flex items-center justify-center">
+        <p className="text-gray-500">로딩 중...</p>
+      </div>
+    );
   }
 
   return (
@@ -188,6 +249,13 @@ export function CompanyProfile() {
           <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3 animate-in fade-in">
             <CheckCircle className="w-5 h-5 text-green-600" />
             <span className="text-sm font-medium text-green-800">프로필이 저장되었습니다</span>
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600" />
+            <span className="text-sm font-medium text-red-800">{error}</span>
           </div>
         )}
 
@@ -473,8 +541,9 @@ export function CompanyProfile() {
             <Button
               type="submit"
               className="bg-blue-600 hover:bg-blue-700 text-white"
+              disabled={isSaving}
             >
-              프로필 저장
+              {isSaving ? "저장 중..." : "프로필 저장"}
             </Button>
           </div>
         </form>
