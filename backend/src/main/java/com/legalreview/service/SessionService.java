@@ -70,6 +70,12 @@ public class SessionService {
             // 6. 법제처 OPEN API 검색으로 추가 근거 보강
             enrichWithLawSearch(session, request.getContent());
 
+            // 5. 법령/판례 근거 저장
+            if (aiResponse.evidences() != null && !aiResponse.evidences().isEmpty()) {
+                saveEvidences(session, aiResponse.evidences());
+                log.info("법령/판례 근거 {}건 저장 (sessionId={})", aiResponse.evidences().size(), session.getId());
+            }
+
             session.setStatus("COMPLETED");
         } catch (Exception e) {
             log.error("AI 서버 호출 실패 (sessionId={}): {}", session.getId(), e.getMessage());
