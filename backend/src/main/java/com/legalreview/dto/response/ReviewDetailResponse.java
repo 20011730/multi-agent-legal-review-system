@@ -29,4 +29,7 @@ public class ReviewDetailResponse {
 
     // 최종 판정
     private FinalDecisionDto finalDecision;
+
+    // 법령/판례 근거
+    private List<EvidenceDto> evidences;
 }
