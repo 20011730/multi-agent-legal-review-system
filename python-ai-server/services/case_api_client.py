@@ -12,13 +12,16 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "http://www.law.go.kr/DRF/lawSearch.do"
+# ── 설정 ────────────────────────────────────────────────────
+# CASE_API_BASE_URL: 기본값 사용 시 .env 에 설정하지 않아도 됨
+# CASE_API_KEY:      미설정 시 LAW_API_KEY를 공유. 둘 다 없으면 판례 검색 건너뜀 (fallback)
+BASE_URL = os.getenv("CASE_API_BASE_URL", "http://www.law.go.kr/DRF/lawSearch.do")
 TIMEOUT = 10.0  # seconds
 
 
 def get_api_key() -> Optional[str]:
-    """환경변수에서 API 인증키를 가져온다."""
-    return os.getenv("LAW_API_KEY")
+    """환경변수에서 API 인증키를 가져온다. CASE_API_KEY 우선, 없으면 LAW_API_KEY 사용."""
+    return os.getenv("CASE_API_KEY") or os.getenv("LAW_API_KEY")
 
 
 def search_cases(query: str, display: int = 5, page: int = 1) -> list[dict]:
