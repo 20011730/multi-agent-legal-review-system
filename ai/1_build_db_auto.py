@@ -11,6 +11,8 @@ from langchain_community.vectorstores import Chroma
 # 🔥 무료 embedding 
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
+#1_build_db_auto.py
+
 load_dotenv()
 
 #구조 확인하고 싶을때 : http://www.law.go.kr/DRF/lawService.do?OC=hyejin&target=law&type=XML&ID=000308
@@ -28,8 +30,19 @@ def get_law_id(law_name):
     }
 
     print(f"📡 법령 검색 중: {law_name}")
-    response = requests.get(url, params=params)
-    print("status:", response.status_code)
+    # 수정된 부분: API 연결 및 응답 오류 처리 추가
+    try:
+        response = requests.get(url, params=params)
+        print("status:", response.status_code)
+        
+        if response.status_code != 200:
+            print(f"🚨 API 응답 오류: 정상적인 상태 코드가 아닙니다. (코드: {response.status_code})")
+            return None
+            
+    except Exception as e:
+        print(f"🚨 API 연결 오류 발생 (법령 본문 조회): 서버가 연결을 끊었거나 네트워크 문제가 있습니다.\n상세 내용: {e}")
+        print("response.status_code :" + response.status_code)
+        return None
 
     root = ET.fromstring(response.content)
 

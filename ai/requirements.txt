@@ -1,23 +1,8 @@
-# --- LangChain Core Ecosystem ---
-langchain==0.3.7
-langchain-core==0.3.21
-langchain-community==0.3.7
-langchain-text-splitters==0.3.2
-
-# --- LLM Providers ---
-langchain-openai==0.2.10
-langchain-google-genai==2.0.4
-
-# --- Multi-Agent (LangGraph) ---
-langgraph==0.2.53
-
-# --- Vector DB & Embeddings ---
-chromadb==0.5.20
-sentence-transformers==3.3.1
-tiktoken==0.8.0
-
-# --- Utilities & Data Math ---
-python-dotenv==1.0.1
-requests==2.32.3
-numpy==1.26.4
-scipy==1.11.4
+langchain_community==0.4.1
+langchain_huggingface==1.2.1
+langchain_openai==1.1.12
+langchain_text_splitters==1.1.1
+langgraph==1.1.6
+protobuf==7.34.1
+python-dotenv==1.2.2
+Requests==2.33.1
