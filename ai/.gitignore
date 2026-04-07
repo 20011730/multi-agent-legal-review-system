@@ -1,0 +1,10 @@
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Vector DB
+chroma_db/
+
+__pycache__/
