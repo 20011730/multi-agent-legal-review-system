@@ -77,7 +77,7 @@ def fetch_law_by_id(law_id):
             if ho_text:
                 full_text += f"\n{ho_num} {ho_text}"
 
-            # 🔥 목 추가 (핵심)
+            # 🔥 목 추가 
             for mok in ho.findall(".//목"):
                 mok_num = mok.findtext("목번호", default="")
                 mok_text = mok.findtext("목내용", default="")
