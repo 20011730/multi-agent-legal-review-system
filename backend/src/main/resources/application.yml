@@ -20,6 +20,14 @@ spring:
       hibernate:
         format_sql: true
 
+logging:
+  level:
+    com.legalreview.service.LawApiClient: ${LAW_API_LOG_LEVEL:INFO}
+    com.legalreview.service.LawSearchService: ${LAW_API_LOG_LEVEL:INFO}
+
 app:
   ai:
     base-url: ${AI_SERVER_URL:http://localhost:8001}
+  law-api:
+    base-url: https://www.law.go.kr/DRF/lawSearch.do
+    oc: ${LAW_API_OC:}
