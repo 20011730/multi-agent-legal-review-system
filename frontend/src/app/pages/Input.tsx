@@ -59,17 +59,25 @@ export function InputPage() {
 
     try {
       const user = JSON.parse(localStorage.getItem("legalreview_currentUser") || "{}");
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (user.id) {
-        headers["X-User-Id"] = String(user.id);
+      if (!user.id) {
+        alert("로그인 정보가 유효하지 않습니다. 다시 로그인해주세요.");
+        setIsSubmitting(false);
+        navigate("/login");
+        return;
       }
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-User-Id": String(user.id),
+      };
 
+      console.log("[Input] 세션 생성 요청 headers:", headers);
       const res = await fetch("http://localhost:8080/api/sessions", {
         method: "POST",
         headers,
         body: JSON.stringify(formData),
       });
       const data = await res.json();
+      console.log("[Input] 세션 생성 응답:", data, "→ X-User-Id로 보낸 값:", headers["X-User-Id"]);
       sessionStorage.setItem("sessionId", String(data.sessionId));
     } catch (err) {
       console.error("세션 생성 실패:", err);

@@ -21,6 +21,7 @@ import {
   User,
   Send,
   MessageSquare,
+  ClipboardList,
 } from "lucide-react";
 
 interface Agent {
@@ -293,15 +294,21 @@ export function Result() {
               </p>
             </div>
           </div>
-          {isComplete && (
-            <Button
-              onClick={() => navigate("/verdict")}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              최종 판정 보기
-              <ArrowRight className="ml-2 w-4 h-4" />
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate("/reviews")}>
+              <ClipboardList className="mr-2 w-4 h-4" />
+              검토 이력
             </Button>
-          )}
+            {isComplete && (
+              <Button
+                onClick={() => navigate("/verdict")}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                최종 판정 보기
+                <ArrowRight className="ml-2 w-4 h-4" />
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 

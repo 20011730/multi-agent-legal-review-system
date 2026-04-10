@@ -16,9 +16,10 @@ import {
   Minus,
   Download,
   RotateCcw,
-  BookOpen,
-  ExternalLink,
+  ClipboardList,
 } from "lucide-react";
+import { EvidenceSection } from "../components/EvidenceSection";
+import type { EvidenceItem } from "../components/EvidenceSection";
 
 interface ReviewData {
   companyName: string;
@@ -45,15 +46,7 @@ interface FinalDecision {
   revisedContent: string;
 }
 
-interface EvidenceItem {
-  sourceType: string;
-  title: string;
-  referenceId?: string;
-  articleOrCourt?: string;
-  summary?: string;
-  url?: string;
-  relevanceReason?: string;
-}
+// EvidenceItem은 ../components/EvidenceSection에서 import
 
 export function Verdict() {
   const navigate = useNavigate();
@@ -181,12 +174,16 @@ export function Verdict() {
             </div>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate("/reviews")}>
+              <ClipboardList className="mr-2 w-4 h-4" />
+              검토 이력
+            </Button>
             <Button variant="outline" size="sm">
               <Download className="mr-2 w-4 h-4" />
               PDF 다운로드
             </Button>
-            <Button 
-              size="sm" 
+            <Button
+              size="sm"
               className="bg-blue-600 hover:bg-blue-700 text-white"
               onClick={() => {
                 sessionStorage.removeItem("reviewData");
@@ -299,69 +296,7 @@ export function Verdict() {
         </Card>
 
         {/* Legal Evidences */}
-        {evidences.length > 0 && (
-          <Card className="border-gray-200 mb-6">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-indigo-600" />
-                법령·판례 근거
-              </CardTitle>
-              <CardDescription>분석에 참조된 법령 및 판례 자료</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {evidences.map((ev, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200"
-                  >
-                    <Badge
-                      className={`text-xs flex-shrink-0 mt-0.5 ${
-                        ev.sourceType === "LAW"
-                          ? "bg-blue-600"
-                          : "bg-purple-600"
-                      }`}
-                    >
-                      {ev.sourceType === "LAW" ? "법령" : "판례"}
-                    </Badge>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-sm text-gray-900 truncate">
-                          {ev.title}
-                        </span>
-                        {ev.url && (
-                          <a
-                            href={ev.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex-shrink-0 text-blue-600 hover:text-blue-800"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                      </div>
-                      {ev.articleOrCourt && (
-                        <p className="text-xs text-gray-500 mb-1">
-                          {ev.sourceType === "LAW" ? "소관: " : "법원: "}
-                          {ev.articleOrCourt}
-                          {ev.referenceId ? ` | ${ev.referenceId}` : ""}
-                        </p>
-                      )}
-                      {ev.summary && (
-                        <p className="text-xs text-gray-600">{ev.summary}</p>
-                      )}
-                      {ev.relevanceReason && (
-                        <p className="text-xs text-indigo-600 mt-1">
-                          {ev.relevanceReason}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        <EvidenceSection evidences={evidences} />
 
         {/* Key Issues */}
         <Card className="border-gray-200 mb-6">

@@ -38,6 +38,8 @@ public class SessionService {
         // 사용자 연결 (userId가 있으면)
         if (userId != null) {
             userRepository.findById(userId).ifPresent(session::setUser);
+        } else {
+            log.warn("세션 생성 시 userId가 없습니다. 검토 이력에 표시되지 않을 수 있습니다.");
         }
 
         session.setCompanyName(request.getCompanyName());

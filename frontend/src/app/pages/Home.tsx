@@ -2,7 +2,7 @@ import { useNavigate } from "react-router";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
-import { Shield, Scale, FileCheck, Users, ArrowRight, CheckCircle2, LogIn, UserPlus, User } from "lucide-react";
+import { Shield, Scale, FileCheck, Users, ArrowRight, CheckCircle2, LogIn, UserPlus, User, ClipboardList } from "lucide-react";
 
 export function Home() {
   const navigate = useNavigate();
@@ -39,6 +39,14 @@ export function Home() {
           <div className="flex items-center gap-3">
             {currentUser ? (
               <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate("/reviews")}
+                >
+                  <ClipboardList className="w-4 h-4 mr-2" />
+                  검토 이력
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
