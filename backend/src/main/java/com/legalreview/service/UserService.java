@@ -31,7 +31,9 @@ public class UserService {
         user.setName(request.getName());
         user.setEmail(request.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setCompanyName(request.getCompanyName());
+        String companyName = request.getCompanyName();
+        user.setCompanyName(
+                companyName != null && !companyName.isBlank() ? companyName.trim() : null);
         userRepository.save(user);
 
         return UserResponse.from(user);

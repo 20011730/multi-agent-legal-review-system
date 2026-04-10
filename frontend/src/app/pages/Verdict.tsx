@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
@@ -15,10 +15,13 @@ import {
   TrendingUp,
   Minus,
   Download,
+  Loader2,
   RotateCcw,
   BookOpen,
   ExternalLink,
 } from "lucide-react";
+import { toast } from "sonner";
+import { exportElementToPdf } from "../utils/exportVerdictPdf";
 
 interface ReviewData {
   companyName: string;
@@ -57,6 +60,8 @@ interface EvidenceItem {
 
 export function Verdict() {
   const navigate = useNavigate();
+  const reportRef = useRef<HTMLDivElement>(null);
+  const [isPdfExporting, setIsPdfExporting] = useState(false);
   const [reviewData, setReviewData] = useState<ReviewData | null>(null);
   const [finalDecision, setFinalDecision] = useState<FinalDecision | null>(null);
   const [evidences, setEvidences] = useState<EvidenceItem[]>([]);
@@ -166,6 +171,34 @@ export function Verdict() {
   const verdictConfig = getVerdictConfig(verdict);
   const VerdictIcon = verdictConfig.icon;
 
+  const handlePdfDownload = async () => {
+    const el = reportRef.current;
+    if (!el) {
+      toast.error("보고서 영역을 찾을 수 없습니다.");
+      return;
+    }
+    setIsPdfExporting(true);
+    el.scrollIntoView({ block: "start" });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    try {
+      await document.fonts?.ready;
+    } catch {
+      /* ignore */
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    try {
+      await exportElementToPdf(el, `LegalReview_report_${stamp}.pdf`);
+      toast.success("PDF를 저장했습니다.");
+    } catch (e) {
+      console.error(e);
+      toast.error("PDF 생성에 실패했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setIsPdfExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
       {/* Header */}
@@ -181,9 +214,18 @@ export function Verdict() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
-              <Download className="mr-2 w-4 h-4" />
-              PDF 다운로드
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isPdfExporting}
+              onClick={() => void handlePdfDownload()}
+            >
+              {isPdfExporting ? (
+                <Loader2 className="mr-2 w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 w-4 h-4" />
+              )}
+              {isPdfExporting ? "PDF 생성 중…" : "PDF 다운로드"}
             </Button>
             <Button 
               size="sm" 
@@ -205,17 +247,25 @@ export function Verdict() {
 
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-6 py-12">
-        <div className="mb-8">
+        <div className="mb-4">
           <button
             onClick={() => navigate("/result")}
-            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
+            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
           >
             <ArrowLeft className="w-4 h-4" />
             토의 로그로 돌아가기
           </button>
-          <h2 className="text-3xl font-semibold text-gray-900 mb-2">최종 검토 보고서</h2>
-          <p className="text-gray-600">멀티 에이전트 분석 결과 및 종합 권고사항</p>
         </div>
+
+        <div
+          ref={reportRef}
+          className="verdict-pdf-root rounded-xl border border-gray-200 bg-white p-6 shadow-sm md:p-10"
+          style={{ printColorAdjust: "exact" } as React.CSSProperties}
+        >
+          <div className="mb-8">
+            <h2 className="text-3xl font-semibold text-gray-900 mb-2">최종 검토 보고서</h2>
+            <p className="text-gray-600">멀티 에이전트 분석 결과 및 종합 권고사항</p>
+          </div>
 
         {/* Review Info Summary */}
         <Card className="border-gray-200 mb-6">
@@ -593,6 +643,7 @@ export function Verdict() {
             사내 전문가의 검토를 거쳐 진행하시고, 필요시 외부 법률 자문을 받으시기 바랍니다. 
             본 시스템은 법률 자문을 제공하지 않으며, 실제 법적 판단에 대한 책임을 지지 않습니다.
           </p>
+        </div>
         </div>
       </main>
     </div>
