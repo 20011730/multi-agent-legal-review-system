@@ -7,7 +7,7 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
-import { Scale, Building2, CheckCircle, LogOut, FileText, AlertCircle } from "lucide-react";
+import { Scale, Building2, CheckCircle, LogOut, FileText, AlertCircle, ClipboardList } from "lucide-react";
 
 interface CompanyProfile {
   // Basic info
@@ -219,6 +219,14 @@ export function CompanyProfile() {
             </div>
           </button>
           <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate("/reviews")}
+            >
+              <ClipboardList className="w-4 h-4 mr-2" />
+              검토 이력
+            </Button>
             <div className="text-right">
               <p className="text-sm font-medium text-gray-900">{currentUser.name}</p>
               <p className="text-xs text-gray-500">{currentUser.email}</p>

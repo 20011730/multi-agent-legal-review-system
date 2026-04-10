@@ -37,7 +37,7 @@ export function Login() {
           password: formData.password,
         }),
       });
-
+      
       const data = await res.json();
 
       if (!res.ok) {

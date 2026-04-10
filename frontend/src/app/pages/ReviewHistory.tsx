@@ -51,27 +51,58 @@ export function ReviewHistory() {
   const [reviews, setReviews] = useState<ReviewSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  // [DEBUG] 문제 해결 후 제거 가능 — 디버그 상태
+  const [debugInfo, setDebugInfo] = useState<{
+    userId: string | null;
+    fetchStatus: string;
+    responseLength: number | null;
+  }>({ userId: null, fetchStatus: "pending", responseLength: null });
 
   useEffect(() => {
     const userStr = localStorage.getItem("legalreview_currentUser");
+    console.log("[ReviewHistory] localStorage raw:", userStr);
+
     if (!userStr) {
+      console.warn("[ReviewHistory] 로그인 정보 없음 → /login 리다이렉트");
+      setDebugInfo((prev) => ({ ...prev, userId: "(없음)", fetchStatus: "no-user" }));
       navigate("/login");
       return;
     }
 
     const user = JSON.parse(userStr);
+    const userId = user.id ? String(user.id) : "(id 없음)";
+    console.log("[ReviewHistory] parsed user:", user, "→ X-User-Id:", userId);
+    setDebugInfo((prev) => ({ ...prev, userId }));
+
+    if (!user.id) {
+      console.error("[ReviewHistory] user.id가 없습니다! localStorage 값:", userStr);
+      setDebugInfo((prev) => ({ ...prev, fetchStatus: "no-user-id" }));
+      setError("로그인 정보에 사용자 ID가 없습니다. 다시 로그인해주세요.");
+      setIsLoading(false);
+      return;
+    }
 
     fetch("http://localhost:8080/api/reviews", {
       headers: { "X-User-Id": String(user.id) },
     })
       .then((res) => {
-        if (!res.ok) throw new Error("목록 조회 실패");
+        console.log("[ReviewHistory] fetch status:", res.status);
+        if (!res.ok) throw new Error(`목록 조회 실패 (status=${res.status})`);
         return res.json();
       })
-      .then((data) => setReviews(data))
+      .then((data) => {
+        console.log("[ReviewHistory] 응답 데이터:", data.length, "건", data);
+        setReviews(data);
+        setDebugInfo((prev) => ({
+          ...prev,
+          fetchStatus: `OK (${data.length}건)`,
+          responseLength: data.length,
+        }));
+      })
       .catch((err) => {
-        console.error("검토 기록 조회 실패:", err);
+        console.error("[ReviewHistory] 검토 기록 조회 실패:", err);
         setError("검토 기록을 불러오는데 실패했습니다.");
+        setDebugInfo((prev) => ({ ...prev, fetchStatus: `error: ${err.message}` }));
       })
       .finally(() => setIsLoading(false));
   }, [navigate]);
@@ -122,6 +153,12 @@ export function ReviewHistory() {
 
       {/* Main */}
       <main className="max-w-5xl mx-auto px-6 py-12">
+        {/* [DEBUG] 문제 해결 후 이 블록 전체를 제거하세요 */}
+        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-xs font-mono text-yellow-900">
+          <p><strong>[DEBUG]</strong> userId: {debugInfo.userId ?? "(로딩중)"} | fetchStatus: {debugInfo.fetchStatus} | reviews: {debugInfo.responseLength ?? "-"}</p>
+        </div>
+        {/* [/DEBUG] */}
+
         <div className="mb-8">
           <button
             onClick={() => navigate("/")}
