@@ -7,6 +7,7 @@ import com.legalreview.repository.*;
 import com.legalreview.service.AiAnalysisClient.AiAnalysisResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,14 +29,14 @@ public class SessionService {
     private final LawSearchService lawSearchService;
 
     /**
-     * 세션 생성 → Python AI 서버 호출 → 결과 DB 저장
+     * 세션 생성 → 즉시 반환 → AI 분석은 비동기 실행
+     * 프론트엔드가 30~90초 기다리지 않도록 즉시 sessionId 반환
      */
     @Transactional
     public SessionCreateResponse createSession(SessionCreateRequest request, Long userId) {
-        // 1. 세션 저장
+        // 1. 세션 저장 (상태: ANALYZING)
         ReviewSession session = new ReviewSession();
 
-        // 사용자 연결 (userId가 있으면)
         if (userId != null) {
             userRepository.findById(userId).ifPresent(session::setUser);
         } else {
@@ -51,48 +52,90 @@ public class SessionService {
         session.setStatus("ANALYZING");
         sessionRepository.save(session);
 
-        try {
-            // 2. Python AI 서버 호출
-            AiAnalysisResponse aiResponse = aiAnalysisClient.analyze(session.getId(), request);
+        // 2. AI 분석을 비동기로 시작
+        runAnalysisAsync(session.getId(), request);
 
-            // 3. 토론 메시지 저장
+        // 3. 즉시 반환 (프론트엔드가 바로 결과 페이지로 이동)
+        return new SessionCreateResponse(session.getId(), session.getStatus());
+    }
+
+    /**
+     * 비동기 AI 분석 실행
+     * @Async를 사용하여 별도 스레드에서 실행
+     * 분석 완료 후 세션 상태를 COMPLETED로 변경
+     */
+    @Async
+    @Transactional
+    public void runAnalysisAsync(Long sessionId, SessionCreateRequest request) {
+        try {
+            log.info("비동기 AI 분석 시작 (sessionId={})", sessionId);
+
+            ReviewSession session = sessionRepository.findById(sessionId)
+                    .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+
+            // Python AI 서버 호출
+            AiAnalysisResponse aiResponse = aiAnalysisClient.analyze(sessionId, request);
+
+            // 토론 메시지 저장
             saveDebateMessages(session, aiResponse.messages());
 
-            // 4. 최종 판정 저장
+            // 최종 판정 저장
             saveFinalDecision(session, aiResponse.finalDecision());
 
-            // 5. 법령/판례 근거 저장 (AI 서버 응답)
+            // 법령/판례 근거 저장 (AI 서버 응답)
             if (aiResponse.evidences() != null && !aiResponse.evidences().isEmpty()) {
                 saveEvidences(session, aiResponse.evidences());
-                log.info("AI 분석 근거 {}건 저장 (sessionId={})", aiResponse.evidences().size(), session.getId());
+                log.info("AI 분석 근거 {}건 저장 (sessionId={})", aiResponse.evidences().size(), sessionId);
             }
 
-            // 6. 법제처 OPEN API 검색으로 추가 근거 보강
+            // 법제처 OPEN API 검색으로 추가 근거 보강
             enrichWithLawSearch(session, request.getContent());
 
-            // 5. 법령/판례 근거 저장
-            if (aiResponse.evidences() != null && !aiResponse.evidences().isEmpty()) {
-                saveEvidences(session, aiResponse.evidences());
-                log.info("법령/판례 근거 {}건 저장 (sessionId={})", aiResponse.evidences().size(), session.getId());
-            }
-
             session.setStatus("COMPLETED");
+            sessionRepository.save(session);
+            log.info("비동기 AI 분석 완료 (sessionId={})", sessionId);
+
         } catch (Exception e) {
-            log.error("AI 서버 호출 실패 (sessionId={}): {}", session.getId(), e.getMessage());
+            log.error("AI 분석 실패 (sessionId={}): {}", sessionId, e.getMessage());
             log.info("더미 데이터로 대체합니다.");
 
-            // AI 서버 장애 시 더미 데이터로 폴백
-            createFallbackDebateMessages(session);
-            createFallbackFinalDecision(session);
-
-            // AI 서버 없어도 법제처 검색으로 근거 보강 시도
-            enrichWithLawSearch(session, request.getContent());
-
-            session.setStatus("COMPLETED");
+            try {
+                ReviewSession session = sessionRepository.findById(sessionId).orElse(null);
+                if (session != null) {
+                    createFallbackDebateMessages(session);
+                    createFallbackFinalDecision(session);
+                    enrichWithLawSearch(session, request.getContent());
+                    session.setStatus("COMPLETED");
+                    sessionRepository.save(session);
+                }
+            } catch (Exception fallbackErr) {
+                log.error("폴백 데이터 생성도 실패 (sessionId={}): {}", sessionId, fallbackErr.getMessage());
+                // 세션 상태를 FAILED로 변경
+                sessionRepository.findById(sessionId).ifPresent(s -> {
+                    s.setStatus("FAILED");
+                    sessionRepository.save(s);
+                });
+            }
         }
+    }
 
-        sessionRepository.save(session);
-        return new SessionCreateResponse(session.getId(), session.getStatus());
+    /**
+     * 세션 상태 조회 (폴링용)
+     */
+    @Transactional(readOnly = true)
+    public SessionStatusResponse getSessionStatus(Long sessionId) {
+        ReviewSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+
+        long messageCount = messageRepository.countBySessionId(sessionId);
+        boolean hasFinalDecision = finalDecisionRepository.findBySessionId(sessionId).isPresent();
+
+        return new SessionStatusResponse(
+                sessionId,
+                session.getStatus(),
+                messageCount,
+                hasFinalDecision
+        );
     }
 
     /**
@@ -222,34 +265,23 @@ public class SessionService {
 
     private static final int MAX_ENRICH_PER_TYPE = 5;
 
-    /**
-     * 법제처 OPEN API로 법령/판례를 검색하여 세션에 evidence로 추가 저장한다.
-     * - AI 서버가 이미 제공한 evidence와 referenceId가 같은 항목은 중복 저장하지 않는다.
-     * - content 전문 대신 핵심 키워드를 추출하여 검색한다.
-     * - 검색 실패 시 무시하고 진행 (전체 흐름을 막지 않음).
-     */
     private void enrichWithLawSearch(ReviewSession session, String content) {
         try {
-            // 1. 이미 저장된 evidence의 referenceId 수집 (중복 방지)
             List<Evidence> existing = evidenceRepository.findBySessionIdOrderByIdAsc(session.getId());
             java.util.Set<String> existingRefIds = existing.stream()
                     .map(Evidence::getReferenceId)
                     .filter(id -> id != null && !id.isEmpty())
                     .collect(java.util.stream.Collectors.toSet());
 
-            // 2. 검색 키워드 추출 (content에서 앞 50자 사용)
             String query = extractSearchQuery(content);
             if (query.isEmpty()) {
                 return;
             }
 
-            // 3. 법령 + 판례 검색
             List<EvidenceDto> lawResults = lawSearchService.searchLawsAsEvidence(query);
             List<EvidenceDto> caseResults = lawSearchService.searchCasesAsEvidence(query);
 
             int saved = 0;
-
-            // 4. 중복 제거 후 저장 (각 타입 최대 5건)
             for (EvidenceDto dto : lawResults) {
                 if (saved >= MAX_ENRICH_PER_TYPE) break;
                 if (existingRefIds.contains(dto.getReferenceId())) continue;
@@ -279,24 +311,16 @@ public class SessionService {
         }
     }
 
-    /** 법제처 검색에 불필요한 조사/어미/일반 동사 패턴 */
     private static final java.util.regex.Pattern STOPWORD_PATTERN =
             java.util.regex.Pattern.compile(
                     "\\b(있는|없는|되는|하는|위한|대한|통한|관한|가능성이|가능성|여부|검토|수행|진행|상황|경우|것으로|보입니다|합니다|입니다|됩니다|과도한|부당한|의심되는)\\b");
 
-    /** "~법", "~령", "~규칙", "~조례" 형태의 법령명 패턴 */
     private static final java.util.regex.Pattern LAW_NAME_PATTERN =
             java.util.regex.Pattern.compile("[가-힣]+(법|령|규칙|조례|규정)");
 
-    /**
-     * content에서 법제처 검색에 적합한 키워드를 추출한다.
-     * 1순위: "~법", "~령" 등 법령명이 포함되어 있으면 그것을 검색어로 사용.
-     * 2순위: 불용어를 제거한 뒤 앞 20자를 검색어로 사용.
-     */
     private String extractSearchQuery(String content) {
         if (content == null || content.isBlank()) return "";
 
-        // 1순위: 법령명 추출
         java.util.regex.Matcher matcher = LAW_NAME_PATTERN.matcher(content);
         if (matcher.find()) {
             String lawName = matcher.group();
@@ -304,7 +328,6 @@ public class SessionService {
             return lawName;
         }
 
-        // 2순위: 불용어 제거 후 앞 20자
         String cleaned = STOPWORD_PATTERN.matcher(content).replaceAll(" ")
                 .replaceAll("[^가-힣a-zA-Z0-9 ]", " ")
                 .replaceAll("\\s+", " ")

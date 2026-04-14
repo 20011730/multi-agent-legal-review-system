@@ -3,6 +3,7 @@ package com.legalreview.controller;
 import com.legalreview.dto.request.SessionCreateRequest;
 import com.legalreview.dto.response.DebateResultResponse;
 import com.legalreview.dto.response.SessionCreateResponse;
+import com.legalreview.dto.response.SessionStatusResponse;
 import com.legalreview.service.SessionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,17 @@ public class SessionController {
             @Valid @RequestBody SessionCreateRequest request,
             @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         SessionCreateResponse response = sessionService.createSession(request, userId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 세션 상태 조회 API (폴링용)
+     * 프론트 /result 페이지에서 분석 진행 상태를 확인
+     */
+    @GetMapping("/{sessionId}/status")
+    public ResponseEntity<SessionStatusResponse> getSessionStatus(
+            @PathVariable Long sessionId) {
+        SessionStatusResponse response = sessionService.getSessionStatus(sessionId);
         return ResponseEntity.ok(response);
     }
 

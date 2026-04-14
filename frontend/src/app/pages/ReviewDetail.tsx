@@ -24,8 +24,7 @@ import {
   Shield,
   FileCheck,
 } from "lucide-react";
-import { EvidenceSection } from "../components/EvidenceSection";
-import type { EvidenceItem } from "../components/EvidenceSection";
+import { EvidenceCardList } from "../components/EvidenceCard";
 
 interface AgentMessage {
   agentId: string;
@@ -52,7 +51,15 @@ interface FinalDecision {
   revisedContent: string;
 }
 
-// EvidenceItem은 ../components/EvidenceSection에서 import
+interface EvidenceItem {
+  sourceType: string;
+  title: string;
+  referenceId?: string;
+  articleOrCourt?: string;
+  summary?: string;
+  url?: string;
+  relevanceReason?: string;
+}
 
 interface ReviewDetail {
   sessionId: number;
@@ -378,8 +385,10 @@ export function ReviewDetailPage() {
               </CardContent>
             </Card>
 
-            {/* Legal Evidences */}
-            <EvidenceSection evidences={detail.evidences || []} />
+            {/* Legal Evidences — 공통 컴포넌트 사용 */}
+            {detail.evidences && detail.evidences.length > 0 && (
+              <EvidenceCardList evidences={detail.evidences} />
+            )}
 
             {/* Actions */}
             <div className="flex justify-center gap-3">

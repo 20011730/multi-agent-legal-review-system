@@ -1,0 +1,10 @@
+{
+  "name": "multi-agent-legal-review-system",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "preview": "npm run preview --prefix frontend",
+    "backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-backend.ps1"
+  }
+}

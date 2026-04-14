@@ -50,40 +50,15 @@ export function InputPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
     setIsSubmitting(true);
 
+    // 폼 데이터만 저장하고 즉시 Result 페이지로 이동
+    // API 호출은 Result 페이지에서 수행 (로딩 UI 표시)
     sessionStorage.setItem("reviewData", JSON.stringify(formData));
-
-    try {
-      const user = JSON.parse(localStorage.getItem("legalreview_currentUser") || "{}");
-      if (!user.id) {
-        alert("로그인 정보가 유효하지 않습니다. 다시 로그인해주세요.");
-        setIsSubmitting(false);
-        navigate("/login");
-        return;
-      }
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "X-User-Id": String(user.id),
-      };
-
-      console.log("[Input] 세션 생성 요청 headers:", headers);
-      const res = await fetch("http://localhost:8080/api/sessions", {
-        method: "POST",
-        headers,
-        body: JSON.stringify(formData),
-      });
-      const data = await res.json();
-      console.log("[Input] 세션 생성 응답:", data, "→ X-User-Id로 보낸 값:", headers["X-User-Id"]);
-      sessionStorage.setItem("sessionId", String(data.sessionId));
-    } catch (err) {
-      console.error("세션 생성 실패:", err);
-    }
-
-    setIsSubmitting(false);
+    sessionStorage.removeItem("sessionId"); // 이전 세션 클리어
     navigate("/result");
   };
 

@@ -8,4 +8,6 @@ import java.util.List;
 public interface DebateMessageRepository extends JpaRepository<DebateMessage, Long> {
 
     List<DebateMessage> findBySessionIdOrderByRoundAscIdAsc(Long sessionId);
+
+    long countBySessionId(Long sessionId);
 }

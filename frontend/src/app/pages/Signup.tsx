@@ -4,7 +4,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Scale, ArrowLeft, Mail, Lock, Building2, User, AlertCircle, CheckCircle } from "lucide-react";
+import { Scale, ArrowLeft, Mail, Lock, User, AlertCircle, CheckCircle } from "lucide-react";
 
 export function Signup() {
   const navigate = useNavigate();
@@ -13,7 +13,6 @@ export function Signup() {
     email: "",
     password: "",
     confirmPassword: "",
-    companyName: "",
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -24,7 +23,7 @@ export function Signup() {
     setError("");
 
     // Validation
-    if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword || !formData.companyName) {
+    if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword) {
       setError("모든 필드를 입력해주세요");
       return;
     }
@@ -56,7 +55,6 @@ export function Signup() {
           name: formData.name,
           email: formData.email,
           password: formData.password,
-          companyName: formData.companyName,
         }),
       });
 
@@ -174,21 +172,6 @@ export function Signup() {
                     placeholder="hong@example.com"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="pl-10 bg-white"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="companyName">소속 기업/조직 *</Label>
-                <div className="relative">
-                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    id="companyName"
-                    type="text"
-                    placeholder="(주)테크이노베이션"
-                    value={formData.companyName}
-                    onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                     className="pl-10 bg-white"
                   />
                 </div>

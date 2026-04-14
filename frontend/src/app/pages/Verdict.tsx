@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
@@ -15,11 +15,13 @@ import {
   TrendingUp,
   Minus,
   Download,
+  Loader2,
   RotateCcw,
-  ClipboardList,
+  BookOpen,
 } from "lucide-react";
-import { EvidenceSection } from "../components/EvidenceSection";
-import type { EvidenceItem } from "../components/EvidenceSection";
+import { toast } from "sonner";
+import { exportElementToPdf } from "../utils/exportVerdictPdf";
+import { EvidenceCardList, type EvidenceItem } from "../components/EvidenceCard";
 
 interface ReviewData {
   companyName: string;
@@ -46,10 +48,12 @@ interface FinalDecision {
   revisedContent: string;
 }
 
-// EvidenceItem은 ../components/EvidenceSection에서 import
+// EvidenceItem 타입은 EvidenceCard에서 import
 
 export function Verdict() {
   const navigate = useNavigate();
+  const reportRef = useRef<HTMLDivElement>(null);
+  const [isPdfExporting, setIsPdfExporting] = useState(false);
   const [reviewData, setReviewData] = useState<ReviewData | null>(null);
   const [finalDecision, setFinalDecision] = useState<FinalDecision | null>(null);
   const [evidences, setEvidences] = useState<EvidenceItem[]>([]);
@@ -159,28 +163,68 @@ export function Verdict() {
   const verdictConfig = getVerdictConfig(verdict);
   const VerdictIcon = verdictConfig.icon;
 
+  const handlePdfDownload = async () => {
+    const el = reportRef.current;
+    if (!el) {
+      toast.error("보고서 영역을 찾을 수 없습니다.");
+      return;
+    }
+    setIsPdfExporting(true);
+    el.scrollIntoView({ block: "start" });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    try {
+      await document.fonts?.ready;
+    } catch {
+      /* ignore */
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    try {
+      await exportElementToPdf(el, `LegalReview_report_${stamp}.pdf`);
+      toast.success("PDF를 저장했습니다.");
+    } catch (e) {
+      console.error(e);
+      toast.error("PDF 생성에 실패했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setIsPdfExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
       {/* Header */}
       <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate("/")}
+            className="flex items-center gap-3 hover:opacity-70 transition-opacity"
+          >
             <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
               <Scale className="w-6 h-6 text-white" />
             </div>
-            <div>
+            <div className="text-left">
               <h1 className="font-semibold text-gray-900">LegalReview AI</h1>
               <p className="text-xs text-gray-500">Multi-Agent Legal Compliance System</p>
             </div>
-          </div>
+          </button>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => navigate("/reviews")}>
-              <ClipboardList className="mr-2 w-4 h-4" />
+              <BookOpen className="mr-2 w-4 h-4" />
               검토 이력
             </Button>
-            <Button variant="outline" size="sm">
-              <Download className="mr-2 w-4 h-4" />
-              PDF 다운로드
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isPdfExporting}
+              onClick={() => void handlePdfDownload()}
+            >
+              {isPdfExporting ? (
+                <Loader2 className="mr-2 w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 w-4 h-4" />
+              )}
+              {isPdfExporting ? "PDF 생성 중…" : "PDF 다운로드"}
             </Button>
             <Button
               size="sm"
@@ -202,20 +246,28 @@ export function Verdict() {
 
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-6 py-12">
-        <div className="mb-8">
+        <div className="mb-4">
           <button
             onClick={() => navigate("/result")}
-            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
+            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
           >
             <ArrowLeft className="w-4 h-4" />
             토의 로그로 돌아가기
           </button>
-          <h2 className="text-3xl font-semibold text-gray-900 mb-2">최종 검토 보고서</h2>
-          <p className="text-gray-600">멀티 에이전트 분석 결과 및 종합 권고사항</p>
         </div>
 
+        <div
+          ref={reportRef}
+          className="verdict-pdf-root rounded-xl border border-gray-200 bg-white p-6 shadow-sm md:p-10"
+          style={{ printColorAdjust: "exact" } as React.CSSProperties}
+        >
+          <div className="mb-8">
+            <h2 className="text-3xl font-semibold text-gray-900 mb-2">최종 검토 보고서</h2>
+            <p className="text-gray-600">멀티 에이전트 분석 결과 및 종합 권고사항</p>
+          </div>
+
         {/* Review Info Summary */}
-        <Card className="border-gray-200 mb-6">
+        <Card className="border-gray-200 mb-6 pdf-section">
           <CardContent className="pt-6">
             <div className="grid md:grid-cols-4 gap-4 text-sm">
               <div>
@@ -245,7 +297,7 @@ export function Verdict() {
         </Card>
 
         {/* Verdict */}
-        <Card className={`border-2 ${verdictConfig.borderColor} ${verdictConfig.bgColor} mb-6`}>
+        <Card className={`border-2 ${verdictConfig.borderColor} ${verdictConfig.bgColor} mb-6 pdf-section`}>
           <CardHeader>
             <div className="flex items-center gap-3">
               <div className={`w-12 h-12 bg-white rounded-lg flex items-center justify-center`}>
@@ -266,7 +318,7 @@ export function Verdict() {
         </Card>
 
         {/* Risk Summary */}
-        <Card className="border-gray-200 mb-6">
+        <Card className="border-gray-200 mb-6 pdf-section">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-amber-600" />
@@ -295,52 +347,37 @@ export function Verdict() {
           </CardContent>
         </Card>
 
-        {/* Legal Evidences */}
-        <EvidenceSection evidences={evidences} />
+        {/* Legal Evidences — 공통 컴포넌트 사용 */}
+        <EvidenceCardList evidences={evidences} className="mb-6" />
 
-        {/* Key Issues */}
-        <Card className="border-gray-200 mb-6">
-          <CardHeader>
-            <CardTitle>주요 쟁점 사항</CardTitle>
-            <CardDescription>에이전트 토의에서 도출된 핵심 문제점</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="border-l-4 border-blue-500 pl-4">
-                <h4 className="font-medium text-gray-900 mb-2">1. 비교 광고의 객관성 부족</h4>
-                <p className="text-sm text-gray-600 mb-2">
-                  '업계 1위 제품보다 2배 빠른 성능'이라는 주장에 대한 공인 기관의 시험 결과나 
-                  객관적 데이터가 제시되지 않았습니다. 표시광고법상 비교 광고는 객관적이고 
-                  입증 가능한 사실에 근거해야 합니다.
-                </p>
-                <Badge variant="outline" className="text-xs">표시광고법 제3조</Badge>
+        {/* Key Issues — 리스크 항목에서 동적 생성 */}
+        {risks.length > 0 && (
+          <Card className="border-gray-200 mb-6">
+            <CardHeader>
+              <CardTitle>주요 쟁점 사항</CardTitle>
+              <CardDescription>에이전트 토의에서 도출된 핵심 문제점</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {risks.map((risk, idx) => {
+                  const colors = ["border-blue-500", "border-emerald-500", "border-violet-500", "border-amber-500", "border-rose-500"];
+                  return (
+                    <div key={idx}>
+                      {idx > 0 && <Separator className="mb-4" />}
+                      <div className={`border-l-4 ${colors[idx % colors.length]} pl-4`}>
+                        <h4 className="font-medium text-gray-900 mb-2">
+                          {idx + 1}. {risk.category}
+                        </h4>
+                        <p className="text-sm text-gray-600 mb-2">{risk.description}</p>
+                        {getRiskBadge(risk.level)}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-
-              <Separator />
-
-              <div className="border-l-4 border-emerald-500 pl-4">
-                <h4 className="font-medium text-gray-900 mb-2">2. 경쟁사 비하 표현</h4>
-                <p className="text-sm text-gray-600 mb-2">
-                  '타사 제품은 구시대 유물'이라는 표현은 경쟁사에 대한 직접적 비하에 해당합니다. 
-                  이는 부정경쟁방지법상 문제가 될 수 있으며, 기업 이미지에도 부정적 영향을 줄 수 있습니다.
-                </p>
-                <Badge variant="outline" className="text-xs">부정경쟁방지법</Badge>
-              </div>
-
-              <Separator />
-
-              <div className="border-l-4 border-violet-500 pl-4">
-                <h4 className="font-medium text-gray-900 mb-2">3. 과도한 긴박감 조성</h4>
-                <p className="text-sm text-gray-600 mb-2">
-                  '한정 수량', '서둘러', '놓치면 후회' 등의 표현이 실제 재고 현황과 무관하게 
-                  사용된다면 소비자를 기만하는 것으로 간주될 수 있습니다. 소비자의 합리적 
-                  의사결정을 방해하는 압박 마케팅은 지양해야 합니다.
-                </p>
-                <Badge variant="outline" className="text-xs">소비자보호</Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Original vs Revised */}
         <div className="grid md:grid-cols-2 gap-6 mb-6">
@@ -398,95 +435,26 @@ export function Verdict() {
           </Card>
         </div>
 
-        {/* Recommendations */}
-        <Card className="border-gray-200 mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="w-5 h-5 text-blue-600" />
-              최종 권고사항
-            </CardTitle>
-            <CardDescription>실무 적용을 위한 구체적 가이드라인</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                  <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center text-xs font-semibold text-blue-700">
-                    1
-                  </div>
-                  법적 안전성 확보
-                </h4>
-                <ul className="space-y-2 ml-8 text-sm text-gray-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">•</span>
-                    <span>성능 비교 데이터는 '자사 테스트', '당사 기준' 등 출처를 명확히 표시</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">•</span>
-                    <span>제3자 검증 기관의 인증이 있다면 해당 내용을 추가로 명시</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">•</span>
-                    <span>경쟁사 직접 비하 표현은 전면 삭제하고 자사 강점에 집중</span>
-                  </li>
-                </ul>
-              </div>
-
-              <Separator />
-
-              <div>
-                <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                  <div className="w-6 h-6 bg-emerald-100 rounded-full flex items-center justify-center text-xs font-semibold text-emerald-700">
-                    2
-                  </div>
-                  리스크 관리
-                </h4>
-                <ul className="space-y-2 ml-8 text-sm text-gray-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-emerald-600 mt-1">•</span>
-                    <span>할인율 및 사은품 관련 상세 조건을 명시하여 소비자 오해 방지</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-emerald-600 mt-1">•</span>
-                    <span>한정 수량은 실제 재고를 기반으로 하며, 소진 시 안내 문구 자동 변경</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-emerald-600 mt-1">•</span>
-                    <span>사후 소비자 불만 대응 프로세스 및 환불 정책 사전 수립</span>
-                  </li>
-                </ul>
-              </div>
-
-              <Separator />
-
-              <div>
-                <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                  <div className="w-6 h-6 bg-violet-100 rounded-full flex items-center justify-center text-xs font-semibold text-violet-700">
-                    3
-                  </div>
-                  윤리적 커뮤니케이션
-                </h4>
-                <ul className="space-y-2 ml-8 text-sm text-gray-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-violet-600 mt-1">•</span>
-                    <span>압박적 표현 대신 제품 혜택과 가치를 중심으로 재구성</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-violet-600 mt-1">•</span>
-                    <span>소비자 선택권을 존중하는 톤앤매너 유지</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-violet-600 mt-1">•</span>
-                    <span>ESG 경영 원칙에 부합하는 투명하고 공정한 마케팅 메시지 구사</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Recommendations — AI 응답 기반 */}
+        {finalDecision?.recommendation && (
+          <Card className="border-gray-200 mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-blue-600" />
+                최종 권고사항
+              </CardTitle>
+              <CardDescription>실무 적용을 위한 구체적 가이드라인</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                {finalDecision.recommendation}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Next Steps */}
-        <Card className="border-blue-200 bg-blue-50/50">
+        <Card className="border-blue-200 bg-blue-50/50 pdf-section">
           <CardHeader>
             <CardTitle className="text-base">다음 단계</CardTitle>
           </CardHeader>
@@ -528,6 +496,7 @@ export function Verdict() {
             사내 전문가의 검토를 거쳐 진행하시고, 필요시 외부 법률 자문을 받으시기 바랍니다. 
             본 시스템은 법률 자문을 제공하지 않으며, 실제 법적 판단에 대한 책임을 지지 않습니다.
           </p>
+        </div>
         </div>
       </main>
     </div>
