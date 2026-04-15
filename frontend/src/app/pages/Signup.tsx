@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Mail, Lock, User, AlertCircle, CheckCircle, LogIn, ArrowRight } from "lucide-react";
+import { Mail, Lock, User, AlertCircle, CheckCircle, LogIn, ArrowRight, Github } from "lucide-react";
 
 export function Signup() {
   const navigate = useNavigate();
@@ -159,6 +159,19 @@ export function Signup() {
             </CardHeader>
             <CardContent className="px-6 pb-6">
               <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-2 gap-2">
+                  <Button type="button" variant="outline" className="h-10 rounded-xl" disabled>
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 mr-2" aria-hidden="true">
+                      <path fill="currentColor" d="M12 10.2v3.9h5.4c-.2 1.2-1.4 3.6-5.4 3.6-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.1 14.7 2 12 2 6.9 2 2.8 6.1 2.8 11.2S6.9 20.4 12 20.4c6.9 0 9.1-4.8 9.1-7.3 0-.5 0-.9-.1-1.3H12z" />
+                    </svg>
+                    구글 로그인(준비중)
+                  </Button>
+                  <Button type="button" variant="outline" className="h-10 rounded-xl" disabled>
+                    <Github className="w-4 h-4 mr-2" />
+                    GitHub 로그인(준비중)
+                  </Button>
+                </div>
+
                 {error && (
                   <div className="flex items-start gap-3 p-3 rounded-xl border border-red-200 bg-red-50">
                     <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />

@@ -133,19 +133,24 @@ export function ReviewDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-        <span className="ml-3 text-gray-500">불러오는 중...</span>
+      <div className="min-h-screen bg-[#F2F2F2] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-[#1E3A8A] animate-spin" />
+        <span className="ml-3 text-slate-500">불러오는 중...</span>
       </div>
     );
   }
 
   if (error || !detail) {
     return (
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)] flex items-center justify-center">
+      <div className="min-h-screen bg-[#F2F2F2] flex items-center justify-center">
         <div className="text-center">
           <p className="text-red-600 mb-4">{error || "데이터를 찾을 수 없습니다"}</p>
-          <Button onClick={() => navigate("/reviews")}>목록으로</Button>
+          <Button
+            onClick={() => navigate("/reviews")}
+            className="rounded-full bg-[#1E3A8A] hover:bg-[#1E293B] text-white"
+          >
+            목록으로
+          </Button>
         </div>
       </div>
     );
@@ -163,25 +168,30 @@ export function ReviewDetailPage() {
   });
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)]">
-      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-[#F2F2F2] text-slate-900 flex flex-col">
+      <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#F2F2F2]/94 backdrop-blur-md shadow-sm">
+        <div className="max-w-7xl mx-auto px-5 md:px-7 flex items-center justify-between h-[74px]">
           <button
             onClick={() => navigate("/")}
-            className="flex items-center gap-3 hover:opacity-70 transition-opacity"
+            className="min-w-[220px] text-left py-1"
           >
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
-              <Scale className="w-6 h-6 text-white" />
-            </div>
-            <div className="text-left">
-              <h1 className="font-semibold text-slate-900">LexRex AI</h1>
-              <p className="text-xs text-gray-500">Multi-Agent Legal Compliance System</p>
-            </div>
+            <h1 className="font-menu leading-[1.02] text-[25px] text-[#1E3A8A]">LexRex AI</h1>
+            <p className="text-[11px] leading-[1.3] tracking-[-0.01em] text-[#64748B] mt-[3px] max-h-5">
+              Multi-Agent Legal Compliance System
+            </p>
           </button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 rounded-full border border-transparent bg-transparent px-4 text-[#4B5563] hover:bg-[#1E3A8A] hover:text-white hover:border-[#1E3A8A] transition-all duration-300 hover:shadow-[0_8px_18px_rgba(30,58,138,0.22)]"
+            onClick={() => navigate("/reviews")}
+          >
+            히스토리
+          </Button>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-12">
+      <main className="flex-1 max-w-[1240px] w-full mx-auto px-5 md:px-6 py-12 md:py-14">
         {/* Back + title */}
         <div className="mb-8">
           <button
@@ -204,7 +214,7 @@ export function ReviewDetailPage() {
           </div>
         </div>
 
-        <Card className="border-slate-200/80 bg-white/95 shadow-sm mb-6">
+        <Card className="border-slate-200 bg-white shadow-sm rounded-3xl mb-6 overflow-hidden">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
@@ -250,14 +260,22 @@ export function ReviewDetailPage() {
           <Button
             variant={activeTab === "debate" ? "default" : "outline"}
             onClick={() => setActiveTab("debate")}
-            className={activeTab === "debate" ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white" : ""}
+            className={
+              activeTab === "debate"
+                ? "rounded-full bg-[#1E3A8A] hover:bg-[#1E293B] text-white"
+                : "rounded-full border-[#64748B]/35 text-slate-700 hover:bg-white"
+            }
           >
             토론 내용
           </Button>
           <Button
             variant={activeTab === "verdict" ? "default" : "outline"}
             onClick={() => setActiveTab("verdict")}
-            className={activeTab === "verdict" ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white" : ""}
+            className={
+              activeTab === "verdict"
+                ? "rounded-full bg-[#1E3A8A] hover:bg-[#1E293B] text-white"
+                : "rounded-full border-[#64748B]/35 text-slate-700 hover:bg-white"
+            }
           >
             최종 판정
           </Button>
@@ -266,7 +284,7 @@ export function ReviewDetailPage() {
         {activeTab === "debate" && (
           <div className="space-y-6">
             {Object.entries(rounds).map(([roundNum, msgs]) => (
-              <Card key={roundNum} className="border-slate-200/80 bg-white/95 shadow-sm">
+              <Card key={roundNum} className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
                 <CardHeader>
                   <CardTitle className="text-lg">
                     라운드 {roundNum}
@@ -304,7 +322,7 @@ export function ReviewDetailPage() {
 
         {activeTab === "verdict" && fd && (
           <div className="space-y-6">
-            <Card className="border-slate-200/80 bg-white/95 shadow-sm">
+            <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
               <CardHeader>
                 <CardTitle>판정 요약</CardTitle>
               </CardHeader>
@@ -331,7 +349,7 @@ export function ReviewDetailPage() {
             </Card>
 
             {fd.risks.length > 0 && (
-              <Card className="border-slate-200/80 bg-white/95 shadow-sm">
+              <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
                 <CardHeader>
                   <CardTitle>위험 요소</CardTitle>
                 </CardHeader>
@@ -358,7 +376,7 @@ export function ReviewDetailPage() {
               </Card>
             )}
 
-            <Card className="border-slate-200/80 bg-white/95 shadow-sm">
+            <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
               <CardHeader>
                 <CardTitle>권고사항</CardTitle>
               </CardHeader>
@@ -379,7 +397,7 @@ export function ReviewDetailPage() {
             </Card>
 
             {detail.evidences && detail.evidences.length > 0 && (
-              <Card className="border-slate-200/80 bg-white/95 shadow-sm">
+              <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <BookOpen className="w-5 h-5 text-indigo-600" />
@@ -451,7 +469,7 @@ export function ReviewDetailPage() {
               </Button>
               <Button
                 onClick={() => navigate("/input")}
-                className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
+                className="rounded-full bg-[#1E3A8A] hover:bg-[#1E293B] text-white"
               >
                 새 검토 시작
               </Button>
@@ -459,6 +477,13 @@ export function ReviewDetailPage() {
           </div>
         )}
       </main>
+      <footer className="border-t border-[#64748B]/25 bg-[#F2F2F2] mt-auto">
+        <div className="max-w-7xl mx-auto px-6 py-8 text-center">
+          <p className="text-sm text-slate-500">
+            본 시스템은 의사결정 지원을 위한 참고 자료이며, 최종 판단은 실무 전문가와 법무팀의 검토가 필요합니다.
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }

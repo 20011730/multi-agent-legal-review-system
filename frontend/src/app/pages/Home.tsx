@@ -32,6 +32,8 @@ export function Home() {
   const [visibleSections, setVisibleSections] = useState<Record<string, boolean>>({
     benefits: false,
     specifications: false,
+    technology: false,
+    trust: false,
     howto: false,
     contact: false,
   });
@@ -116,7 +118,7 @@ export function Home() {
   }, []);
 
   useEffect(() => {
-    const ids = ["benefits", "specifications", "howto", "contact"];
+    const ids = ["benefits", "specifications", "technology", "trust", "howto", "contact"];
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -234,6 +236,26 @@ export function Home() {
               }`}
             >
               전문분야
+            </button>
+            <button
+              onClick={() => scrollToSection("howto")}
+              className={`relative pb-1 transition-colors after:absolute after:left-0 after:-bottom-[2px] after:h-[1.5px] after:w-full after:origin-left after:rounded-full after:bg-[#1E3A8A] after:transition-transform after:duration-300 after:ease-out ${
+                activeSection === "technology"
+                  ? "text-[#1E3A8A] after:scale-x-100"
+                  : "text-[#1E293B] hover:text-black after:scale-x-0"
+              }`}
+            >
+              핵심 기술
+            </button>
+            <button
+              onClick={() => scrollToSection("trust")}
+              className={`relative pb-1 transition-colors after:absolute after:left-0 after:-bottom-[2px] after:h-[1.5px] after:w-full after:origin-left after:rounded-full after:bg-[#1E3A8A] after:transition-transform after:duration-300 after:ease-out ${
+                activeSection === "trust"
+                  ? "text-[#1E3A8A] after:scale-x-100"
+                  : "text-[#1E293B] hover:text-black after:scale-x-0"
+              }`}
+            >
+              신뢰와 보안
             </button>
             <button
               onClick={() => scrollToSection("howto")}
@@ -479,6 +501,111 @@ export function Home() {
               </div>
             </CardContent>
           </Card>
+        </section>
+
+        <section id="technology" className="scroll-mt-24 py-14 md:py-16">
+          <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("technology")}`}>핵심 기술</p>
+          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight mb-7 ${getRevealClass("technology")}`}>
+            왜 LexRex AI인가: 토론형 AI 아키텍처
+          </h3>
+          <p className={`text-lg text-slate-600 max-w-4xl leading-relaxed break-keep mb-8 ${getRevealClass("technology")}`}>
+            LexRex AI는 <strong>Spring Boot(제어)</strong>와 <strong>FastAPI(추론)</strong>를 분리한 구조 위에서,
+            독립 프롬프트 페르소나를 가진 에이전트들이 논점을 교차 검증합니다.
+            불일치가 발생하면 판정 에이전트가 법적 근거 가중치를 반영해 중재안을 도출하고,
+            유의미한 반론은 <strong>소수 의견(Minority Opinion)</strong>으로 함께 제공합니다.
+          </p>
+          <div className="grid lg:grid-cols-2 gap-5 items-stretch">
+            <Card className={`border-slate-200 bg-white ${getRevealClass("technology")}`} style={{ transitionDelay: "50ms" } as React.CSSProperties}>
+              <CardContent className="p-6">
+                <p className="text-sm uppercase tracking-[0.18em] text-slate-500 mb-3">Mediation Logic</p>
+                <div className="space-y-3 text-sm text-slate-700">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="font-semibold mb-1">1) 독립 의견 생성</p>
+                    <p>법무·사업·윤리 에이전트가 같은 입력을 서로 다른 관점으로 분석합니다.</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="font-semibold mb-1">2) 충돌 탐지 및 중재</p>
+                    <p>근거 조항, 사업 실행성, 평판 리스크를 가중치로 비교해 판정안을 정리합니다.</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="font-semibold mb-1">3) 소수 의견 병기</p>
+                    <p>최종 합의 밖의 유의미한 반론도 리포트 하단에 함께 남겨 판단 편향을 줄입니다.</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className={`border-slate-200 bg-white ${getRevealClass("technology")}`} style={{ transitionDelay: "110ms" } as React.CSSProperties}>
+              <CardContent className="p-6">
+                <p className="text-sm uppercase tracking-[0.18em] text-slate-500 mb-3">System Architecture</p>
+                <div className="rounded-2xl border border-[#CBD5E1] bg-[#F8FAFC] p-5">
+                  <div className="grid grid-cols-1 gap-3 text-sm">
+                    <div className="rounded-lg border border-[#1E3A8A]/20 bg-white p-3">
+                      <p className="font-semibold text-[#1E3A8A]">Client / UI</p>
+                      <p className="text-slate-600">분석 요청 · 실시간 토론 상태 · 결과 리포트 제공</p>
+                    </div>
+                    <div className="text-center text-slate-400">↓</div>
+                    <div className="rounded-lg border border-[#1E3A8A]/20 bg-white p-3">
+                      <p className="font-semibold text-[#1E3A8A]">Spring Boot Orchestrator</p>
+                      <p className="text-slate-600">세션 제어, 인증, 라우팅, 작업 상태 관리</p>
+                    </div>
+                    <div className="text-center text-slate-400">↓</div>
+                    <div className="rounded-lg border border-[#1E3A8A]/20 bg-white p-3">
+                      <p className="font-semibold text-[#1E3A8A]">FastAPI Inference + RAG</p>
+                      <p className="text-slate-600">법령/판례 근거 검색 후 멀티 에이전트 토론 및 합의</p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+
+        <section id="trust" className="scroll-mt-24 py-14 md:py-16">
+          <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("trust")}`}>신뢰와 보안</p>
+          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight mb-7 ${getRevealClass("trust")}`}>
+            데이터는 안전한가: 업데이트·정확도·프라이버시 원칙
+          </h3>
+          <div className="grid lg:grid-cols-2 gap-5 items-stretch">
+            <Card className={`border-slate-200 bg-white ${getRevealClass("trust")}`} style={{ transitionDelay: "50ms" } as React.CSSProperties}>
+              <CardContent className="p-6 space-y-4">
+                <h4 className="font-semibold">법령 데이터 업데이트 체계</h4>
+                <div className="space-y-3 text-sm text-slate-700">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="font-medium mb-1">실시간 동기화</p>
+                    <p>국가법령정보센터 API 연동으로 최신 공포 법령·판례를 주기적으로 반영합니다.</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="font-medium mb-1">스케줄링 크롤링</p>
+                    <p>신규 해석례와 가이드라인은 주 단위로 수집해 RAG 인덱스를 업데이트합니다.</p>
+                  </div>
+                </div>
+                <h4 className="font-semibold pt-1">정확도 보장 체계</h4>
+                <ul className="space-y-2 text-sm text-slate-700">
+                  <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 mt-0.5 text-[#1E3A8A]" />에이전트 간 교차 검증으로 사실관계 오류를 1차 필터링</li>
+                  <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 mt-0.5 text-[#1E3A8A]" />근거 조항 번호 및 판례 번호를 답변과 함께 명시</li>
+                </ul>
+              </CardContent>
+            </Card>
+            <Card className={`border-slate-200 bg-white ${getRevealClass("trust")}`} style={{ transitionDelay: "110ms" } as React.CSSProperties}>
+              <CardContent className="p-6">
+                <h4 className="font-semibold mb-4">Trust Checklist (FAQ 스타일)</h4>
+                <div className="space-y-3 text-sm">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="font-medium text-slate-900">Q. 입력 데이터가 외부 모델 학습에 사용되나요?</p>
+                    <p className="text-slate-700 mt-1">A. 사용되지 않습니다. 사용자 입력은 재학습 데이터로 제공하지 않는 것을 원칙으로 합니다.</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="font-medium text-slate-900">Q. 분석 세션 데이터는 어떻게 관리되나요?</p>
+                    <p className="text-slate-700 mt-1">A. 저장 시 암호화하고, 요청 시 즉시 삭제 가능한 Zero-Retention 정책을 따릅니다.</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="font-medium text-slate-900">Q. 결과의 신뢰도는 어떻게 확인하나요?</p>
+                    <p className="text-slate-700 mt-1">A. 멀티 에이전트 상호 검증 로그와 근거 출처를 함께 제공하여 판단 근거를 투명하게 확인할 수 있습니다.</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </section>
 
         <section id="howto" className="scroll-mt-24 py-14 md:py-16">
