@@ -133,7 +133,7 @@ export function ReviewDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)] flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
         <span className="ml-3 text-gray-500">불러오는 중...</span>
       </div>
@@ -142,7 +142,7 @@ export function ReviewDetailPage() {
 
   if (error || !detail) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)] flex items-center justify-center">
         <div className="text-center">
           <p className="text-red-600 mb-4">{error || "데이터를 찾을 수 없습니다"}</p>
           <Button onClick={() => navigate("/reviews")}>목록으로</Button>
@@ -163,19 +163,18 @@ export function ReviewDetailPage() {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)]">
+      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <button
             onClick={() => navigate("/")}
             className="flex items-center gap-3 hover:opacity-70 transition-opacity"
           >
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
               <Scale className="w-6 h-6 text-white" />
             </div>
             <div className="text-left">
-              <h1 className="font-semibold text-gray-900">LegalReview AI</h1>
+              <h1 className="font-semibold text-slate-900">LexRex AI</h1>
               <p className="text-xs text-gray-500">Multi-Agent Legal Compliance System</p>
             </div>
           </button>
@@ -187,13 +186,13 @@ export function ReviewDetailPage() {
         <div className="mb-8">
           <button
             onClick={() => navigate("/reviews")}
-            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
+            className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
             검토 기록으로 돌아가기
           </button>
           <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-3xl font-semibold text-gray-900">
+            <h2 className="text-3xl font-semibold text-slate-900 tracking-tight">
               검토 상세
             </h2>
             {vc && VerdictIcon && (
@@ -205,8 +204,7 @@ export function ReviewDetailPage() {
           </div>
         </div>
 
-        {/* Session info */}
-        <Card className="border-gray-200 mb-6">
+        <Card className="border-slate-200/80 bg-white/95 shadow-sm mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
@@ -216,18 +214,18 @@ export function ReviewDetailPage() {
           <CardContent>
             <div className="grid md:grid-cols-3 gap-4 mb-4">
               <div>
-                <p className="text-xs text-gray-500">기업명</p>
-                <p className="font-medium text-gray-900">{detail.companyName}</p>
+                <p className="text-xs text-slate-500">기업명</p>
+                <p className="font-medium text-slate-900">{detail.companyName}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500">검토 유형</p>
-                <p className="font-medium text-gray-900">
+                <p className="text-xs text-slate-500">검토 유형</p>
+                <p className="font-medium text-slate-900">
                   {reviewTypeLabels[detail.reviewType] || detail.reviewType}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-gray-500">요청 일시</p>
-                <p className="font-medium text-gray-900">
+                <p className="text-xs text-slate-500">요청 일시</p>
+                <p className="font-medium text-slate-900">
                   {new Date(detail.createdAt).toLocaleDateString("ko-KR", {
                     year: "numeric", month: "long", day: "numeric",
                     hour: "2-digit", minute: "2-digit",
@@ -236,41 +234,39 @@ export function ReviewDetailPage() {
               </div>
             </div>
             <div className="mb-4">
-              <p className="text-xs text-gray-500 mb-1">상황 설명</p>
-              <p className="text-sm text-gray-700">{detail.situation}</p>
+              <p className="text-xs text-slate-500 mb-1">상황 설명</p>
+              <p className="text-sm text-slate-700">{detail.situation}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-500 mb-1">검토 원문</p>
-              <div className="p-3 bg-gray-50 rounded-lg border">
-                <p className="text-sm text-gray-800 whitespace-pre-wrap">{detail.content}</p>
+              <p className="text-xs text-slate-500 mb-1">검토 원문</p>
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <p className="text-sm text-slate-800 whitespace-pre-wrap">{detail.content}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Tab buttons */}
         <div className="flex gap-2 mb-6">
           <Button
             variant={activeTab === "debate" ? "default" : "outline"}
             onClick={() => setActiveTab("debate")}
-            className={activeTab === "debate" ? "bg-blue-600 text-white" : ""}
+            className={activeTab === "debate" ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white" : ""}
           >
             토론 내용
           </Button>
           <Button
             variant={activeTab === "verdict" ? "default" : "outline"}
             onClick={() => setActiveTab("verdict")}
-            className={activeTab === "verdict" ? "bg-blue-600 text-white" : ""}
+            className={activeTab === "verdict" ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white" : ""}
           >
             최종 판정
           </Button>
         </div>
 
-        {/* Debate tab */}
         {activeTab === "debate" && (
           <div className="space-y-6">
             {Object.entries(rounds).map(([roundNum, msgs]) => (
-              <Card key={roundNum} className="border-gray-200">
+              <Card key={roundNum} className="border-slate-200/80 bg-white/95 shadow-sm">
                 <CardHeader>
                   <CardTitle className="text-lg">
                     라운드 {roundNum}
@@ -281,7 +277,7 @@ export function ReviewDetailPage() {
                     const ac = agentConfig[msg.agentId] || agentConfig.legal;
                     const AgentIcon = ac.icon;
                     return (
-                      <div key={idx} className={`p-4 rounded-lg border ${ac.bg}`}>
+                      <div key={idx} className={`p-4 rounded-xl border ${ac.bg}`}>
                         <div className="flex items-center gap-2 mb-2">
                           <AgentIcon className={`w-4 h-4 ${ac.color}`} />
                           <span className={`font-medium text-sm ${ac.color}`}>
@@ -291,9 +287,9 @@ export function ReviewDetailPage() {
                             {msg.stance}
                           </Badge>
                         </div>
-                        <p className="text-sm text-gray-800 mb-2">{msg.content}</p>
+                        <p className="text-sm text-slate-800 mb-2">{msg.content}</p>
                         {msg.evidenceSummary && (
-                          <p className="text-xs text-gray-500">
+                          <p className="text-xs text-slate-500">
                             근거: {msg.evidenceSummary}
                           </p>
                         )}
@@ -306,11 +302,9 @@ export function ReviewDetailPage() {
           </div>
         )}
 
-        {/* Verdict tab */}
         {activeTab === "verdict" && fd && (
           <div className="space-y-6">
-            {/* Summary */}
-            <Card className="border-gray-200">
+            <Card className="border-slate-200/80 bg-white/95 shadow-sm">
               <CardHeader>
                 <CardTitle>판정 요약</CardTitle>
               </CardHeader>
@@ -332,13 +326,12 @@ export function ReviewDetailPage() {
                     위험도: {fd.riskLevel}
                   </Badge>
                 </div>
-                <p className="text-gray-700">{fd.summary}</p>
+                <p className="text-slate-700">{fd.summary}</p>
               </CardContent>
             </Card>
 
-            {/* Risks */}
             {fd.risks.length > 0 && (
-              <Card className="border-gray-200">
+              <Card className="border-slate-200/80 bg-white/95 shadow-sm">
                 <CardHeader>
                   <CardTitle>위험 요소</CardTitle>
                 </CardHeader>
@@ -347,15 +340,15 @@ export function ReviewDetailPage() {
                     {fd.risks.map((risk, idx) => {
                       const RiskIcon = riskLevelIcon[risk.level?.toUpperCase()] || Minus;
                       return (
-                        <div key={idx} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                        <div key={idx} className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl">
                           <RiskIcon className={`w-5 h-5 mt-0.5 ${
                             risk.level === "high" ? "text-red-600" :
                             risk.level === "medium" ? "text-amber-600" :
                             "text-green-600"
                           }`} />
                           <div>
-                            <p className="font-medium text-sm text-gray-900">{risk.category}</p>
-                            <p className="text-sm text-gray-600">{risk.description}</p>
+                            <p className="font-medium text-sm text-slate-900">{risk.category}</p>
+                            <p className="text-sm text-slate-600">{risk.description}</p>
                           </div>
                         </div>
                       );
@@ -365,19 +358,18 @@ export function ReviewDetailPage() {
               </Card>
             )}
 
-            {/* Recommendation */}
-            <Card className="border-gray-200">
+            <Card className="border-slate-200/80 bg-white/95 shadow-sm">
               <CardHeader>
                 <CardTitle>권고사항</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-gray-700 mb-4">{fd.recommendation}</p>
+                <p className="text-slate-700 mb-4">{fd.recommendation}</p>
                 {fd.revisedContent && (
                   <>
                     <Separator className="my-4" />
                     <div>
-                      <p className="text-sm font-medium text-gray-900 mb-2">수정 제안 문구</p>
-                      <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <p className="text-sm font-medium text-slate-900 mb-2">수정 제안 문구</p>
+                      <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
                         <p className="text-sm text-green-900 whitespace-pre-wrap">{fd.revisedContent}</p>
                       </div>
                     </div>
@@ -386,9 +378,8 @@ export function ReviewDetailPage() {
               </CardContent>
             </Card>
 
-            {/* Legal Evidences */}
             {detail.evidences && detail.evidences.length > 0 && (
-              <Card className="border-gray-200">
+              <Card className="border-slate-200/80 bg-white/95 shadow-sm">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <BookOpen className="w-5 h-5 text-indigo-600" />
@@ -401,7 +392,7 @@ export function ReviewDetailPage() {
                     {detail.evidences.map((ev, idx) => (
                       <div
                         key={idx}
-                        className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200"
+                        className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200"
                       >
                         <Badge
                           className={`text-xs flex-shrink-0 mt-0.5 ${
@@ -414,7 +405,7 @@ export function ReviewDetailPage() {
                         </Badge>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-sm text-gray-900 truncate">
+                            <span className="font-medium text-sm text-slate-900 truncate">
                               {ev.title}
                             </span>
                             {ev.url && (
@@ -429,14 +420,14 @@ export function ReviewDetailPage() {
                             )}
                           </div>
                           {ev.articleOrCourt && (
-                            <p className="text-xs text-gray-500 mb-1">
+                              <p className="text-xs text-slate-500 mb-1">
                               {ev.sourceType === "LAW" ? "소관: " : "법원: "}
                               {ev.articleOrCourt}
                               {ev.referenceId ? ` | ${ev.referenceId}` : ""}
                             </p>
                           )}
                           {ev.summary && (
-                            <p className="text-xs text-gray-600">{ev.summary}</p>
+                            <p className="text-xs text-slate-600">{ev.summary}</p>
                           )}
                           {ev.relevanceReason && (
                             <p className="text-xs text-indigo-600 mt-1">
@@ -451,7 +442,6 @@ export function ReviewDetailPage() {
               </Card>
             )}
 
-            {/* Actions */}
             <div className="flex justify-center gap-3">
               <Button
                 variant="outline"
@@ -461,7 +451,7 @@ export function ReviewDetailPage() {
               </Button>
               <Button
                 onClick={() => navigate("/input")}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
               >
                 새 검토 시작
               </Button>

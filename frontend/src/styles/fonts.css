@@ -1,0 +1,24 @@
+@import url("https://fonts.googleapis.com/css2?family=Crimson+Text:wght@400;600;700&family=DM+Sans:wght@700&family=Inter:wght@400;500;600;700&display=swap");
+
+:root {
+  --font-display: "Crimson Text", "Times New Roman", serif;
+  --font-ui: "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+body {
+  font-family: var(--font-ui);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.0425em;
+  line-height: 0.9;
+  font-weight: 400;
+}
+
+.font-menu {
+  font-family: "DM Sans", var(--font-ui);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.4;
+}

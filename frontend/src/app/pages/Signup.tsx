@@ -1,10 +1,11 @@
+import React from "react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Scale, ArrowLeft, Mail, Lock, User, AlertCircle, CheckCircle } from "lucide-react";
+import { Mail, Lock, User, AlertCircle, CheckCircle, LogIn, ArrowRight } from "lucide-react";
 
 export function Signup() {
   const navigate = useNavigate();
@@ -22,7 +23,6 @@ export function Signup() {
     e.preventDefault();
     setError("");
 
-    // Validation
     if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword) {
       setError("모든 필드를 입력해주세요");
       return;
@@ -67,8 +67,6 @@ export function Signup() {
       }
 
       setSuccess(true);
-
-      // Redirect to login after 2 seconds
       setTimeout(() => {
         navigate("/login");
       }, 2000);
@@ -79,166 +77,210 @@ export function Signup() {
     }
   };
 
+  const inputClass =
+    "pl-10 h-11 rounded-xl border border-[#64748B]/35 bg-white text-sm text-slate-700 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-[#1E3A8A]/20 focus-visible:border-[#1E3A8A]";
+
+  const header = (
+    <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#F2F2F2]/94 backdrop-blur-md shadow-sm">
+      <div className="max-w-7xl mx-auto px-5 md:px-7 flex items-center justify-between h-[74px]">
+        <button
+          type="button"
+          onClick={() => navigate("/")}
+          className="min-w-[200px] text-left py-1"
+        >
+          <h1 className="font-menu leading-[1.02] text-[25px] text-[#1E3A8A]">LexRex AI</h1>
+          <p className="text-[11px] leading-[1.3] tracking-[-0.01em] text-[#64748B] mt-[3px] max-h-5">
+            Multi-Agent Legal Compliance System
+          </p>
+        </button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 rounded-full border border-transparent bg-transparent px-4 text-[#4B5563] hover:bg-[#1E3A8A] hover:text-white hover:border-[#1E3A8A] transition-all duration-300 hover:shadow-[0_8px_18px_rgba(30,58,138,0.22)]"
+          onClick={() => navigate("/login")}
+        >
+          <LogIn className="w-4 h-4 mr-2 text-current" />
+          로그인
+        </Button>
+      </div>
+    </header>
+  );
+
+  const footer = (
+    <footer className="border-t border-[#64748B]/25 bg-[#F2F2F2] mt-auto">
+      <div className="max-w-7xl mx-auto px-6 py-8 text-center">
+        <p className="text-sm text-slate-500">
+          본 시스템은 의사결정 지원을 위한 참고 자료이며, 최종 판단은 실무 전문가와 법무팀의 검토가 필요합니다.
+        </p>
+      </div>
+    </footer>
+  );
+
   if (success) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 flex items-center justify-center p-6">
-        <Card className="w-full max-w-md border-green-200">
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <CheckCircle className="w-8 h-8 text-green-600" />
+      <div className="min-h-screen bg-[#F2F2F2] text-slate-900 flex flex-col">
+        {header}
+        <main className="flex-1 flex items-center justify-center px-5 py-14">
+          <Card className="w-full max-w-md border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
+            <CardContent className="pt-8 pb-8 px-6">
+              <div className="text-center">
+                <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 flex items-center justify-center">
+                  <CheckCircle className="w-7 h-7 text-[#1E3A8A]" />
+                </div>
+                <h3 className="font-menu text-xl font-semibold text-[#1E3A8A] mb-2">회원가입 완료</h3>
+                <p className="text-slate-600 text-sm">로그인 페이지로 이동합니다...</p>
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">회원가입 완료!</h3>
-              <p className="text-gray-600">로그인 페이지로 이동합니다...</p>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </main>
+        {footer}
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <button 
-            onClick={() => navigate('/')}
-            className="flex items-center gap-3 hover:opacity-70 transition-opacity"
-          >
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
-              <Scale className="w-6 h-6 text-white" />
-            </div>
-            <div className="text-left">
-              <h1 className="font-semibold text-gray-900">LegalReview AI</h1>
-              <p className="text-xs text-gray-500">Multi-Agent Legal Compliance System</p>
-            </div>
-          </button>
-        </div>
-      </header>
+    <div className="min-h-screen bg-[#F2F2F2] text-slate-900 flex flex-col">
+      {header}
 
-      {/* Main Content */}
-      <main className="max-w-md mx-auto px-6 py-12">
-        <div className="mb-8">
-          <button
-            onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            뒤로 가기
-          </button>
-          <h2 className="text-3xl font-semibold text-gray-900 mb-2">회원가입</h2>
-          <p className="text-gray-600">LegalReview AI를 시작하세요</p>
-        </div>
+      <main className="flex-1 max-w-[1240px] w-full mx-auto px-5 md:px-6 py-12 md:py-14">
+        <div className="max-w-md mx-auto">
+          <p className="text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 text-center">Create Account</p>
+          <h2 className="font-menu text-center text-3xl md:text-4xl font-bold tracking-tight text-[#1E3A8A] mb-3">
+            회원가입
+          </h2>
+          <p className="text-center text-slate-600 text-sm md:text-base leading-relaxed mb-8 break-keep">
+            계정을 만들고 검토 기록과 최종 권고안을 안전하게 관리하세요.
+          </p>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <Card className="border-gray-200">
-            <CardHeader>
-              <CardTitle>계정 정보</CardTitle>
-              <CardDescription>
-                서비스 이용을 위한 계정을 생성합니다
-              </CardDescription>
+          <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
+            <CardHeader className="space-y-1 px-6 pt-6 pb-2">
+              <CardTitle className="text-lg font-semibold tracking-tight text-slate-900 sr-only">회원가입 폼</CardTitle>
+              <CardDescription className="text-slate-600">필수 항목을 입력해 계정을 생성하세요</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {error && (
-                <div className="flex items-start gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-red-800">{error}</p>
-                </div>
-              )}
+            <CardContent className="px-6 pb-6">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {error && (
+                  <div className="flex items-start gap-3 p-3 rounded-xl border border-red-200 bg-red-50">
+                    <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-red-800">{error}</p>
+                  </div>
+                )}
 
-              <div className="space-y-2">
-                <Label htmlFor="name">이름 *</Label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    id="name"
-                    type="text"
-                    placeholder="홍길동"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="pl-10 bg-white"
-                  />
+                <div className="space-y-2">
+                  <Label htmlFor="name" className="text-slate-700">
+                    이름 *
+                  </Label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input
+                      id="name"
+                      type="text"
+                      placeholder="홍길동"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className={inputClass}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="email">이메일 *</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="hong@example.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="pl-10 bg-white"
-                  />
+                <div className="space-y-2">
+                  <Label htmlFor="email" className="text-slate-700">
+                    이메일 *
+                  </Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="hong@example.com"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      className={inputClass}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="password">비밀번호 *</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="최소 6자 이상"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="pl-10 bg-white"
-                  />
+                <div className="space-y-2">
+                  <Label htmlFor="password" className="text-slate-700">
+                    비밀번호 *
+                  </Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="최소 6자 이상"
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      className={inputClass}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword">비밀번호 확인 *</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    id="confirmPassword"
-                    type="password"
-                    placeholder="비밀번호를 다시 입력하세요"
-                    value={formData.confirmPassword}
-                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                    className="pl-10 bg-white"
-                  />
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword" className="text-slate-700">
+                    비밀번호 확인 *
+                  </Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input
+                      id="confirmPassword"
+                      type="password"
+                      placeholder="비밀번호를 다시 입력하세요"
+                      value={formData.confirmPassword}
+                      onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                      className={inputClass}
+                    />
+                  </div>
                 </div>
-              </div>
+
+                <div className="flex items-start gap-3 p-4 rounded-xl border border-[#64748B]/25 bg-[#F8FAFC]">
+                  <AlertCircle className="w-5 h-5 text-[#1E3A8A] flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-slate-700">
+                    <p className="font-semibold text-slate-900 mb-1">데모 버전 안내</p>
+                    <p className="text-slate-600 leading-relaxed break-keep">
+                      본 시스템은 데모용입니다. 실제 개인정보나 민감한 기업 정보는 입력하지 마세요.
+                    </p>
+                  </div>
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full h-11 rounded-full bg-[#1E3A8A] hover:bg-[#1E293B] text-white shadow-[0_8px_20px_rgba(30,58,138,0.24)]"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? "처리 중..." : "회원가입"}
+                </Button>
+
+                <div className="text-center text-sm text-slate-600 pt-1">
+                  이미 계정이 있으신가요?{" "}
+                  <button
+                    type="button"
+                    onClick={() => navigate("/login")}
+                    className="text-[#1E3A8A] hover:text-[#1E293B] font-medium underline-offset-4 hover:underline"
+                  >
+                    로그인
+                  </button>
+                </div>
+              </form>
             </CardContent>
           </Card>
 
-          <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-            <div className="text-sm text-blue-900">
-              <p className="font-medium mb-1">데모 버전 안내</p>
-              <p className="text-blue-800">
-                본 시스템은 데모용입니다. 실제 개인정보나 민감한 기업 정보는 입력하지 마세요.
-              </p>
-            </div>
-          </div>
-
-          <Button
-            type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? "처리 중..." : "회원가입"}
-          </Button>
-
-          <div className="text-center text-sm text-gray-600">
-            이미 계정이 있으신가요?{" "}
-            <button
-              type="button"
-              onClick={() => navigate("/login")}
-              className="text-blue-600 hover:text-blue-700 font-medium"
+          <div className="mt-8 flex justify-center">
+            <Button
+              variant="outline"
+              size="lg"
+              className="h-12 min-w-[220px] px-6 rounded-full inline-flex items-center justify-center gap-2 border border-[#64748B]/45 bg-white text-[#64748B] hover:bg-[#1E3A8A] hover:border-[#1E3A8A] hover:text-white transition-all duration-300 shadow-sm hover:shadow-[0_10px_24px_rgba(30,58,138,0.22)]"
+              onClick={() => navigate("/")}
             >
-              로그인
-            </button>
+              홈으로 돌아가기
+              <ArrowRight className="w-5 h-5 text-current" />
+            </Button>
           </div>
-        </form>
+        </div>
       </main>
+
+      {footer}
     </div>
   );
 }

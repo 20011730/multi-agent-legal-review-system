@@ -92,19 +92,18 @@ export function ReviewHistory() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)]">
+      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <button
             onClick={() => navigate("/")}
             className="flex items-center gap-3 hover:opacity-70 transition-opacity"
           >
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
               <Scale className="w-6 h-6 text-white" />
             </div>
             <div className="text-left">
-              <h1 className="font-semibold text-gray-900">LegalReview AI</h1>
+              <h1 className="font-semibold text-slate-900">LexRex AI</h1>
               <p className="text-xs text-gray-500">
                 Multi-Agent Legal Compliance System
               </p>
@@ -120,20 +119,19 @@ export function ReviewHistory() {
         </div>
       </header>
 
-      {/* Main */}
       <main className="max-w-5xl mx-auto px-6 py-12">
         <div className="mb-8">
           <button
             onClick={() => navigate("/")}
-            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
+            className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
             홈으로
           </button>
-          <h2 className="text-3xl font-semibold text-gray-900 mb-2">
+          <h2 className="text-3xl font-semibold text-slate-900 tracking-tight mb-2">
             검토 기록
           </h2>
-          <p className="text-gray-600">
+          <p className="text-slate-600">
             지금까지 진행한 법률 검토 기록을 확인하세요
           </p>
         </div>
@@ -180,7 +178,7 @@ export function ReviewHistory() {
               return (
                 <Card
                   key={review.sessionId}
-                  className="border-gray-200 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer"
+                  className="border-slate-200/80 bg-white/95 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer"
                   onClick={() => handleReviewClick(review.sessionId)}
                 >
                   <CardContent className="p-6">
@@ -188,7 +186,7 @@ export function ReviewHistory() {
                       {/* Left */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3 mb-2">
-                          <h3 className="font-semibold text-gray-900 truncate">
+                          <h3 className="font-semibold text-slate-900 truncate">
                             {review.companyName}
                           </h3>
                           <Badge variant="outline" className="shrink-0">
@@ -196,10 +194,10 @@ export function ReviewHistory() {
                               review.reviewType}
                           </Badge>
                         </div>
-                        <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+                        <p className="text-sm text-slate-600 mb-3 line-clamp-2">
                           {review.situation}
                         </p>
-                        <div className="flex items-center gap-2 text-xs text-gray-400">
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
                           <Clock className="w-3.5 h-3.5" />
                           {formatDate(review.createdAt)}
                         </div>

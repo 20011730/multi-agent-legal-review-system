@@ -189,7 +189,7 @@ export function Verdict() {
     }
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     try {
-      await exportElementToPdf(el, `LegalReview_report_${stamp}.pdf`);
+      await exportElementToPdf(el, `LexRex_report_${stamp}.pdf`);
       toast.success("PDF를 저장했습니다.");
     } catch (e) {
       console.error(e);
@@ -200,19 +200,21 @@ export function Verdict() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)]">
+      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
+          <button
+            onClick={() => navigate("/")}
+            className="flex items-center gap-3 text-left hover:opacity-80 transition-opacity"
+          >
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
               <Scale className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="font-semibold text-gray-900">LegalReview AI</h1>
-              <p className="text-xs text-gray-500">Multi-Agent Legal Compliance System</p>
+              <h1 className="font-semibold text-slate-900">LexRex AI</h1>
+              <p className="text-xs text-slate-500">Multi-Agent Legal Compliance System</p>
             </div>
-          </div>
+          </button>
           <div className="flex gap-2">
             <Button
               variant="outline"
@@ -229,7 +231,7 @@ export function Verdict() {
             </Button>
             <Button 
               size="sm" 
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
               onClick={() => {
                 sessionStorage.removeItem("reviewData");
                 sessionStorage.removeItem("sessionId");
@@ -245,12 +247,11 @@ export function Verdict() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-6xl mx-auto px-6 py-12">
         <div className="mb-4">
           <button
             onClick={() => navigate("/result")}
-            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+            className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900"
           >
             <ArrowLeft className="w-4 h-4" />
             토의 로그로 돌아가기
@@ -259,37 +260,36 @@ export function Verdict() {
 
         <div
           ref={reportRef}
-          className="verdict-pdf-root rounded-xl border border-gray-200 bg-white p-6 shadow-sm md:p-10"
+          className="verdict-pdf-root rounded-xl border border-slate-200 bg-white/95 p-6 shadow-sm md:p-10"
           style={{ printColorAdjust: "exact" } as React.CSSProperties}
         >
           <div className="mb-8">
-            <h2 className="text-3xl font-semibold text-gray-900 mb-2">최종 검토 보고서</h2>
-            <p className="text-gray-600">멀티 에이전트 분석 결과 및 종합 권고사항</p>
+            <h2 className="text-3xl font-semibold text-slate-900 tracking-tight mb-2">최종 검토 보고서</h2>
+            <p className="text-slate-600">멀티 에이전트 분석 결과 및 종합 권고사항</p>
           </div>
 
-        {/* Review Info Summary */}
-        <Card className="border-gray-200 mb-6">
+        <Card className="border-slate-200/80 bg-white shadow-sm mb-6">
           <CardContent className="pt-6">
             <div className="grid md:grid-cols-4 gap-4 text-sm">
               <div>
-                <p className="text-gray-500 mb-1">기업명</p>
-                <p className="font-medium text-gray-900">{reviewData.companyName}</p>
+                <p className="text-slate-500 mb-1">기업명</p>
+                <p className="font-medium text-slate-900">{reviewData.companyName}</p>
               </div>
               <div>
-                <p className="text-gray-500 mb-1">산업 분야</p>
-                <p className="font-medium text-gray-900">
+                <p className="text-slate-500 mb-1">산업 분야</p>
+                <p className="font-medium text-slate-900">
                   {reviewData.industry === "tech" ? "IT·소프트웨어" : reviewData.industry}
                 </p>
               </div>
               <div>
-                <p className="text-gray-500 mb-1">검토 유형</p>
-                <p className="font-medium text-gray-900">
+                <p className="text-slate-500 mb-1">검토 유형</p>
+                <p className="font-medium text-slate-900">
                   {reviewData.reviewType === "marketing" ? "마케팅·광고 문구" : reviewData.reviewType}
                 </p>
               </div>
               <div>
-                <p className="text-gray-500 mb-1">검토 완료 일시</p>
-                <p className="font-medium text-gray-900">
+                <p className="text-slate-500 mb-1">검토 완료 일시</p>
+                <p className="font-medium text-slate-900">
                   {new Date().toLocaleDateString("ko-KR")} {new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
@@ -318,8 +318,7 @@ export function Verdict() {
           </CardContent>
         </Card>
 
-        {/* Risk Summary */}
-        <Card className="border-gray-200 mb-6">
+        <Card className="border-slate-200/80 bg-white shadow-sm mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-amber-600" />
@@ -332,15 +331,15 @@ export function Verdict() {
               {risks.map((risk, index) => (
                 <div
                   key={index}
-                  className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200"
+                  className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200"
                 >
                   <div className="mt-0.5">{getRiskIcon(risk.level)}</div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium text-sm text-gray-900">{risk.category}</span>
+                      <span className="font-medium text-sm text-slate-900">{risk.category}</span>
                       {getRiskBadge(risk.level)}
                     </div>
-                    <p className="text-sm text-gray-600">{risk.description}</p>
+                    <p className="text-sm text-slate-600">{risk.description}</p>
                   </div>
                 </div>
               ))}
@@ -348,9 +347,8 @@ export function Verdict() {
           </CardContent>
         </Card>
 
-        {/* Legal Evidences */}
         {evidences.length > 0 && (
-          <Card className="border-gray-200 mb-6">
+          <Card className="border-slate-200/80 bg-white shadow-sm mb-6">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <BookOpen className="w-5 h-5 text-indigo-600" />
@@ -363,7 +361,7 @@ export function Verdict() {
                 {evidences.map((ev, idx) => (
                   <div
                     key={idx}
-                    className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200"
+                    className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200"
                   >
                     <Badge
                       className={`text-xs flex-shrink-0 mt-0.5 ${
@@ -376,7 +374,7 @@ export function Verdict() {
                     </Badge>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-sm text-gray-900 truncate">
+                        <span className="font-medium text-sm text-slate-900 truncate">
                           {ev.title}
                         </span>
                         {ev.url && (
@@ -391,14 +389,14 @@ export function Verdict() {
                         )}
                       </div>
                       {ev.articleOrCourt && (
-                        <p className="text-xs text-gray-500 mb-1">
+                          <p className="text-xs text-slate-500 mb-1">
                           {ev.sourceType === "LAW" ? "소관: " : "법원: "}
                           {ev.articleOrCourt}
                           {ev.referenceId ? ` | ${ev.referenceId}` : ""}
                         </p>
                       )}
                       {ev.summary && (
-                        <p className="text-xs text-gray-600">{ev.summary}</p>
+                        <p className="text-xs text-slate-600">{ev.summary}</p>
                       )}
                       {ev.relevanceReason && (
                         <p className="text-xs text-indigo-600 mt-1">
@@ -413,8 +411,7 @@ export function Verdict() {
           </Card>
         )}
 
-        {/* Key Issues */}
-        <Card className="border-gray-200 mb-6">
+        <Card className="border-slate-200/80 bg-white shadow-sm mb-6">
           <CardHeader>
             <CardTitle>주요 쟁점 사항</CardTitle>
             <CardDescription>에이전트 토의에서 도출된 핵심 문제점</CardDescription>
@@ -422,8 +419,8 @@ export function Verdict() {
           <CardContent>
             <div className="space-y-4">
               <div className="border-l-4 border-blue-500 pl-4">
-                <h4 className="font-medium text-gray-900 mb-2">1. 비교 광고의 객관성 부족</h4>
-                <p className="text-sm text-gray-600 mb-2">
+                <h4 className="font-medium text-slate-900 mb-2">1. 비교 광고의 객관성 부족</h4>
+                <p className="text-sm text-slate-600 mb-2">
                   '업계 1위 제품보다 2배 빠른 성능'이라는 주장에 대한 공인 기관의 시험 결과나 
                   객관적 데이터가 제시되지 않았습니다. 표시광고법상 비교 광고는 객관적이고 
                   입증 가능한 사실에 근거해야 합니다.
@@ -434,8 +431,8 @@ export function Verdict() {
               <Separator />
 
               <div className="border-l-4 border-emerald-500 pl-4">
-                <h4 className="font-medium text-gray-900 mb-2">2. 경쟁사 비하 표현</h4>
-                <p className="text-sm text-gray-600 mb-2">
+                <h4 className="font-medium text-slate-900 mb-2">2. 경쟁사 비하 표현</h4>
+                <p className="text-sm text-slate-600 mb-2">
                   '타사 제품은 구시대 유물'이라는 표현은 경쟁사에 대한 직접적 비하에 해당합니다. 
                   이는 부정경쟁방지법상 문제가 될 수 있으며, 기업 이미지에도 부정적 영향을 줄 수 있습니다.
                 </p>
@@ -445,8 +442,8 @@ export function Verdict() {
               <Separator />
 
               <div className="border-l-4 border-violet-500 pl-4">
-                <h4 className="font-medium text-gray-900 mb-2">3. 과도한 긴박감 조성</h4>
-                <p className="text-sm text-gray-600 mb-2">
+                <h4 className="font-medium text-slate-900 mb-2">3. 과도한 긴박감 조성</h4>
+                <p className="text-sm text-slate-600 mb-2">
                   '한정 수량', '서둘러', '놓치면 후회' 등의 표현이 실제 재고 현황과 무관하게 
                   사용된다면 소비자를 기만하는 것으로 간주될 수 있습니다. 소비자의 합리적 
                   의사결정을 방해하는 압박 마케팅은 지양해야 합니다.
@@ -457,9 +454,8 @@ export function Verdict() {
           </CardContent>
         </Card>
 
-        {/* Original vs Revised */}
         <div className="grid md:grid-cols-2 gap-6 mb-6">
-          <Card className="border-red-200 bg-red-50/50">
+          <Card className="border-red-200 bg-red-50/60 shadow-sm">
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <XCircle className="w-5 h-5 text-red-600" />
@@ -468,7 +464,7 @@ export function Verdict() {
             </CardHeader>
             <CardContent>
               <div className="p-4 bg-white rounded-lg border border-red-200">
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap font-mono">
+                <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap font-mono">
                   {reviewData.content}
                 </p>
               </div>
@@ -485,7 +481,7 @@ export function Verdict() {
             </CardContent>
           </Card>
 
-          <Card className="border-green-200 bg-green-50/50">
+          <Card className="border-green-200 bg-green-50/60 shadow-sm">
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-green-600" />
@@ -494,7 +490,7 @@ export function Verdict() {
             </CardHeader>
             <CardContent>
               <div className="p-4 bg-white rounded-lg border border-green-200">
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap font-mono">
+                <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap font-mono">
                   {finalDecision?.revisedContent ||
                     "자사 테스트 결과 기존 대비 2배 향상된 성능을 확인했습니다. 혁신적인 기술로 더 나은 사용 경험을 제공합니다.\n\n지금 구매 시 특별 할인 50% 및 추가 사은품을 드립니다. (재고 소진 시까지, 상세 조건은 페이지 하단 참조)"}
                 </p>
@@ -513,8 +509,7 @@ export function Verdict() {
           </Card>
         </div>
 
-        {/* Recommendations */}
-        <Card className="border-gray-200 mb-6">
+        <Card className="border-slate-200/80 bg-white shadow-sm mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
@@ -525,13 +520,13 @@ export function Verdict() {
           <CardContent>
             <div className="space-y-4">
               <div>
-                <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                <h4 className="font-medium text-slate-900 mb-3 flex items-center gap-2">
                   <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center text-xs font-semibold text-blue-700">
                     1
                   </div>
                   법적 안전성 확보
                 </h4>
-                <ul className="space-y-2 ml-8 text-sm text-gray-700">
+                <ul className="space-y-2 ml-8 text-sm text-slate-700">
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 mt-1">•</span>
                     <span>성능 비교 데이터는 '자사 테스트', '당사 기준' 등 출처를 명확히 표시</span>
@@ -550,13 +545,13 @@ export function Verdict() {
               <Separator />
 
               <div>
-                <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                <h4 className="font-medium text-slate-900 mb-3 flex items-center gap-2">
                   <div className="w-6 h-6 bg-emerald-100 rounded-full flex items-center justify-center text-xs font-semibold text-emerald-700">
                     2
                   </div>
                   리스크 관리
                 </h4>
-                <ul className="space-y-2 ml-8 text-sm text-gray-700">
+                <ul className="space-y-2 ml-8 text-sm text-slate-700">
                   <li className="flex items-start gap-2">
                     <span className="text-emerald-600 mt-1">•</span>
                     <span>할인율 및 사은품 관련 상세 조건을 명시하여 소비자 오해 방지</span>
@@ -575,13 +570,13 @@ export function Verdict() {
               <Separator />
 
               <div>
-                <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                <h4 className="font-medium text-slate-900 mb-3 flex items-center gap-2">
                   <div className="w-6 h-6 bg-violet-100 rounded-full flex items-center justify-center text-xs font-semibold text-violet-700">
                     3
                   </div>
                   윤리적 커뮤니케이션
                 </h4>
-                <ul className="space-y-2 ml-8 text-sm text-gray-700">
+                <ul className="space-y-2 ml-8 text-sm text-slate-700">
                   <li className="flex items-start gap-2">
                     <span className="text-violet-600 mt-1">•</span>
                     <span>압박적 표현 대신 제품 혜택과 가치를 중심으로 재구성</span>
@@ -600,13 +595,12 @@ export function Verdict() {
           </CardContent>
         </Card>
 
-        {/* Next Steps */}
-        <Card className="border-blue-200 bg-blue-50/50">
+        <Card className="border-blue-200 bg-blue-50/60 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">다음 단계</CardTitle>
           </CardHeader>
           <CardContent>
-            <ol className="space-y-3 text-sm text-gray-700">
+            <ol className="space-y-3 text-sm text-slate-700">
               <li className="flex items-start gap-3">
                 <span className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-semibold">
                   1
@@ -635,9 +629,8 @@ export function Verdict() {
           </CardContent>
         </Card>
 
-        {/* Footer Note */}
-        <div className="mt-8 p-6 bg-gray-100 rounded-lg border border-gray-200">
-          <p className="text-sm text-gray-700 leading-relaxed">
+        <div className="mt-8 p-6 bg-slate-100 rounded-xl border border-slate-200">
+          <p className="text-sm text-slate-700 leading-relaxed">
             <strong>유의사항:</strong> 본 보고서는 AI 기반 멀티 에이전트 시스템에 의한 분석 결과이며, 
             참고 자료로 활용하시기 바랍니다. 최종 의사결정은 법무팀, 컴플라이언스팀 등 
             사내 전문가의 검토를 거쳐 진행하시고, 필요시 외부 법률 자문을 받으시기 바랍니다. 

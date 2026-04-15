@@ -202,26 +202,25 @@ export function CompanyProfile() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)]">
+      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <button 
+          <button
             onClick={() => navigate('/')}
             className="flex items-center gap-3 hover:opacity-70 transition-opacity"
           >
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
               <Scale className="w-6 h-6 text-white" />
             </div>
             <div className="text-left">
-              <h1 className="font-semibold text-gray-900">LegalReview AI</h1>
-              <p className="text-xs text-gray-500">Multi-Agent Legal Compliance System</p>
+              <h1 className="font-semibold text-slate-900">LexRex AI</h1>
+              <p className="text-xs text-slate-500">Multi-Agent Legal Compliance System</p>
             </div>
           </button>
           <div className="flex items-center gap-3">
             <div className="text-right">
-              <p className="text-sm font-medium text-gray-900">{currentUser.name}</p>
-              <p className="text-xs text-gray-500">{currentUser.email}</p>
+              <p className="text-sm font-medium text-slate-900">{currentUser.name}</p>
+              <p className="text-xs text-slate-500">{currentUser.email}</p>
             </div>
             <Button
               variant="outline"
@@ -235,33 +234,31 @@ export function CompanyProfile() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-5xl mx-auto px-6 py-12">
         <div className="mb-8">
-          <h2 className="text-3xl font-semibold text-gray-900 mb-2">기업 프로필 설정</h2>
-          <p className="text-gray-600">
+          <h2 className="text-3xl font-semibold text-slate-900 tracking-tight mb-2">기업 프로필 설정</h2>
+          <p className="text-slate-600">
             검토 유형에 따라 필요한 기업 정보를 입력하세요. 
             선택한 검토 유형에 맞는 정보 입력란이 자동으로 표시됩니다.
           </p>
         </div>
 
         {isSaved && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3 animate-in fade-in">
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3 animate-in fade-in">
             <CheckCircle className="w-5 h-5 text-green-600" />
             <span className="text-sm font-medium text-green-800">프로필이 저장되었습니다</span>
           </div>
         )}
 
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-red-600" />
             <span className="text-sm font-medium text-red-800">{error}</span>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Basic Information */}
-          <Card className="border-gray-200">
+          <Card className="border-slate-200/80 bg-white/95 shadow-sm">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-blue-600" />
@@ -279,7 +276,7 @@ export function CompanyProfile() {
                     id="companyName"
                     value={profile.companyName}
                     onChange={(e) => setProfile({ ...profile, companyName: e.target.value })}
-                    className="bg-white"
+                    className="bg-white h-11 rounded-xl"
                     required
                   />
                 </div>
@@ -292,7 +289,7 @@ export function CompanyProfile() {
                     placeholder="https://example.com"
                     value={profile.website}
                     onChange={(e) => setProfile({ ...profile, website: e.target.value })}
-                    className="bg-white"
+                    className="bg-white h-11 rounded-xl"
                   />
                 </div>
               </div>
@@ -304,7 +301,7 @@ export function CompanyProfile() {
                     value={profile.industry}
                     onValueChange={(value) => setProfile({ ...profile, industry: value })}
                   >
-                    <SelectTrigger id="industry" className="bg-white">
+                    <SelectTrigger id="industry" className="bg-white h-11 rounded-xl">
                       <SelectValue placeholder="선택해주세요" />
                     </SelectTrigger>
                     <SelectContent>
@@ -326,7 +323,7 @@ export function CompanyProfile() {
                     value={profile.companySize}
                     onValueChange={(value) => setProfile({ ...profile, companySize: value })}
                   >
-                    <SelectTrigger id="companySize" className="bg-white">
+                    <SelectTrigger id="companySize" className="bg-white h-11 rounded-xl">
                       <SelectValue placeholder="선택해주세요" />
                     </SelectTrigger>
                     <SelectContent>
@@ -346,14 +343,13 @@ export function CompanyProfile() {
                   placeholder="주요 사업 분야, 비전, 핵심 가치 등을 간단히 설명해주세요"
                   value={profile.description}
                   onChange={(e) => setProfile({ ...profile, description: e.target.value })}
-                  className="min-h-[100px] bg-white"
+                  className="min-h-[100px] bg-white rounded-xl"
                 />
               </div>
             </CardContent>
           </Card>
 
-          {/* Review Types */}
-          <Card className="border-gray-200">
+          <Card className="border-slate-200/80 bg-white/95 shadow-sm">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-blue-600" />
@@ -383,9 +379,8 @@ export function CompanyProfile() {
             </CardContent>
           </Card>
 
-          {/* Dynamic Fields based on Review Types */}
           {relevantFields.length > 0 && (
-            <Card className="border-gray-200">
+            <Card className="border-slate-200/80 bg-white/95 shadow-sm">
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <Building2 className="w-5 h-5 text-blue-600" />
@@ -404,7 +399,7 @@ export function CompanyProfile() {
                       placeholder="예: AI 기반 고객 관리 솔루션, B2B SaaS 플랫폼"
                       value={profile.mainProducts || ""}
                       onChange={(e) => setProfile({ ...profile, mainProducts: e.target.value })}
-                      className="bg-white"
+                      className="bg-white rounded-xl"
                     />
                   </div>
                 )}
@@ -417,7 +412,7 @@ export function CompanyProfile() {
                       placeholder="예: 국내 20-30대 직장인, 중소기업 마케팅 담당자"
                       value={profile.targetMarket || ""}
                       onChange={(e) => setProfile({ ...profile, targetMarket: e.target.value })}
-                      className="bg-white"
+                      className="bg-white rounded-xl"
                     />
                   </div>
                 )}
@@ -430,7 +425,7 @@ export function CompanyProfile() {
                       placeholder="예: A사, B사 등 주요 경쟁사 및 시장 포지션"
                       value={profile.competitorInfo || ""}
                       onChange={(e) => setProfile({ ...profile, competitorInfo: e.target.value })}
-                      className="bg-white"
+                      className="bg-white rounded-xl"
                     />
                   </div>
                 )}
@@ -443,7 +438,7 @@ export function CompanyProfile() {
                       placeholder="예: 서비스 이용 약관, B2B 계약서, 협력사 계약 등"
                       value={profile.standardContracts || ""}
                       onChange={(e) => setProfile({ ...profile, standardContracts: e.target.value })}
-                      className="bg-white"
+                      className="bg-white rounded-xl"
                     />
                   </div>
                 )}
@@ -456,7 +451,7 @@ export function CompanyProfile() {
                       placeholder="예: 투자사, 전략적 파트너십, 주요 공급업체"
                       value={profile.keyPartners || ""}
                       onChange={(e) => setProfile({ ...profile, keyPartners: e.target.value })}
-                      className="bg-white"
+                      className="bg-white rounded-xl"
                     />
                   </div>
                 )}
@@ -469,7 +464,7 @@ export function CompanyProfile() {
                       placeholder="예: 개인정보보호법, 의료기기법, ISO 인증 등"
                       value={profile.regulatoryRequirements || ""}
                       onChange={(e) => setProfile({ ...profile, regulatoryRequirements: e.target.value })}
-                      className="bg-white"
+                      className="bg-white rounded-xl"
                     />
                   </div>
                 )}
@@ -482,7 +477,7 @@ export function CompanyProfile() {
                       placeholder="예: 홍길동 이사 (ir@example.com)"
                       value={profile.irContact || ""}
                       onChange={(e) => setProfile({ ...profile, irContact: e.target.value })}
-                      className="bg-white"
+                      className="bg-white h-11 rounded-xl"
                     />
                   </div>
                 )}
@@ -495,7 +490,7 @@ export function CompanyProfile() {
                       placeholder="예: 최근 투자 유치, 제품 출시, 수상 이력 등"
                       value={profile.prHistory || ""}
                       onChange={(e) => setProfile({ ...profile, prHistory: e.target.value })}
-                      className="bg-white"
+                      className="bg-white rounded-xl"
                     />
                   </div>
                 )}
@@ -508,7 +503,7 @@ export function CompanyProfile() {
                       placeholder="예: 주주, 직원, 고객, 지역사회 등"
                       value={profile.stakeholders || ""}
                       onChange={(e) => setProfile({ ...profile, stakeholders: e.target.value })}
-                      className="bg-white"
+                      className="bg-white rounded-xl"
                     />
                   </div>
                 )}
@@ -516,8 +511,7 @@ export function CompanyProfile() {
             </Card>
           )}
 
-          {/* Notice */}
-          <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
             <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
             <div className="text-sm text-amber-900">
               <p className="font-medium mb-1">프로필 활용 안내</p>
@@ -529,7 +523,6 @@ export function CompanyProfile() {
             </div>
           </div>
 
-          {/* Submit Button */}
           <div className="flex justify-end gap-3 pt-4">
             <Button
               type="button"
@@ -540,7 +533,7 @@ export function CompanyProfile() {
             </Button>
             <Button
               type="submit"
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
               disabled={isSaving}
             >
               {isSaving ? "저장 중..." : "프로필 저장"}

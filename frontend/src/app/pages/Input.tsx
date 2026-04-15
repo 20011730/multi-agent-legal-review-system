@@ -88,42 +88,39 @@ export function InputPage() {
     formData.participationMode;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)]">
+      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <button 
+          <button
             onClick={() => navigate('/')}
             className="flex items-center gap-3 hover:opacity-70 transition-opacity"
           >
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
               <Scale className="w-6 h-6 text-white" />
             </div>
             <div className="text-left">
-              <h1 className="font-semibold text-gray-900">LegalReview AI</h1>
-              <p className="text-xs text-gray-500">Multi-Agent Legal Compliance System</p>
+              <h1 className="font-semibold text-slate-900">LexRex AI</h1>
+              <p className="text-xs text-slate-500">Multi-Agent Legal Compliance System</p>
             </div>
           </button>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-5xl mx-auto px-6 py-12">
         <div className="mb-8">
           <button
             onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
+            className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
             뒤로 가기
           </button>
-          <h2 className="text-3xl font-semibold text-gray-900 mb-2">검토 정보 입력</h2>
-          <p className="text-gray-600">검토가 필요한 문서 또는 의사결정 내용을 입력해주세요</p>
+          <h2 className="text-3xl font-semibold text-slate-900 tracking-tight mb-2">검토 정보 입력</h2>
+          <p className="text-slate-600">검토가 필요한 문서 또는 의사결정 내용을 입력해주세요</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Company Information Card */}
-          <Card className="border-gray-200">
+          <Card className="border-slate-200/80 bg-white/95 shadow-sm">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-blue-600" />
@@ -141,7 +138,7 @@ export function InputPage() {
                   placeholder="예: (주)테크이노베이션"
                   value={formData.companyName}
                   onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-                  className="bg-white"
+                  className="bg-white h-11 rounded-xl"
                 />
               </div>
 
@@ -152,7 +149,7 @@ export function InputPage() {
                     value={formData.industry}
                     onValueChange={(value) => setFormData({ ...formData, industry: value })}
                   >
-                    <SelectTrigger id="industry" className="bg-white">
+                    <SelectTrigger id="industry" className="bg-white h-11 rounded-xl">
                       <SelectValue placeholder="선택해주세요" />
                     </SelectTrigger>
                     <SelectContent>
@@ -174,7 +171,7 @@ export function InputPage() {
                     value={formData.reviewType}
                     onValueChange={(value) => setFormData({ ...formData, reviewType: value })}
                   >
-                    <SelectTrigger id="reviewType" className="bg-white">
+                    <SelectTrigger id="reviewType" className="bg-white h-11 rounded-xl">
                       <SelectValue placeholder="선택해주세요" />
                     </SelectTrigger>
                     <SelectContent>
@@ -191,8 +188,7 @@ export function InputPage() {
             </CardContent>
           </Card>
 
-          {/* Review Content Card */}
-          <Card className="border-gray-200">
+          <Card className="border-slate-200/80 bg-white/95 shadow-sm">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-blue-600" />
@@ -210,7 +206,7 @@ export function InputPage() {
                   placeholder="예: 신제품 출시 관련 마케팅 캠페인을 준비 중입니다. 타겟 고객은 20-30대이며, SNS를 통해 바이럴 마케팅을 진행할 예정입니다. 경쟁사 제품과의 비교 우위를 강조하고자 합니다."
                   value={formData.situation}
                   onChange={(e) => setFormData({ ...formData, situation: e.target.value })}
-                  className="min-h-[120px] bg-white"
+                  className="min-h-[120px] bg-white rounded-xl"
                 />
                 <p className="text-xs text-gray-500">
                   배경, 목적, 대상 독자, 예상 영향 등을 포함하여 작성해주세요
@@ -224,7 +220,7 @@ export function InputPage() {
                   placeholder="예: '업계 1위 제품보다 2배 빠른 성능! 타사 제품은 이제 구시대 유물입니다. 지금 구매하시면 특별 할인 50% + 추가 사은품 증정! 한정 수량이므로 서둘러 주문하세요. 이 기회를 놓치면 후회합니다!'"
                   value={formData.content}
                   onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                  className="min-h-[200px] bg-white font-mono text-sm"
+                  className="min-h-[200px] bg-white rounded-xl font-mono text-sm"
                 />
                 <p className="text-xs text-gray-500">
                   검토가 필요한 문서, 문구, 정책 내용을 정확히 입력해주세요
@@ -233,8 +229,7 @@ export function InputPage() {
             </CardContent>
           </Card>
 
-          {/* Participation Mode Card */}
-          <Card className="border-gray-200">
+          <Card className="border-slate-200/80 bg-white/95 shadow-sm">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <MessageSquare className="w-5 h-5 text-blue-600" />
@@ -283,8 +278,7 @@ export function InputPage() {
             </CardContent>
           </Card>
 
-          {/* Notice */}
-          <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
             <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
             <div className="text-sm text-amber-900">
               <p className="font-medium mb-1">검토 전 유의사항</p>
@@ -296,7 +290,6 @@ export function InputPage() {
             </div>
           </div>
 
-          {/* Submit Button */}
           <div className="flex justify-end gap-3 pt-4">
             <Button
               type="button"
@@ -308,7 +301,7 @@ export function InputPage() {
             <Button
               type="submit"
               disabled={!isFormValid}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
             >
               검토 시작
               <ArrowRight className="ml-2 w-4 h-4" />

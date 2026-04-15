@@ -276,27 +276,29 @@ export function Result() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_45%,_#f8fafc_100%)]">
+      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
+          <button
+            onClick={() => navigate("/")}
+            className="flex items-center gap-3 text-left hover:opacity-80 transition-opacity"
+          >
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
               <Scale className="w-6 h-6 text-white" />
             </div>
             <div>
               <h1 className="font-semibold text-gray-900">
-                LegalReview AI
+                LexRex AI
               </h1>
               <p className="text-xs text-gray-500">
                 Multi-Agent Legal Compliance System
               </p>
             </div>
-          </div>
+          </button>
           {isComplete && (
             <Button
               onClick={() => navigate("/verdict")}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
             >
               최종 판정 보기
               <ArrowRight className="ml-2 w-4 h-4" />
@@ -305,15 +307,14 @@ export function Result() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-6xl mx-auto px-6 py-12">
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-3xl font-semibold text-gray-900 mb-2">
+              <h2 className="text-3xl font-semibold text-slate-900 tracking-tight mb-2">
                 에이전트 토의 진행중
               </h2>
-              <p className="text-gray-600">
+              <p className="text-slate-600">
                 {participationMode === "participate"
                   ? "다수의 AI 에이전트가 검토를 진행하고 있습니다. 각 라운드 후 의견을 추가할 수 있습니다."
                   : "다수의 AI 에이전트가 다각도로 검토를 진행하고 있습니다"}
@@ -325,11 +326,10 @@ export function Result() {
           </div>
         </div>
 
-        {/* Progress */}
-        <Card className="border-gray-200 mb-8">
+        <Card className="border-slate-200/80 bg-white/95 shadow-sm mb-8">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-medium text-gray-700">
+                <span className="text-sm font-medium text-slate-700">
                 검토 진행률
               </span>
               <span className="text-sm font-medium text-blue-600">
@@ -338,7 +338,7 @@ export function Result() {
             </div>
             <Progress value={progress} className="h-2" />
             {!isComplete && !waitingForUserInput && (
-              <div className="flex items-center gap-2 mt-4 text-sm text-gray-600">
+              <div className="flex items-center gap-2 mt-4 text-sm text-slate-600">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 <span>에이전트가 분석 중입니다...</span>
               </div>
@@ -346,7 +346,6 @@ export function Result() {
           </CardContent>
         </Card>
 
-        {/* Agents Overview */}
         <div className="grid md:grid-cols-3 gap-4 mb-8">
           {agents.map((agent) => {
             const Icon = agent.icon;
@@ -364,7 +363,7 @@ export function Result() {
                 className={`border-2 transition-all ${
                   isActive
                     ? `${agent.borderColor} shadow-lg scale-105`
-                    : "border-gray-200"
+                    : "border-slate-200"
                 }`}
               >
                 <CardHeader className="pb-3">
@@ -380,14 +379,14 @@ export function Result() {
                       <CardTitle className="text-base">
                         {agent.name}
                       </CardTitle>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-slate-500">
                         {agent.role}
                       </p>
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-sm text-gray-600">
+                  <div className="text-sm text-slate-600">
                     <span className="font-medium">
                       {agentMessages.length}
                     </span>
@@ -399,8 +398,7 @@ export function Result() {
           })}
         </div>
 
-        {/* Discussion Timeline */}
-        <Card className="border-gray-200">
+        <Card className="border-slate-200/80 bg-white/95 shadow-sm">
           <CardHeader>
             <CardTitle>토의 로그</CardTitle>
           </CardHeader>
@@ -412,7 +410,7 @@ export function Result() {
                   return (
                     <div
                       key={index}
-                      className="flex gap-4 p-4 rounded-lg border-l-4 border-purple-200 bg-purple-50 animate-in fade-in slide-in-from-bottom-4"
+                      className="flex gap-4 p-4 rounded-xl border-l-4 border-purple-200 bg-purple-50 animate-in fade-in slide-in-from-bottom-4"
                     >
                       <div className="w-10 h-10 bg-purple-100 border border-purple-200 rounded-lg flex items-center justify-center flex-shrink-0">
                         <User className="w-5 h-5 text-purple-700" />
@@ -423,11 +421,11 @@ export function Result() {
                             사용자 의견
                           </span>
                           {getTypeBadge(message.type)}
-                          <span className="text-xs text-gray-500">
+                        <span className="text-xs text-slate-500">
                             라운드 {message.round} 종료 후
                           </span>
                         </div>
-                        <p className="text-sm text-gray-700 leading-relaxed">
+                        <p className="text-sm text-slate-700 leading-relaxed">
                           {message.content}
                         </p>
                       </div>
@@ -442,7 +440,7 @@ export function Result() {
                 return (
                   <div
                     key={index}
-                    className={`flex gap-4 p-4 rounded-lg border-l-4 ${agent.borderColor} ${agent.bgColor} animate-in fade-in slide-in-from-bottom-4`}
+                    className={`flex gap-4 p-4 rounded-xl border-l-4 ${agent.borderColor} ${agent.bgColor} animate-in fade-in slide-in-from-bottom-4`}
                   >
                     <div
                       className={`w-10 h-10 ${agent.bgColor} border ${agent.borderColor} rounded-lg flex items-center justify-center flex-shrink-0`}
@@ -459,11 +457,11 @@ export function Result() {
                           {agent.name}
                         </span>
                         {getTypeBadge(message.type)}
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-slate-500">
                           라운드 {message.round}
                         </span>
                       </div>
-                      <p className="text-sm text-gray-700 leading-relaxed">
+                      <p className="text-sm text-slate-700 leading-relaxed">
                         {message.content}
                       </p>
                     </div>
@@ -472,9 +470,8 @@ export function Result() {
               })}
             </div>
 
-            {/* User Input Section */}
             {waitingForUserInput && (
-              <div className="mt-6 p-6 bg-purple-50 border-2 border-purple-200 rounded-lg animate-in fade-in">
+              <div className="mt-6 p-6 bg-purple-50 border-2 border-purple-200 rounded-xl animate-in fade-in">
                 <div className="flex items-center gap-2 mb-4">
                   <MessageSquare className="w-5 h-5 text-purple-600" />
                   <h4 className="font-semibold text-gray-900">
@@ -491,12 +488,12 @@ export function Result() {
                   placeholder="예: '2배 빠른 성능'은 당사의 내부 벤치마크 테스트 결과입니다. 제3자 검증은 비용 문제로 진행하지 못했는데, 이 경우에도 문제가 될까요?"
                   value={userInput}
                   onChange={(e) => setUserInput(e.target.value)}
-                  className="min-h-[100px] bg-white mb-4"
+                  className="min-h-[100px] bg-white rounded-xl mb-4"
                 />
                 <div className="flex gap-3">
                   <Button
                     onClick={handleUserSubmit}
-                    className="bg-purple-600 hover:bg-purple-700 text-white"
+                    className="bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 text-white"
                     disabled={!userInput.trim()}
                   >
                     <Send className="mr-2 w-4 h-4" />
@@ -515,14 +512,14 @@ export function Result() {
             {!isComplete &&
               !waitingForUserInput &&
               messages.length > 0 && (
-                <div className="flex items-center gap-2 mt-6 text-sm text-gray-500">
+                <div className="flex items-center gap-2 mt-6 text-sm text-slate-500">
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span>다음 에이전트 응답 대기중...</span>
                 </div>
               )}
 
             {isComplete && (
-              <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-xl">
                 <div className="flex items-center gap-2 text-green-800">
                   <CheckCircle className="w-5 h-5" />
                   <span className="font-medium">
