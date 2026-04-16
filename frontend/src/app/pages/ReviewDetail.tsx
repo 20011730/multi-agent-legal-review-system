@@ -132,19 +132,24 @@ export function ReviewDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-        <span className="ml-3 text-gray-500">불러오는 중...</span>
+      <div className="min-h-screen bg-[#F2F2F2] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-[#1E3A8A] animate-spin" />
+        <span className="ml-3 text-slate-500">불러오는 중...</span>
       </div>
     );
   }
 
   if (error || !detail) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[#F2F2F2] flex items-center justify-center">
         <div className="text-center">
           <p className="text-red-600 mb-4">{error || "데이터를 찾을 수 없습니다"}</p>
-          <Button onClick={() => navigate("/reviews")}>목록으로</Button>
+          <Button
+            onClick={() => navigate("/reviews")}
+            className="rounded-full bg-[#1E3A8A] hover:bg-[#1E293B] text-white"
+          >
+            목록으로
+          </Button>
         </div>
       </div>
     );
@@ -162,37 +167,41 @@ export function ReviewDetailPage() {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-[#F2F2F2] text-slate-900 flex flex-col">
+      <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#F2F2F2]/94 backdrop-blur-md shadow-sm">
+        <div className="max-w-7xl mx-auto px-5 md:px-7 flex items-center justify-between h-[74px]">
           <button
             onClick={() => navigate("/")}
-            className="flex items-center gap-3 hover:opacity-70 transition-opacity"
+            className="min-w-[220px] text-left py-1"
           >
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
-              <Scale className="w-6 h-6 text-white" />
-            </div>
-            <div className="text-left">
-              <h1 className="font-semibold text-gray-900">LegalReview AI</h1>
-              <p className="text-xs text-gray-500">Multi-Agent Legal Compliance System</p>
-            </div>
+            <h1 className="font-menu leading-[1.02] text-[25px] text-[#1E3A8A]">LexRex AI</h1>
+            <p className="text-[11px] leading-[1.3] tracking-[-0.01em] text-[#64748B] mt-[3px] max-h-5">
+              Multi-Agent Legal Compliance System
+            </p>
           </button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 rounded-full border border-transparent bg-transparent px-4 text-[#4B5563] hover:bg-[#1E3A8A] hover:text-white hover:border-[#1E3A8A] transition-all duration-300 hover:shadow-[0_8px_18px_rgba(30,58,138,0.22)]"
+            onClick={() => navigate("/reviews")}
+          >
+            히스토리
+          </Button>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-12">
+      <main className="flex-1 max-w-[1240px] w-full mx-auto px-5 md:px-6 py-12 md:py-14">
         {/* Back + title */}
         <div className="mb-8">
           <button
             onClick={() => navigate("/reviews")}
-            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
+            className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
             검토 기록으로 돌아가기
           </button>
           <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-3xl font-semibold text-gray-900">
+            <h2 className="text-3xl font-semibold text-slate-900 tracking-tight">
               검토 상세
             </h2>
             {vc && VerdictIcon && (
@@ -204,8 +213,7 @@ export function ReviewDetailPage() {
           </div>
         </div>
 
-        {/* Session info */}
-        <Card className="border-gray-200 mb-6">
+        <Card className="border-slate-200 bg-white shadow-sm rounded-3xl mb-6 overflow-hidden">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
@@ -215,18 +223,18 @@ export function ReviewDetailPage() {
           <CardContent>
             <div className="grid md:grid-cols-3 gap-4 mb-4">
               <div>
-                <p className="text-xs text-gray-500">기업명</p>
-                <p className="font-medium text-gray-900">{detail.companyName}</p>
+                <p className="text-xs text-slate-500">기업명</p>
+                <p className="font-medium text-slate-900">{detail.companyName}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500">검토 유형</p>
-                <p className="font-medium text-gray-900">
+                <p className="text-xs text-slate-500">검토 유형</p>
+                <p className="font-medium text-slate-900">
                   {reviewTypeLabels[detail.reviewType] || detail.reviewType}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-gray-500">요청 일시</p>
-                <p className="font-medium text-gray-900">
+                <p className="text-xs text-slate-500">요청 일시</p>
+                <p className="font-medium text-slate-900">
                   {new Date(detail.createdAt).toLocaleDateString("ko-KR", {
                     year: "numeric", month: "long", day: "numeric",
                     hour: "2-digit", minute: "2-digit",
@@ -235,41 +243,47 @@ export function ReviewDetailPage() {
               </div>
             </div>
             <div className="mb-4">
-              <p className="text-xs text-gray-500 mb-1">상황 설명</p>
-              <p className="text-sm text-gray-700">{detail.situation}</p>
+              <p className="text-xs text-slate-500 mb-1">상황 설명</p>
+              <p className="text-sm text-slate-700">{detail.situation}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-500 mb-1">검토 원문</p>
-              <div className="p-3 bg-gray-50 rounded-lg border">
-                <p className="text-sm text-gray-800 whitespace-pre-wrap">{detail.content}</p>
+              <p className="text-xs text-slate-500 mb-1">검토 원문</p>
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <p className="text-sm text-slate-800 whitespace-pre-wrap">{detail.content}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Tab buttons */}
         <div className="flex gap-2 mb-6">
           <Button
             variant={activeTab === "debate" ? "default" : "outline"}
             onClick={() => setActiveTab("debate")}
-            className={activeTab === "debate" ? "bg-blue-600 text-white" : ""}
+            className={
+              activeTab === "debate"
+                ? "rounded-full bg-[#1E3A8A] hover:bg-[#1E293B] text-white"
+                : "rounded-full border-[#64748B]/35 text-slate-700 hover:bg-white"
+            }
           >
             토론 내용
           </Button>
           <Button
             variant={activeTab === "verdict" ? "default" : "outline"}
             onClick={() => setActiveTab("verdict")}
-            className={activeTab === "verdict" ? "bg-blue-600 text-white" : ""}
+            className={
+              activeTab === "verdict"
+                ? "rounded-full bg-[#1E3A8A] hover:bg-[#1E293B] text-white"
+                : "rounded-full border-[#64748B]/35 text-slate-700 hover:bg-white"
+            }
           >
             최종 판정
           </Button>
         </div>
 
-        {/* Debate tab */}
         {activeTab === "debate" && (
           <div className="space-y-6">
             {Object.entries(rounds).map(([roundNum, msgs]) => (
-              <Card key={roundNum} className="border-gray-200">
+              <Card key={roundNum} className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
                 <CardHeader>
                   <CardTitle className="text-lg">
                     라운드 {roundNum}
@@ -280,7 +294,7 @@ export function ReviewDetailPage() {
                     const ac = agentConfig[msg.agentId] || agentConfig.legal;
                     const AgentIcon = ac.icon;
                     return (
-                      <div key={idx} className={`p-4 rounded-lg border ${ac.bg}`}>
+                      <div key={idx} className={`p-4 rounded-xl border ${ac.bg}`}>
                         <div className="flex items-center gap-2 mb-2">
                           <AgentIcon className={`w-4 h-4 ${ac.color}`} />
                           <span className={`font-medium text-sm ${ac.color}`}>
@@ -290,9 +304,9 @@ export function ReviewDetailPage() {
                             {msg.stance}
                           </Badge>
                         </div>
-                        <p className="text-sm text-gray-800 mb-2">{msg.content}</p>
+                        <p className="text-sm text-slate-800 mb-2">{msg.content}</p>
                         {msg.evidenceSummary && (
-                          <p className="text-xs text-gray-500">
+                          <p className="text-xs text-slate-500">
                             근거: {msg.evidenceSummary}
                           </p>
                         )}
@@ -305,11 +319,9 @@ export function ReviewDetailPage() {
           </div>
         )}
 
-        {/* Verdict tab */}
         {activeTab === "verdict" && fd && (
           <div className="space-y-6">
-            {/* Summary */}
-            <Card className="border-gray-200">
+            <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
               <CardHeader>
                 <CardTitle>판정 요약</CardTitle>
               </CardHeader>
@@ -331,13 +343,12 @@ export function ReviewDetailPage() {
                     위험도: {fd.riskLevel}
                   </Badge>
                 </div>
-                <p className="text-gray-700">{fd.summary}</p>
+                <p className="text-slate-700">{fd.summary}</p>
               </CardContent>
             </Card>
 
-            {/* Risks */}
             {fd.risks.length > 0 && (
-              <Card className="border-gray-200">
+              <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
                 <CardHeader>
                   <CardTitle>위험 요소</CardTitle>
                 </CardHeader>
@@ -346,15 +357,15 @@ export function ReviewDetailPage() {
                     {fd.risks.map((risk, idx) => {
                       const RiskIcon = riskLevelIcon[risk.level?.toUpperCase()] || Minus;
                       return (
-                        <div key={idx} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                        <div key={idx} className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl">
                           <RiskIcon className={`w-5 h-5 mt-0.5 ${
                             risk.level === "high" ? "text-red-600" :
                             risk.level === "medium" ? "text-amber-600" :
                             "text-green-600"
                           }`} />
                           <div>
-                            <p className="font-medium text-sm text-gray-900">{risk.category}</p>
-                            <p className="text-sm text-gray-600">{risk.description}</p>
+                            <p className="font-medium text-sm text-slate-900">{risk.category}</p>
+                            <p className="text-sm text-slate-600">{risk.description}</p>
                           </div>
                         </div>
                       );
@@ -364,19 +375,18 @@ export function ReviewDetailPage() {
               </Card>
             )}
 
-            {/* Recommendation */}
-            <Card className="border-gray-200">
+            <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
               <CardHeader>
                 <CardTitle>권고사항</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-gray-700 mb-4">{fd.recommendation}</p>
+                <p className="text-slate-700 mb-4">{fd.recommendation}</p>
                 {fd.revisedContent && (
                   <>
                     <Separator className="my-4" />
                     <div>
-                      <p className="text-sm font-medium text-gray-900 mb-2">수정 제안 문구</p>
-                      <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <p className="text-sm font-medium text-slate-900 mb-2">수정 제안 문구</p>
+                      <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
                         <p className="text-sm text-green-900 whitespace-pre-wrap">{fd.revisedContent}</p>
                       </div>
                     </div>
@@ -390,7 +400,6 @@ export function ReviewDetailPage() {
               <EvidenceCardList evidences={detail.evidences} />
             )}
 
-            {/* Actions */}
             <div className="flex justify-center gap-3">
               <Button
                 variant="outline"
@@ -400,7 +409,7 @@ export function ReviewDetailPage() {
               </Button>
               <Button
                 onClick={() => navigate("/input")}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="rounded-full bg-[#1E3A8A] hover:bg-[#1E293B] text-white"
               >
                 새 검토 시작
               </Button>
@@ -408,6 +417,13 @@ export function ReviewDetailPage() {
           </div>
         )}
       </main>
+      <footer className="border-t border-[#64748B]/25 bg-[#F2F2F2] mt-auto">
+        <div className="max-w-7xl mx-auto px-6 py-8 text-center">
+          <p className="text-sm text-slate-500">
+            본 시스템은 의사결정 지원을 위한 참고 자료이며, 최종 판단은 실무 전문가와 법무팀의 검토가 필요합니다.
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }

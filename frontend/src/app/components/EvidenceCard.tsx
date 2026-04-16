@@ -16,6 +16,7 @@ import {
   ExternalLink,
   Scale,
   FileText,
+  Info,
   Tag,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -205,7 +206,27 @@ export function EvidenceCardList({
   evidences: EvidenceItem[];
   className?: string;
 }) {
-  if (!evidences || evidences.length === 0) return null;
+  if (!evidences || evidences.length === 0) {
+    return (
+      <Card className={`border-gray-200 ${className}`}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-indigo-600" />
+            법령·판례 근거
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-lg">
+            <Info className="w-5 h-5 text-gray-400 mt-0.5 shrink-0" />
+            <div className="text-sm text-gray-500">
+              <p>이 검토 건에 대한 법령/판례 근거가 수집되지 않았습니다.</p>
+              <p className="mt-1 text-gray-400">법제처 API 키가 미설정이거나, 관련 검색 결과가 없는 경우 이 메시지가 표시됩니다.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className={`border-gray-200 ${className}`}>

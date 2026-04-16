@@ -4,11 +4,14 @@ import com.legalreview.dto.request.SessionCreateRequest;
 import com.legalreview.dto.response.DebateResultResponse;
 import com.legalreview.dto.response.SessionCreateResponse;
 import com.legalreview.dto.response.SessionStatusResponse;
+import com.legalreview.service.OllamaClient;
 import com.legalreview.service.SessionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/sessions")
@@ -16,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 public class SessionController {
 
     private final SessionService sessionService;
+    private final OllamaClient ollamaClient;
 
     /**
      * 세션 생성 API
@@ -50,5 +54,18 @@ public class SessionController {
             @PathVariable Long sessionId) {
         DebateResultResponse response = sessionService.getLatestDebateResult(sessionId);
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Ollama 연결 테스트 (개발용)
+     * GET /api/sessions/ollama/health
+     */
+    @GetMapping("/ollama/health")
+    public ResponseEntity<Map<String, Object>> ollamaHealth() {
+        boolean available = ollamaClient.isAvailable();
+        return ResponseEntity.ok(Map.of(
+                "ollamaAvailable", available,
+                "message", available ? "Ollama 서버 연결 성공" : "Ollama 서버 연결 실패"
+        ));
     }
 }

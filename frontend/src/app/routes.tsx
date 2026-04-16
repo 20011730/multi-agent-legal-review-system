@@ -1,5 +1,5 @@
 import { createBrowserRouter } from "react-router";
-import { Home } from "./pages/Home";
+import { HomeLanding } from "./pages/HomeLanding";
 import { InputPage } from "./pages/Input";
 import { Result } from "./pages/Result";
 import { Verdict } from "./pages/Verdict";
@@ -8,12 +8,42 @@ import { Signup } from "./pages/Signup";
 import { CompanyProfile } from "./pages/CompanyProfile";
 import { ReviewHistory } from "./pages/ReviewHistory";
 import { ReviewDetailPage } from "./pages/ReviewDetail";
+import { ServiceAbout } from "./pages/ServiceAbout";
+import { ServiceDomains } from "./pages/ServiceDomains";
+import { ServiceTechnology } from "./pages/ServiceTechnology";
+import { ServiceTrust } from "./pages/ServiceTrust";
+import { ServiceHowTo } from "./pages/ServiceHowTo";
+import { ServiceContact } from "./pages/ServiceContact";
 import { RequireAuth, RedirectIfAuth } from "./components/AuthGuard";
 
 export const router = createBrowserRouter([
   {
     path: "/",
-    element: <Home />,
+    element: <HomeLanding />,
+  },
+  {
+    path: "/about",
+    element: <ServiceAbout />,
+  },
+  {
+    path: "/domains",
+    element: <ServiceDomains />,
+  },
+  {
+    path: "/technology",
+    element: <ServiceTechnology />,
+  },
+  {
+    path: "/trust",
+    element: <ServiceTrust />,
+  },
+  {
+    path: "/how-to",
+    element: <ServiceHowTo />,
+  },
+  {
+    path: "/contact",
+    element: <ServiceContact />,
   },
   {
     path: "/login",

@@ -27,7 +27,13 @@ logging:
 
 app:
   ai:
+    # engine: python → 기존 Python FastAPI 호출, ollama → 로컬 Ollama 직접 호출
+    engine: ${AI_ENGINE:python}
     base-url: ${AI_SERVER_URL:http://localhost:8001}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      model: ${OLLAMA_MODEL:glm-4.7-flash:q4_K_M}
+      timeout-seconds: ${OLLAMA_TIMEOUT:300}
   law-api:
     base-url: https://www.law.go.kr/DRF/lawSearch.do
     oc: ${LAW_API_OC:}

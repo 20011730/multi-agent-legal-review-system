@@ -1,4 +1,4 @@
-# LegalReview AI - 디자인 시스템 가이드
+# LexRex AI - 디자인 시스템 가이드
 
 ## 디자인 키워드
 
