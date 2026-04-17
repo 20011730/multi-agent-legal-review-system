@@ -59,7 +59,7 @@ export function MarketingLayout({ title, description, children }: MarketingLayou
   };
 
   return (
-    <div className="relative isolate min-h-screen bg-[#F2F2F2] text-slate-900">
+    <div className="relative isolate min-h-screen bg-[#ffffffff] text-slate-900">
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(30,58,138,0.14),transparent_36%),radial-gradient(circle_at_84%_80%,rgba(51,65,85,0.12),transparent_40%)]" />
         <div className="absolute -top-[16vh] -left-[10vw] h-[46vh] w-[46vh] rounded-full bg-[#1E3A8A]/12 blur-3xl animate-pulse" />
@@ -136,7 +136,7 @@ export function MarketingLayout({ title, description, children }: MarketingLayou
         {children}
       </main>
 
-      <footer className="border-t border-[#64748B]/25 bg-[#F2F2F2] mt-16">
+      <footer className="border-t border-[#64748B]/25 bg-[#ffffffff] mt-16">
         <div className="max-w-7xl mx-auto px-6 py-8 text-center">
           <p className="text-sm text-slate-500">
             본 시스템은 의사결정 지원을 위한 참고 자료이며, 최종 판단은 실무 전문가와 법무팀의 검토가 필요합니다.

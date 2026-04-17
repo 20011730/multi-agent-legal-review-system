@@ -133,7 +133,7 @@ export function ReviewDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#F2F2F2] flex items-center justify-center">
+      <div className="min-h-screen bg-[#ffffffff] flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-[#1E3A8A] animate-spin" />
         <span className="ml-3 text-slate-500">불러오는 중...</span>
       </div>
@@ -142,7 +142,7 @@ export function ReviewDetailPage() {
 
   if (error || !detail) {
     return (
-      <div className="min-h-screen bg-[#F2F2F2] flex items-center justify-center">
+      <div className="min-h-screen bg-[#ffffffff] flex items-center justify-center">
         <div className="text-center">
           <p className="text-red-600 mb-4">{error || "데이터를 찾을 수 없습니다"}</p>
           <Button
@@ -168,8 +168,8 @@ export function ReviewDetailPage() {
   });
 
   return (
-    <div className="min-h-screen bg-[#F2F2F2] text-slate-900 flex flex-col">
-      <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#F2F2F2]/94 backdrop-blur-md shadow-sm">
+    <div className="min-h-screen bg-[#ffffffff] text-slate-900 flex flex-col">
+      <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#ffffffff]/94 backdrop-blur-md shadow-sm">
         <div className="max-w-7xl mx-auto px-5 md:px-7 flex items-center justify-between h-[74px]">
           <button
             onClick={() => navigate("/")}
@@ -477,7 +477,7 @@ export function ReviewDetailPage() {
           </div>
         )}
       </main>
-      <footer className="border-t border-[#64748B]/25 bg-[#F2F2F2] mt-auto">
+      <footer className="border-t border-[#64748B]/25 bg-[#ffffffff] mt-auto">
         <div className="max-w-7xl mx-auto px-6 py-8 text-center">
           <p className="text-sm text-slate-500">
             본 시스템은 의사결정 지원을 위한 참고 자료이며, 최종 판단은 실무 전문가와 법무팀의 검토가 필요합니다.

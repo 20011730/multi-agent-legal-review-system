@@ -81,7 +81,7 @@ export function Signup() {
     "pl-10 h-11 rounded-xl border border-[#64748B]/35 bg-white text-sm text-slate-700 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-[#1E3A8A]/20 focus-visible:border-[#1E3A8A]";
 
   const header = (
-    <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#F2F2F2]/94 backdrop-blur-md shadow-sm">
+    <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#ffffffff]/94 backdrop-blur-md shadow-sm">
       <div className="max-w-7xl mx-auto px-5 md:px-7 flex items-center justify-between h-[74px]">
         <button
           type="button"
@@ -107,7 +107,7 @@ export function Signup() {
   );
 
   const footer = (
-    <footer className="border-t border-[#64748B]/25 bg-[#F2F2F2] mt-auto">
+    <footer className="border-t border-[#64748B]/25 bg-[#ffffffff] mt-auto">
       <div className="max-w-7xl mx-auto px-6 py-8 text-center">
         <p className="text-sm text-slate-500">
           본 시스템은 의사결정 지원을 위한 참고 자료이며, 최종 판단은 실무 전문가와 법무팀의 검토가 필요합니다.
@@ -118,7 +118,7 @@ export function Signup() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-[#F2F2F2] text-slate-900 flex flex-col">
+      <div className="min-h-screen bg-[#ffffffff] text-slate-900 flex flex-col">
         {header}
         <main className="flex-1 flex items-center justify-center px-5 py-14">
           <Card className="w-full max-w-md border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
@@ -139,7 +139,7 @@ export function Signup() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F2F2F2] text-slate-900 flex flex-col">
+    <div className="min-h-screen bg-[#ffffffff] text-slate-900 flex flex-col">
       {header}
 
       <main className="flex-1 max-w-[1240px] w-full mx-auto px-5 md:px-6 py-12 md:py-14">

@@ -1,5 +1,5 @@
 import { createBrowserRouter } from "react-router";
-import { HomeLanding } from "./pages/HomeLanding";
+import { Home } from "./pages/Home";
 import { InputPage } from "./pages/Input";
 import { Result } from "./pages/Result";
 import { Verdict } from "./pages/Verdict";
@@ -19,7 +19,7 @@ import { RequireAuth, RedirectIfAuth } from "./components/AuthGuard";
 export const router = createBrowserRouter([
   {
     path: "/",
-    element: <HomeLanding />,
+    element: <Home />,
   },
   {
     path: "/about",

@@ -24,6 +24,11 @@ import {
 } from "lucide-react";
 
 export function Home() {
+  const valueVisuals = {
+    step1: "",
+    step2: "",
+    step3: "",
+  };
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isHeaderShrunk, setIsHeaderShrunk] = useState(false);
@@ -31,6 +36,10 @@ export function Home() {
   const [activeSection, setActiveSection] = useState("benefits");
   const [visibleSections, setVisibleSections] = useState<Record<string, boolean>>({
     benefits: false,
+    "value-intro-1": false,
+    "value-step-1": false,
+    "value-step-2": false,
+    "value-step-3": false,
     specifications: false,
     technology: false,
     trust: false,
@@ -118,14 +127,17 @@ export function Home() {
   }, []);
 
   useEffect(() => {
-    const ids = ["benefits", "specifications", "technology", "trust", "howto", "contact"];
+    const navSectionIds = ["benefits", "specifications", "technology", "trust", "howto", "contact"];
+    const ids = [...navSectionIds, "value-intro-1", "value-step-1", "value-step-2", "value-step-3"];
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           const sectionId = entry.target.id;
           if (!sectionId) return;
-          if (entry.isIntersecting) {
-            setVisibleSections((prev) => ({ ...prev, [sectionId]: true }));
+
+          setVisibleSections((prev) => ({ ...prev, [sectionId]: entry.isIntersecting }));
+
+          if (entry.isIntersecting && navSectionIds.includes(sectionId)) {
             setActiveSection(sectionId);
           }
         });
@@ -198,13 +210,13 @@ export function Home() {
     }`;
 
   return (
-    <div className="min-h-screen bg-[#F2F2F2] text-slate-900">
+    <div className="min-h-screen bg-[#ffffffff] text-slate-900">
       <div
         className={`pointer-events-none fixed inset-0 z-[60] bg-white transition-opacity duration-[1400ms] ease-out ${
           isIntroVisible ? "opacity-0" : "opacity-70"
         }`}
       />
-      <header className={`sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#F2F2F2]/94 backdrop-blur-md transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${isHeaderShrunk ? "shadow-sm" : ""}`}>
+      <header className={`sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#ffffffff]/94 backdrop-blur-md transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${isHeaderShrunk ? "shadow-sm" : ""}`}>
         <div className={`max-w-7xl mx-auto px-7 flex items-center justify-between transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${isHeaderShrunk ? "h-[62px]" : "h-[74px]"}`}>
           <button
             onClick={() => navigate("/")}
@@ -225,7 +237,7 @@ export function Home() {
                   : "text-[#1E293B] hover:text-black after:scale-x-0"
               }`}
             >
-              서비스 소개
+              가치 제안
             </button>
             <button
               onClick={() => scrollToSection("specifications")}
@@ -235,17 +247,17 @@ export function Home() {
                   : "text-[#1E293B] hover:text-black after:scale-x-0"
               }`}
             >
-              전문분야
+              핵심 기술
             </button>
             <button
-              onClick={() => scrollToSection("howto")}
+              onClick={() => scrollToSection("technology")}
               className={`relative pb-1 transition-colors after:absolute after:left-0 after:-bottom-[2px] after:h-[1.5px] after:w-full after:origin-left after:rounded-full after:bg-[#1E3A8A] after:transition-transform after:duration-300 after:ease-out ${
                 activeSection === "technology"
                   ? "text-[#1E3A8A] after:scale-x-100"
                   : "text-[#1E293B] hover:text-black after:scale-x-0"
               }`}
             >
-              핵심 기술
+              주요 기능
             </button>
             <button
               onClick={() => scrollToSection("trust")}
@@ -265,7 +277,7 @@ export function Home() {
                   : "text-[#1E293B] hover:text-black after:scale-x-0"
               }`}
             >
-              이용방법
+              클로징 CTA
             </button>
             <button
               onClick={() => scrollToSection("contact")}
@@ -275,7 +287,7 @@ export function Home() {
                   : "text-[#1E293B] hover:text-black after:scale-x-0"
               }`}
             >
-              문의하기
+              문의
             </button>
           </nav>
 
@@ -330,7 +342,7 @@ export function Home() {
       <main className="max-w-[1240px] mx-auto px-5 md:px-6 py-12 md:py-14">
         <section className="pt-8 md:pt-10 pb-14 md:pb-16">
           <p
-            className={`text-center text-2xl md:text-4xl font-semibold text-slate-600 mb-7 transition-all duration-[900ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            className={`text-center text-2xl md:text-4xl font-semibold text-[#1E3A8A] mb-7 md:whitespace-nowrap transition-all duration-[900ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
               isIntroVisible
                 ? "opacity-100 blur-0 translate-y-0"
                 : "opacity-0 blur-[6px] translate-y-2"
@@ -349,14 +361,14 @@ export function Home() {
             LexRex AI
           </h2>
           <p
-            className={`text-center text-lg md:text-2xl text-slate-500 max-w-5xl mx-auto mb-10 leading-relaxed transition-all duration-[1000ms] delay-100 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            className={`text-center text-lg md:text-2xl text-slate-500 max-w-6xl mx-auto mb-10 leading-relaxed transition-all duration-[1000ms] delay-100 ease-[cubic-bezier(0.22,1,0.36,1)] ${
               isIntroVisible
                 ? "opacity-100 blur-0 translate-y-0"
                 : "opacity-0 blur-[6px] translate-y-2"
             }`}
           >
-            <span className="block">신기술·신산업 현장에서 발생하는 복잡한 법률 이슈, 이제 비용 걱정 없이 AI 어시스턴트로 해결하세요.</span>
-            <span className="block mt-1">투자 계약부터 지식재산권 보호까지, 성장의 단계에서 신뢰할 수 있는 가이드를 제시합니다.</span>
+            <span className="block md:whitespace-nowrap">즉각적인 리스크 진단부터 실질적인 비즈니스 솔루션까지, 성장의 단계에서 신뢰할 수 있는 가이드를 제시합니다.</span>
+            <span className="block mt-1 md:whitespace-nowrap">데이터로 증명하고 근거로 답하는 LexRex AI로 안전한 내일을 설계하세요.</span>
           </p>
 
           <div
@@ -392,169 +404,187 @@ export function Home() {
             </div>
           </div>
         </section>
+        <div className="my-7 md:my-9 h-px w-[92%] mx-auto bg-gradient-to-r from-transparent via-[#64748B]/25 to-transparent" />
 
         <section id="benefits" className="scroll-mt-24 py-14 md:py-16">
           <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("benefits")}`}>
-            서비스 소개
+            Value
           </p>
-          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight mb-7 ${getRevealClass("benefits")}`}>
-            법무·사업·윤리 관점의 멀티 에이전트 토론 시스템
+          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight text-[#1E3A8A] mb-7 ${getRevealClass("benefits")}`}>
+            의사결정 전, 핵심 근거를 단계적으로 확인하세요.
           </h3>
           <p className={`text-lg text-slate-600 max-w-4xl leading-relaxed break-keep mb-8 ${getRevealClass("benefits")}`}>
-            LexRex AI는 단순 질의응답형 AI가 아닌, <strong>법무·사업·윤리</strong> 세 에이전트가 동일 사안을 토론하고
-            교차 검증하여 최적의 판정을 도출하는 <strong>멀티 에이전트 법률 자문 시스템</strong>입니다.
-            초기 기업이 겪는 법률 리스크와 고비용 자문 부담을 줄여 더 빠르고 안전한 의사결정을 지원합니다.
+            스크롤 흐름에 맞춰 LexRex의 핵심 가치와 데이터 기반 검토 역량을 먼저 확인한 뒤, 상세 기능 카드로 이어집니다.
+          </p>
+          <div id="value-intro-1" className={`rounded-3xl bg-white px-6 py-6 md:px-8 md:py-8 mb-4 ${getRevealClass("value-intro-1")}`}>
+            <h4 className="text-[24px] md:text-[30px] leading-tight font-semibold mb-3 text-[#1E3A8A]">
+              단일 답변의 한계를 넘은 입체적 통찰, LexRex 에이전트
+            </h4>
+            <p className="text-[17px] md:text-[20px] text-slate-600 leading-relaxed break-keep">
+              법령, 판례, 최신 규제 데이터베이스를 바탕으로 기업의 의사결정에 꼭 필요한 다각도의 검토 결과를 쉽고 빠르게 확인하세요.
+            </p>
+          </div>
+          <div className="space-y-8 md:space-y-14">
+            <div id="value-step-1" className="min-h-[68vh] md:min-h-[82vh] grid md:grid-cols-2 gap-6 md:gap-8 items-center">
+              <Card className={`h-full border-0 shadow-none bg-white ${getRevealClass("value-step-1")}`}>
+                <CardContent className="h-full p-7 md:p-10 flex flex-col justify-center">
+                  <div className="w-12 h-12 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-5">
+                    <Scale className="w-5 h-5 text-[#1E3A8A] stroke-[1.8]" />
+                  </div>
+                  <h4 className="text-[24px] md:text-[32px] leading-tight font-semibold mb-4 text-[#1E3A8A]">방대한 실시간 법률 데이터</h4>
+                  <p className="text-[17px] md:text-[21px] text-slate-600 leading-relaxed break-keep">국가법령정보센터 API와 실시간 동기화된 최신 판례 및 법령 데이터를 기반으로 양질의 리스크 진단을 제공합니다.</p>
+                </CardContent>
+              </Card>
+              <div className={`h-full min-h-[240px] md:min-h-[380px] rounded-3xl overflow-hidden border border-[#1E3A8A]/15 bg-[#F2F2F2] ${getRevealClass("value-step-1")}`}>
+                <div className="w-full h-full aspect-[16/10]">
+                  {valueVisuals.step1 ? (
+                    <img
+                      src={valueVisuals.step1}
+                      alt="방대한 실시간 법률 데이터 시각 자료"
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-[#1E3A8A]/65 text-sm md:text-base border-2 border-dashed border-[#1E3A8A]/30">
+                      서비스 이미지 영역
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div id="value-step-2" className="min-h-[68vh] md:min-h-[82vh] grid md:grid-cols-2 gap-6 md:gap-8 items-center">
+              <div className={`h-full min-h-[240px] md:min-h-[380px] rounded-3xl overflow-hidden border border-[#1E3A8A]/15 bg-[#F2F2F2] ${getRevealClass("value-step-2")}`}>
+                <div className="w-full h-full aspect-[16/10]">
+                  {valueVisuals.step2 ? (
+                    <img
+                      src={valueVisuals.step2}
+                      alt="신뢰할 수 있는 답변 출처 시각 자료"
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-[#1E3A8A]/65 text-sm md:text-base border-2 border-dashed border-[#1E3A8A]/30">
+                      서비스 이미지 영역
+                    </div>
+                  )}
+                </div>
+              </div>
+              <Card className={`h-full border-0 shadow-none bg-white ${getRevealClass("value-step-2")}`}>
+                <CardContent className="h-full p-7 md:p-10 flex flex-col justify-center">
+                  <div className="w-12 h-12 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-5">
+                    <FileCheck className="w-5 h-5 text-[#1E3A8A] stroke-[1.8]" />
+                  </div>
+                  <h4 className="text-[24px] md:text-[32px] leading-tight font-semibold mb-4 text-[#1E3A8A]">신뢰할 수 있는 답변 출처</h4>
+                  <p className="text-[17px] md:text-[21px] text-slate-600 leading-relaxed break-keep">모든 답변에 법령 조항과 판례 번호를 함께 제공해 정보의 투명성과 검증 가능성을 높입니다.</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div id="value-step-3" className="min-h-[68vh] md:min-h-[82vh] grid md:grid-cols-2 gap-6 md:gap-8 items-center">
+              <Card className={`h-full border-0 shadow-none bg-white ${getRevealClass("value-step-3")}`}>
+                <CardContent className="h-full p-7 md:p-10 flex flex-col justify-center">
+                  <div className="w-12 h-12 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-5">
+                    <BriefcaseBusiness className="w-5 h-5 text-[#1E3A8A] stroke-[1.8]" />
+                  </div>
+                  <h4 className="text-[24px] md:text-[32px] leading-tight font-semibold mb-4 text-[#1E3A8A]">맥락을 파악하는 리걸 리즈닝</h4>
+                  <p className="text-[17px] md:text-[21px] text-slate-600 leading-relaxed break-keep">스타트업 특화 Legal Reasoning이 창업가의 의도를 정밀하게 파악하고 상황 맞춤형 대응 시나리오를 제시합니다.</p>
+                </CardContent>
+              </Card>
+              <div className={`h-full min-h-[240px] md:min-h-[380px] rounded-3xl overflow-hidden border border-[#1E3A8A]/15 bg-[#F2F2F2] ${getRevealClass("value-step-3")}`}>
+                <div className="w-full h-full aspect-[16/10]">
+                  {valueVisuals.step3 ? (
+                    <img
+                      src={valueVisuals.step3}
+                      alt="맥락을 파악하는 리걸 리즈닝 시각 자료"
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-[#1E3A8A]/65 text-sm md:text-base border-2 border-dashed border-[#1E3A8A]/30">
+                      서비스 이미지 영역
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="specifications" className="scroll-mt-24 py-14 md:py-16">
+          <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("specifications")}`}>Core Tech</p>
+          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight text-[#1E3A8A] mb-7 ${getRevealClass("specifications")}`}>
+            범용 AI와 차별화된 도메인 특화 멀티 에이전트 시스템
+          </h3>
+          <p className={`text-lg text-slate-600 max-w-4xl leading-relaxed break-keep mb-8 ${getRevealClass("specifications")}`}>
+            단순 질의응답을 넘어 법무·사업·윤리 에이전트가 상호 논증하며 최적의 판정을 도출합니다.
           </p>
           <div className="grid md:grid-cols-3 gap-5 items-stretch">
-            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("benefits")}`} style={{ transitionDelay: "60ms" } as React.CSSProperties}>
-              <CardContent className="h-full pt-5 pb-5 flex flex-col">
-                <div className="w-11 h-11 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-4">
-                  <Scale className="w-5 h-5 text-[#1E3A8A] stroke-[1.8]" />
-                </div>
-                <h4 className="font-semibold mb-2">법무 에이전트</h4>
-                <p className="text-sm text-slate-600 break-keep">법령, 판례, 계약 조항 관점에서 법적 위험을 구조화합니다.</p>
+            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("specifications")}`} style={{ transitionDelay: "60ms" } as React.CSSProperties}>
+              <CardContent className="h-full pt-5 pb-5">
+                <h4 className="font-semibold mb-2 text-[#1E3A8A]">멀티 에이전트 토론 로직</h4>
+                <p className="text-sm text-slate-600 break-keep">세 명의 독립된 AI 에이전트가 동일 사안을 서로 다른 시각으로 검토해 편향과 환각 현상을 낮춥니다.</p>
               </CardContent>
             </Card>
-            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("benefits")}`} style={{ transitionDelay: "120ms" } as React.CSSProperties}>
-              <CardContent className="h-full pt-5 pb-5 flex flex-col">
-                <div className="w-11 h-11 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-4">
-                  <BriefcaseBusiness className="w-5 h-5 text-[#1E3A8A] stroke-[1.8]" />
-                </div>
-                <h4 className="font-semibold mb-2">사업 에이전트</h4>
-                <p className="text-sm text-slate-600 break-keep">비즈니스 실행성과 성장 전략 관점에서 현실적인 대안을 제시합니다.</p>
+            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("specifications")}`} style={{ transitionDelay: "120ms" } as React.CSSProperties}>
+              <CardContent className="h-full pt-5 pb-5">
+                <h4 className="font-semibold mb-2 text-[#1E3A8A]">중재 및 소수 의견 병기</h4>
+                <p className="text-sm text-slate-600 break-keep">의견 불일치 시 판정 에이전트가 중재안을 도출하고, 유의미한 반론은 소수 의견으로 남겨 객관성을 강화합니다.</p>
               </CardContent>
             </Card>
-            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("benefits")}`} style={{ transitionDelay: "180ms" } as React.CSSProperties}>
-              <CardContent className="h-full pt-5 pb-5 flex flex-col">
-                <div className="w-11 h-11 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-4">
-                  <FileCheck className="w-5 h-5 text-[#1E3A8A] stroke-[1.8]" />
-                </div>
-                <h4 className="font-semibold mb-2">윤리 에이전트</h4>
-                <p className="text-sm text-slate-600 break-keep">사회적 신뢰와 기업 평판 관점에서 커뮤니케이션 리스크를 보완합니다.</p>
+            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("specifications")}`} style={{ transitionDelay: "180ms" } as React.CSSProperties}>
+              <CardContent className="h-full pt-5 pb-5">
+                <h4 className="font-semibold mb-2 text-[#1E3A8A]">고성능 분산 아키텍처</h4>
+                <p className="text-sm text-slate-600 break-keep">Java Spring Boot(제어)와 Python FastAPI(추론)를 분리해 대규모 에이전트 연산을 안정적으로 처리합니다.</p>
               </CardContent>
             </Card>
           </div>
         </section>
 
-        <section id="specifications" className="scroll-mt-24 py-14 md:py-16">
-          <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("specifications")}`}>전문분야</p>
-          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight mb-7 ${getRevealClass("specifications")}`}>스타트업 핵심 법률 이슈</h3>
-          <Card className={`border-slate-200 bg-white ${getRevealClass("specifications")}`}>
-            <CardContent className="p-4 md:p-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-[10px] items-stretch">
-                <div className="rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 min-h-[104px] h-full flex flex-col justify-between">
-                  <div className="w-8 h-8 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-md flex items-center justify-center">
-                    <Scale className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                  </div>
-                  <p className="text-[14px] lg:text-[14.5px] min-[1200px]:text-[15px] min-[1440px]:text-[15.5px] leading-[1.2] tracking-[-0.018em] whitespace-nowrap font-semibold text-[#111827]">계약·거래</p>
-                  <p className="text-[10.5px] lg:text-[10.5px] min-[1200px]:text-[11px] min-[1440px]:text-[11.5px] leading-[1.2] tracking-[-0.022em] min-[1200px]:tracking-[-0.02em] whitespace-nowrap text-[#64748B]">비즈니스 파트너와의 계약, 물품공급계약 등</p>
-                </div>
-                <div className="rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 min-h-[104px] h-full flex flex-col justify-between">
-                  <div className="w-8 h-8 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-md flex items-center justify-center">
-                    <Landmark className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                  </div>
-                  <p className="text-[14px] lg:text-[14.5px] min-[1200px]:text-[15px] min-[1440px]:text-[15.5px] leading-[1.2] tracking-[-0.018em] whitespace-nowrap font-semibold text-[#111827]">지식재산·브랜드</p>
-                  <p className="text-[10.5px] lg:text-[10.5px] min-[1200px]:text-[11px] min-[1440px]:text-[11.5px] leading-[1.2] tracking-[-0.022em] min-[1200px]:tracking-[-0.02em] whitespace-nowrap text-[#64748B]">지식재산권을 보호하기 위한 법률적 대응</p>
-                </div>
-                <div className="rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 min-h-[104px] h-full flex flex-col justify-between">
-                  <div className="w-8 h-8 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-md flex items-center justify-center">
-                    <Shield className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                  </div>
-                  <p className="text-[14px] lg:text-[14.5px] min-[1200px]:text-[15px] min-[1440px]:text-[15.5px] leading-[1.2] tracking-[-0.018em] whitespace-nowrap font-semibold text-[#111827]">개인정보·데이터</p>
-                  <p className="text-[10.5px] lg:text-[10.5px] min-[1200px]:text-[11px] min-[1440px]:text-[11.5px] leading-[1.2] tracking-[-0.022em] min-[1200px]:tracking-[-0.02em] whitespace-nowrap text-[#64748B]">개인정보 처리 및 보호에 대한 법률 자문</p>
-                </div>
-                <div className="rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 min-h-[104px] h-full flex flex-col justify-between">
-                  <div className="w-8 h-8 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-md flex items-center justify-center">
-                    <ClipboardList className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                  </div>
-                  <p className="text-[13.5px] lg:text-[14px] min-[1200px]:text-[14.5px] min-[1440px]:text-[15px] leading-[1.2] tracking-[-0.022em] whitespace-nowrap font-semibold text-[#111827]">규제·인허가 대응</p>
-                  <p className="text-[10.5px] lg:text-[10.5px] min-[1200px]:text-[11px] min-[1440px]:text-[11.5px] leading-[1.2] tracking-[-0.022em] min-[1200px]:tracking-[-0.02em] whitespace-nowrap text-[#64748B]">인허가 획득 및 신산업 법규제 준수 가이드</p>
-                </div>
-                <div className="rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 min-h-[104px] h-full flex flex-col justify-between">
-                  <div className="w-8 h-8 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-md flex items-center justify-center">
-                    <UserRound className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                  </div>
-                  <p className="text-[14px] lg:text-[14.5px] min-[1200px]:text-[15px] min-[1440px]:text-[15.5px] leading-[1.2] tracking-[-0.018em] whitespace-nowrap font-semibold text-[#111827]">인사·노무</p>
-                  <p className="text-[10.5px] lg:text-[10.5px] min-[1200px]:text-[11px] min-[1440px]:text-[11.5px] leading-[1.2] tracking-[-0.022em] min-[1200px]:tracking-[-0.02em] whitespace-nowrap text-[#64748B]">노동갈등이나 인사노무 관련 분야의 지원</p>
-                </div>
-                <div className="rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 min-h-[104px] h-full flex flex-col justify-between">
-                  <div className="w-8 h-8 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-md flex items-center justify-center">
-                    <BadgeDollarSign className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                  </div>
-                  <p className="text-[14px] lg:text-[14.5px] min-[1200px]:text-[15px] min-[1440px]:text-[15.5px] leading-[1.2] tracking-[-0.018em] whitespace-nowrap font-semibold text-[#111827]">투자·자금조달</p>
-                  <p className="text-[10.5px] lg:text-[10.5px] min-[1200px]:text-[11px] min-[1440px]:text-[11.5px] leading-[1.2] tracking-[-0.022em] min-[1200px]:tracking-[-0.02em] whitespace-nowrap text-[#64748B]">투자 계약 및 라운드 협의 관련 법률적 지원</p>
-                </div>
-                <div className="rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 min-h-[104px] h-full flex flex-col justify-between">
-                  <div className="w-8 h-8 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-md flex items-center justify-center">
-                    <Building2 className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                  </div>
-                  <p className="text-[14px] lg:text-[14.5px] min-[1200px]:text-[15px] min-[1440px]:text-[15.5px] leading-[1.2] tracking-[-0.018em] whitespace-nowrap font-semibold text-[#111827]">기업운영·법무</p>
-                  <p className="text-[10.5px] lg:text-[10.5px] min-[1200px]:text-[11px] min-[1440px]:text-[11.5px] leading-[1.2] tracking-[-0.022em] min-[1200px]:tracking-[-0.02em] whitespace-nowrap text-[#64748B]">기업 경영에 필요한 기본적 법률 검토 사항</p>
-                </div>
-                <div className="rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 min-h-[104px] h-full flex flex-col justify-between">
-                  <div className="w-8 h-8 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-md flex items-center justify-center">
-                    <RotateCcw className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                  </div>
-                  <p className="text-[13.5px] lg:text-[14px] min-[1200px]:text-[14.5px] min-[1440px]:text-[15px] leading-[1.2] tracking-[-0.022em] whitespace-nowrap font-semibold text-[#111827]">사업정리·재도전</p>
-                  <p className="text-[10.5px] lg:text-[10.5px] min-[1200px]:text-[11px] min-[1440px]:text-[11.5px] leading-[1.2] tracking-[-0.022em] min-[1200px]:tracking-[-0.02em] whitespace-nowrap text-[#64748B]">폐업청산, 철수, 회생파산, 재창업 관련 법률지원</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-
         <section id="technology" className="scroll-mt-24 py-14 md:py-16">
-          <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("technology")}`}>핵심 기술</p>
-          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight mb-7 ${getRevealClass("technology")}`}>
-            왜 LexRex AI인가: 토론형 AI 아키텍처
+          <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("technology")}`}>Function</p>
+          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight text-[#1E3A8A] mb-7 ${getRevealClass("technology")}`}>
+            스타트업 맞춤형 올인원 리걸 어시스턴트
           </h3>
-          <p className={`text-lg text-slate-600 max-w-4xl leading-relaxed break-keep mb-8 ${getRevealClass("technology")}`}>
-            LexRex AI는 <strong>Spring Boot(제어)</strong>와 <strong>FastAPI(추론)</strong>를 분리한 구조 위에서,
-            독립 프롬프트 페르소나를 가진 에이전트들이 논점을 교차 검증합니다.
-            불일치가 발생하면 판정 에이전트가 법적 근거 가중치를 반영해 중재안을 도출하고,
-            유의미한 반론은 <strong>소수 의견(Minority Opinion)</strong>으로 함께 제공합니다.
-          </p>
-          <div className="grid lg:grid-cols-2 gap-5 items-stretch">
-            <Card className={`border-slate-200 bg-white ${getRevealClass("technology")}`} style={{ transitionDelay: "50ms" } as React.CSSProperties}>
-              <CardContent className="p-6">
-                <p className="text-sm uppercase tracking-[0.18em] text-slate-500 mb-3">Mediation Logic</p>
-                <div className="space-y-3 text-sm text-slate-700">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="font-semibold mb-1">1) 독립 의견 생성</p>
-                    <p>법무·사업·윤리 에이전트가 같은 입력을 서로 다른 관점으로 분석합니다.</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="font-semibold mb-1">2) 충돌 탐지 및 중재</p>
-                    <p>근거 조항, 사업 실행성, 평판 리스크를 가중치로 비교해 판정안을 정리합니다.</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="font-semibold mb-1">3) 소수 의견 병기</p>
-                    <p>최종 합의 밖의 유의미한 반론도 리포트 하단에 함께 남겨 판단 편향을 줄입니다.</p>
-                  </div>
+          <div className="grid md:grid-cols-2 gap-5 items-stretch">
+            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("technology")}`} style={{ transitionDelay: "40ms" } as React.CSSProperties}>
+              <CardContent className="h-full pt-6 pb-6 flex flex-col">
+                <div className="w-10 h-10 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-3">
+                  <ClipboardList className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
                 </div>
+                <p className="text-3xl font-semibold mb-3 text-[#1E3A8A]">01</p>
+                <h4 className="font-semibold mb-2">지능형 시나리오 진단</h4>
+                <p className="text-sm text-slate-600">투자 계약, 지식재산권, 규제 대응 등 복잡한 경영 상황을 입력하면 즉시 분석 세션이 시작됩니다.</p>
               </CardContent>
             </Card>
-            <Card className={`border-slate-200 bg-white ${getRevealClass("technology")}`} style={{ transitionDelay: "110ms" } as React.CSSProperties}>
-              <CardContent className="p-6">
-                <p className="text-sm uppercase tracking-[0.18em] text-slate-500 mb-3">System Architecture</p>
-                <div className="rounded-2xl border border-[#CBD5E1] bg-[#F8FAFC] p-5">
-                  <div className="grid grid-cols-1 gap-3 text-sm">
-                    <div className="rounded-lg border border-[#1E3A8A]/20 bg-white p-3">
-                      <p className="font-semibold text-[#1E3A8A]">Client / UI</p>
-                      <p className="text-slate-600">분석 요청 · 실시간 토론 상태 · 결과 리포트 제공</p>
-                    </div>
-                    <div className="text-center text-slate-400">↓</div>
-                    <div className="rounded-lg border border-[#1E3A8A]/20 bg-white p-3">
-                      <p className="font-semibold text-[#1E3A8A]">Spring Boot Orchestrator</p>
-                      <p className="text-slate-600">세션 제어, 인증, 라우팅, 작업 상태 관리</p>
-                    </div>
-                    <div className="text-center text-slate-400">↓</div>
-                    <div className="rounded-lg border border-[#1E3A8A]/20 bg-white p-3">
-                      <p className="font-semibold text-[#1E3A8A]">FastAPI Inference + RAG</p>
-                      <p className="text-slate-600">법령/판례 근거 검색 후 멀티 에이전트 토론 및 합의</p>
-                    </div>
-                  </div>
+            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("technology")}`} style={{ transitionDelay: "100ms" } as React.CSSProperties}>
+              <CardContent className="h-full pt-6 pb-6 flex flex-col">
+                <div className="w-10 h-10 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-3">
+                  <BriefcaseBusiness className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
                 </div>
+                <p className="text-3xl font-semibold mb-3 text-[#1E3A8A]">02</p>
+                <h4 className="font-semibold mb-2">실시간 토론 모니터링</h4>
+                <p className="text-sm text-slate-600">에이전트들이 논리를 주고받으며 합의점에 도달하는 과정을 투명하게 확인할 수 있습니다.</p>
+              </CardContent>
+            </Card>
+            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("technology")}`} style={{ transitionDelay: "160ms" } as React.CSSProperties}>
+              <CardContent className="h-full pt-6 pb-6 flex flex-col">
+                <div className="w-10 h-10 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-3">
+                  <FileCheck className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
+                </div>
+                <p className="text-3xl font-semibold mb-3 text-[#1E3A8A]">03</p>
+                <h4 className="font-semibold mb-2">정밀 리포트 및 재검토</h4>
+                <p className="text-sm text-slate-600">분석 결과에 대한 상세 보고서를 제공하고, 조건 변경 시 즉각적인 심층 재검토가 가능합니다.</p>
+              </CardContent>
+            </Card>
+            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("technology")}`} style={{ transitionDelay: "220ms" } as React.CSSProperties}>
+              <CardContent className="h-full pt-6 pb-6 flex flex-col">
+                <div className="w-10 h-10 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-3">
+                  <RotateCcw className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
+                </div>
+                <p className="text-3xl font-semibold mb-3 text-[#1E3A8A]">04</p>
+                <h4 className="font-semibold mb-2">검토 이력 대시보드</h4>
+                <p className="text-sm text-slate-600">과거 자문 내역과 토론 로그를 PostgreSQL 환경에 안전하게 저장해 언제든 다시 조회할 수 있습니다.</p>
               </CardContent>
             </Card>
           </div>
@@ -562,24 +592,24 @@ export function Home() {
 
         <section id="trust" className="scroll-mt-24 py-14 md:py-16">
           <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("trust")}`}>신뢰와 보안</p>
-          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight mb-7 ${getRevealClass("trust")}`}>
-            데이터는 안전한가: 업데이트·정확도·프라이버시 원칙
+          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight text-[#1E3A8A] mb-7 ${getRevealClass("trust")}`}>
+            사용자의 정보는 성장을 위한 자산이며, 철저히 보호됩니다.
           </h3>
           <div className="grid lg:grid-cols-2 gap-5 items-stretch">
             <Card className={`border-slate-200 bg-white ${getRevealClass("trust")}`} style={{ transitionDelay: "50ms" } as React.CSSProperties}>
               <CardContent className="p-6 space-y-4">
-                <h4 className="font-semibold">법령 데이터 업데이트 체계</h4>
+                <h4 className="font-semibold">데이터 보안 원칙</h4>
                 <div className="space-y-3 text-sm text-slate-700">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="font-medium mb-1">실시간 동기화</p>
-                    <p>국가법령정보센터 API 연동으로 최신 공포 법령·판례를 주기적으로 반영합니다.</p>
+                  <div className="rounded-xl border border-slate-200 bg-[#F2F2F2] p-3">
+                    <p className="font-medium mb-1">Zero-Retention 원칙</p>
+                    <p>사용자가 입력한 데이터는 AI 모델 학습에 절대 사용되지 않으며 분석 목적 범위에서만 일시적으로 활용됩니다.</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="font-medium mb-1">스케줄링 크롤링</p>
-                    <p>신규 해석례와 가이드라인은 주 단위로 수집해 RAG 인덱스를 업데이트합니다.</p>
+                  <div className="rounded-xl border border-slate-200 bg-[#F2F2F2] p-3">
+                    <p className="font-medium mb-1">안전한 암호화 저장</p>
+                    <p>모든 분석 세션 데이터는 엔터프라이즈급 PostgreSQL 환경에서 암호화되어 안전하게 관리됩니다.</p>
                   </div>
                 </div>
-                <h4 className="font-semibold pt-1">정확도 보장 체계</h4>
+                <h4 className="font-semibold pt-1">정확도 및 신뢰 체계</h4>
                 <ul className="space-y-2 text-sm text-slate-700">
                   <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 mt-0.5 text-[#1E3A8A]" />에이전트 간 교차 검증으로 사실관계 오류를 1차 필터링</li>
                   <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 mt-0.5 text-[#1E3A8A]" />근거 조항 번호 및 판례 번호를 답변과 함께 명시</li>
@@ -588,19 +618,19 @@ export function Home() {
             </Card>
             <Card className={`border-slate-200 bg-white ${getRevealClass("trust")}`} style={{ transitionDelay: "110ms" } as React.CSSProperties}>
               <CardContent className="p-6">
-                <h4 className="font-semibold mb-4">Trust Checklist (FAQ 스타일)</h4>
+                <h4 className="font-semibold mb-4">실시간 법령 동기화</h4>
                 <div className="space-y-3 text-sm">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="font-medium text-slate-900">Q. 입력 데이터가 외부 모델 학습에 사용되나요?</p>
-                    <p className="text-slate-700 mt-1">A. 사용되지 않습니다. 사용자 입력은 재학습 데이터로 제공하지 않는 것을 원칙으로 합니다.</p>
+                  <div className="rounded-xl border border-slate-200 bg-[#F2F2F2] p-3">
+                    <p className="font-medium text-slate-900">매일 업데이트되는 국가법령 데이터 반영</p>
+                    <p className="text-slate-700 mt-1">시시각각 변하는 규제 환경에 대응할 수 있도록 법령과 판례 데이터 동기화를 지속적으로 수행합니다.</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="font-medium text-slate-900">Q. 분석 세션 데이터는 어떻게 관리되나요?</p>
-                    <p className="text-slate-700 mt-1">A. 저장 시 암호화하고, 요청 시 즉시 삭제 가능한 Zero-Retention 정책을 따릅니다.</p>
+                  <div className="rounded-xl border border-slate-200 bg-[#F2F2F2] p-3">
+                    <p className="font-medium text-slate-900">RAG 기반 근거 검색 정확도 강화</p>
+                    <p className="text-slate-700 mt-1">최신 데이터셋을 반영한 검색 파이프라인으로 답변의 근거 품질과 최신성을 유지합니다.</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="font-medium text-slate-900">Q. 결과의 신뢰도는 어떻게 확인하나요?</p>
-                    <p className="text-slate-700 mt-1">A. 멀티 에이전트 상호 검증 로그와 근거 출처를 함께 제공하여 판단 근거를 투명하게 확인할 수 있습니다.</p>
+                  <div className="rounded-xl border border-slate-200 bg-[#F2F2F2] p-3">
+                    <p className="font-medium text-slate-900">근거 중심 보고서</p>
+                    <p className="text-slate-700 mt-1">모든 핵심 권고안에 근거 출처와 논리 과정을 함께 표시해 검증 가능한 의사결정을 지원합니다.</p>
                   </div>
                 </div>
               </CardContent>
@@ -609,57 +639,32 @@ export function Home() {
         </section>
 
         <section id="howto" className="scroll-mt-24 py-14 md:py-16">
-          <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("howto")}`}>이용방법</p>
-          <h3 className={`text-[36px] md:text-[44px] leading-[1.12] font-semibold tracking-tight mb-7 ${getRevealClass("howto")}`}>4단계 컴플라이언스 프로세스</h3>
-          <div className="grid md:grid-cols-2 gap-5 items-stretch">
-            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("howto")}`} style={{ transitionDelay: "40ms" } as React.CSSProperties}>
-              <CardContent className="h-full pt-6 pb-6 flex flex-col">
-                <div className="w-10 h-10 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-3">
-                  <ClipboardList className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                </div>
-                <p className="text-3xl font-semibold mb-3 text-[#1E3A8A]">01</p>
-                <h4 className="font-semibold mb-2">시나리오 입력</h4>
-                <p className="text-sm text-slate-600">검토 대상 문구·상황·배경 정보를 입력합니다.</p>
-              </CardContent>
-            </Card>
-            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("howto")}`} style={{ transitionDelay: "100ms" } as React.CSSProperties}>
-              <CardContent className="h-full pt-6 pb-6 flex flex-col">
-                <div className="w-10 h-10 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-3">
-                  <BriefcaseBusiness className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                </div>
-                <p className="text-3xl font-semibold mb-3 text-[#1E3A8A]">02</p>
-                <h4 className="font-semibold mb-2">멀티 에이전트 토론</h4>
-                <p className="text-sm text-slate-600">법무·사업·윤리 관점 에이전트가 교차 토론합니다.</p>
-              </CardContent>
-            </Card>
-            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("howto")}`} style={{ transitionDelay: "160ms" } as React.CSSProperties}>
-              <CardContent className="h-full pt-6 pb-6 flex flex-col">
-                <div className="w-10 h-10 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-3">
-                  <FileCheck className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                </div>
-                <p className="text-3xl font-semibold mb-3 text-[#1E3A8A]">03</p>
-                <h4 className="font-semibold mb-2">최종 판정 보고서</h4>
-                <p className="text-sm text-slate-600">핵심 리스크, 수정 권고안, 근거를 포함한 결과를 제공합니다.</p>
-              </CardContent>
-            </Card>
-            <Card className={`h-full border-slate-200 bg-white ${getRevealClass("howto")}`} style={{ transitionDelay: "220ms" } as React.CSSProperties}>
-              <CardContent className="h-full pt-6 pb-6 flex flex-col">
-                <div className="w-10 h-10 bg-[#1E3A8A]/10 border border-[#1E3A8A]/20 rounded-lg flex items-center justify-center mb-3">
-                  <RotateCcw className="w-4 h-4 text-[#1E3A8A] stroke-[1.8]" />
-                </div>
-                <p className="text-3xl font-semibold mb-3 text-[#1E3A8A]">04</p>
-                <h4 className="font-semibold mb-2">심층 재검토</h4>
-                <p className="text-sm text-slate-600">조건 변경 및 추가 질문으로 재토론해 판정 정밀도를 높입니다.</p>
-              </CardContent>
-            </Card>
-          </div>
+          <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("howto")}`}>Closing</p>
+          <Card className={`border-slate-200 bg-white ${getRevealClass("howto")}`}>
+            <CardContent className="p-7 md:p-10 text-center">
+              <h3 className="text-[32px] md:text-[42px] leading-[1.15] font-semibold tracking-tight text-[#1E3A8A] mb-4">
+                지속 가능한 성장을 위한 가장 스마트한 선택
+              </h3>
+              <p className="text-slate-600 text-lg mb-8">
+                지금 바로 LexRex AI의 입체적인 법률 자문을 경험해보세요.
+              </p>
+              <Button
+                size="lg"
+                className="h-12 min-w-[280px] rounded-full bg-[#1E3A8A] hover:bg-[#172554] text-white shadow-[0_10px_24px_rgba(30,58,138,0.24)]"
+                onClick={() => navigate("/signup")}
+              >
+                간편 가입 후 무료 진단 시작하기
+                <ArrowRight className="w-5 h-5 ml-2 text-current" />
+              </Button>
+            </CardContent>
+          </Card>
         </section>
 
         <section id="contact" className="scroll-mt-24 py-14 md:py-16">
           <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("contact")}`}>문의하기</p>
           <Card className={`border-slate-200 bg-white ${getRevealClass("contact")}`}>
             <CardContent className="p-7 md:p-8">
-              <h3 className="text-[32px] leading-[1.15] font-semibold tracking-tight mb-3">도입 문의 및 기술 지원</h3>
+              <h3 className="text-[32px] leading-[1.15] font-semibold tracking-tight text-[#1E3A8A] mb-3">도입 문의 및 기술 지원</h3>
               <p className="text-slate-600 mb-6">
                 서비스 도입 상담이 필요하거나 기술 지원이 필요하다면 아래 정보를 남겨주세요.
               </p>
@@ -682,10 +687,17 @@ export function Home() {
         </section>
       </main>
 
-      <footer className="border-t border-[#64748B]/25 bg-[#F2F2F2] mt-24">
-        <div className="max-w-7xl mx-auto px-6 py-8 text-center">
-          <p className="text-sm text-slate-500">
-            본 시스템은 의사결정 지원을 위한 참고 자료이며, 최종 판단은 실무 전문가와 법무팀의 검토가 필요합니다.
+      <footer className="border-t border-[#64748B]/25 bg-[#ffffffff] mt-24">
+        <div className="max-w-7xl mx-auto px-6 py-10 text-center space-y-3">
+          <p className="text-sm md:text-base font-semibold text-[#1E3A8A]">
+            LexRex AI (뭐LAW노사우르스 팀)
+          </p>
+          <p className="text-sm text-slate-600">
+            서울특별시 [대장의 주소지] l 대표이사 [대장 이름] l 사업자등록번호 [000-00-00000]
+          </p>
+          <p className="text-xs md:text-sm text-slate-500 leading-relaxed max-w-4xl mx-auto">
+            주의사항: LexRex AI는 법률 문서의 신속한 검토 및 리스크 식별을 지원하는 AI 솔루션으로, 법률사무 처리나 법률 자문을 직접 대행하지 않습니다.
+            구체적인 사안에 대해서는 반드시 변호사 등 법률 전문가의 조언을 받으시기 바랍니다.
           </p>
         </div>
       </footer>

@@ -67,8 +67,8 @@ export function ReviewHistory() {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen bg-[#F2F2F2] text-slate-900">
-      <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#F2F2F2]/94 backdrop-blur-md shadow-sm">
+    <div className="min-h-screen bg-[#ffffffff] text-slate-900">
+      <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#ffffffff]/94 backdrop-blur-md shadow-sm">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <button onClick={() => navigate("/")} className="min-w-[220px] text-left py-1">
             <h1 className="font-menu leading-[1.02] text-[25px] text-[#1E3A8A]">LexRex AI</h1>
