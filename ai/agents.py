@@ -20,7 +20,7 @@ from schemas import AgentMessage, FinalDecision, RiskItem
 
 logger = logging.getLogger(__name__)
 
-llm = ChatOllama(model="phi3.5", temperature=0.4)
+llm = ChatOllama(model="phi3.5", temperature=0.2)
 
 
 class DebateState(TypedDict):
@@ -57,15 +57,19 @@ def legal_agent(state: DebateState) -> dict:
     system = f"""당신은 스타트업 전문 법률 전문가입니다.
 검토 유형: {state['review_type']}
 {ROUND_CONTEXT[round_num]}
-반드시 순수 한국어로만 답변하세요. 영어나 외래어를 절대 사용하지 마세요.
-3문장 이내로 핵심만 간결하게 작성하세요.
-관련 한국 법령명을 구체적으로 언급하세요."""
+
+[출력 규칙]
+- 반드시 순수 한국어로만 작성하세요.
+- 정확히 2문장으로만 답변하세요. 그 이상 쓰지 마세요.
+- 번호, 목록, 소제목 없이 문장만 작성하세요.
+- 관련 한국 법령명 하나를 반드시 포함하세요.
+- 예시: "이 광고는 표시광고법 제3조를 위반할 소지가 있습니다. 효과를 과장하는 표현은 소비자 기만에 해당합니다." """
 
     user = f"""[상황] {state['situation']}
 [검토 내용] {state['content']}
 이전 의견: {_get_previous_opinions(state['messages'], round_num)}
 
-법률 전문가 관점에서 분석해주세요."""
+법률 전문가로서 2문장으로 분석하세요."""
 
     content = _call_llm(system, user)
     stance = "CON" if round_num <= 2 else "PRO"
@@ -82,15 +86,19 @@ def risk_agent(state: DebateState) -> dict:
     system = f"""당신은 스타트업 리스크 관리 전문가입니다.
 검토 유형: {state['review_type']}
 {ROUND_CONTEXT[round_num]}
-반드시 순수 한국어로만 답변하세요. 영어나 외래어를 절대 사용하지 마세요.
-3문장 이내로 핵심만 간결하게 작성하세요.
-재무적 리스크와 사업적 영향을 중심으로 분석하세요."""
+
+[출력 규칙]
+- 반드시 순수 한국어로만 작성하세요.
+- 정확히 2문장으로만 답변하세요. 그 이상 쓰지 마세요.
+- 번호, 목록, 소제목 없이 문장만 작성하세요.
+- 재무적 리스크나 사업적 피해를 구체적으로 언급하세요.
+- 예시: "이 광고로 인해 과징금 부과 시 최대 매출의 2%가 손실됩니다. 브랜드 신뢰도 하락으로 초기 고객 유치에 타격이 예상됩니다." """
 
     user = f"""[상황] {state['situation']}
 [검토 내용] {state['content']}
 이전 의견: {_get_previous_opinions(state['messages'], round_num)}
 
-리스크 관리자 관점에서 분석해주세요."""
+리스크 관리자로서 2문장으로 분석하세요."""
 
     content = _call_llm(system, user)
     stance = "CON" if round_num <= 2 else "PRO"
@@ -107,15 +115,19 @@ def ethics_agent(state: DebateState) -> dict:
     system = f"""당신은 기업 윤리 및 ESG 전문가입니다.
 검토 유형: {state['review_type']}
 {ROUND_CONTEXT[round_num]}
-반드시 순수 한국어로만 답변하세요. 영어나 외래어를 절대 사용하지 마세요.
-3문장 이내로 핵심만 간결하게 작성하세요.
-소비자 보호와 사회적 책임 관점에서 분석하세요."""
+
+[출력 규칙]
+- 반드시 순수 한국어로만 작성하세요.
+- 정확히 2문장으로만 답변하세요. 그 이상 쓰지 마세요.
+- 번호, 목록, 소제목 없이 문장만 작성하세요.
+- 소비자 보호 또는 사회적 책임 관점을 언급하세요.
+- 예시: "소비자에게 근거 없는 기대를 심어주는 광고는 윤리적으로 문제가 있습니다. 기업의 사회적 책임 차원에서 표현을 수정해야 합니다." """
 
     user = f"""[상황] {state['situation']}
 [검토 내용] {state['content']}
 이전 의견: {_get_previous_opinions(state['messages'], round_num)}
 
-윤리 검토자 관점에서 분석해주세요."""
+윤리 검토자로서 2문장으로 분석하세요."""
 
     content = _call_llm(system, user)
     stance = "PRO" if round_num == 3 else ("CON" if round_num == 2 else "NEUTRAL")
@@ -154,11 +166,11 @@ def supervisor(state: DebateState) -> dict:
 
     system = """당신은 법률 검토 슈퍼바이저입니다.
 세 전문가의 토론을 종합하여 최종 판정을 내려주세요.
-반드시 순수 한국어로만 답변하고, 아래 형식을 정확히 따르세요.
+반드시 순수 한국어로만 작성하고, 아래 형식을 정확히 따르세요. 형식 외의 내용은 절대 추가하지 마세요.
 
-위험수준: HIGH 또는 MEDIUM 또는 LOW
-핵심문제: (2문장 이내)
-권고사항: (2문장 이내)"""
+위험수준: HIGH
+핵심문제: (1~2문장으로 핵심 문제만 작성)
+권고사항: (1~2문장으로 수정 방향만 작성)"""
 
     user = f"""[상황] {state['situation']}
 [검토 내용] {state['content']}
