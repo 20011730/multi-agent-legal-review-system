@@ -85,7 +85,8 @@ public class SessionService {
                 sessionId,
                 session.getStatus(),
                 messageCount,
-                hasFinalDecision
+                hasFinalDecision,
+                session.getAnalysisPhase()
         );
     }
 
@@ -110,26 +111,27 @@ public class SessionService {
                 ))
                 .toList();
 
-        FinalDecision fd = finalDecisionRepository.findBySessionId(sessionId)
-                .orElseThrow(() -> new IllegalArgumentException("FinalDecision not found for session: " + sessionId));
-
-        List<RiskItemDto> riskDtos = fd.getRisks().stream()
-                .map(r -> new RiskItemDto(r.getCategory(), r.getLevel(), r.getDescription()))
-                .toList();
-
-        FinalDecisionDto fdDto = new FinalDecisionDto(
-                fd.getVerdict(),
-                fd.getRiskLevel(),
-                riskDtos,
-                fd.getSummary(),
-                fd.getRecommendation(),
-                fd.getRevisedContent()
-        );
+        // FinalDecision이 아직 없으면(분석 진행 중) null로 처리 — 부분 결과 반환
+        FinalDecisionDto fdDto = finalDecisionRepository.findBySessionId(sessionId)
+                .map(fd -> {
+                    List<RiskItemDto> riskDtos = fd.getRisks().stream()
+                            .map(r -> new RiskItemDto(r.getCategory(), r.getLevel(), r.getDescription()))
+                            .toList();
+                    return new FinalDecisionDto(
+                            fd.getVerdict(),
+                            fd.getRiskLevel(),
+                            riskDtos,
+                            fd.getSummary(),
+                            fd.getRecommendation(),
+                            fd.getRevisedContent()
+                    );
+                })
+                .orElse(null);
 
         // 법령/판례 근거 조회
         List<EvidenceDto> evidenceDtos = loadEvidenceDtos(sessionId);
-        log.info("[VERDICT-DEBUG] 최종 응답 조립: sessionId={}, messages={}건, evidences={}건",
-                sessionId, messageDtos.size(), evidenceDtos.size());
+        log.info("[VERDICT-DEBUG] 최종 응답 조립: sessionId={}, messages={}건, evidences={}건, fdDto={}",
+                sessionId, messageDtos.size(), evidenceDtos.size(), fdDto != null ? "있음" : "없음(분석중)");
 
         return new DebateResultResponse(sessionId, 1L, session.getStatus(), messageDtos, fdDto, evidenceDtos);
     }

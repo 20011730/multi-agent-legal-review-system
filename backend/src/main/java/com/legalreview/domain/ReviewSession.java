@@ -45,6 +45,13 @@ public class ReviewSession {
     @Column(nullable = false)
     private String status = "CREATED";
 
+    /** 분석 진행 단계 (폴링 UI용):
+     *  ROUND1_BIZ, ROUND1_LEGAL, ROUND2_BIZ, ROUND2_LEGAL, ROUND3_BIZ, ROUND3_LEGAL,
+     *  JUDGING, COLLECTING_EVIDENCE
+     *  완료 후 null로 초기화됨 */
+    @Column(length = 30)
+    private String analysisPhase;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 

@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.function.Consumer;
 
 /**
  * Ollama 기반 멀티에이전트 법률 분석 서비스.
@@ -24,43 +25,47 @@ public class OllamaAnalysisService {
 
     private final OllamaClient ollamaClient;
 
-    private static final int MAX_ROUNDS = 2;
+    private static final int MAX_ROUNDS = 3;
 
     // ── 시스템 프롬프트 ──
 
     private static final String BIZ_SYSTEM = """
-            당신은 기업의 성장과 실행력을 최우선으로 하는 전략 기획자(CSO)입니다.
+            당신은 기업의 성장과 실행력을 최우선으로 하는 비즈니스 전략가(CSO)입니다.
             법적 리스크만 강조하면 아무것도 실행할 수 없다는 현실적 관점을 제시하세요.
 
-            반드시 아래 3개 항목을 소제목과 함께 작성하세요:
+            다음 3가지를 자연스러운 문단 형태로 작성하세요. 소제목은 간결하게 사용하고,
+            각 항목은 2~3문장의 문단으로 구성하세요:
 
-            **[비즈니스 기회 분석]**
-            - 해당 안건이 가져올 수 있는 비즈니스 이점과 시장 기회
+            ## 비즈니스 기회
+            해당 안건이 가져올 수 있는 비즈니스 이점과 시장 기회를 분석하세요.
 
-            **[리스크 완화 실행 방안]**
-            - 법적 리스크를 최소화하면서 실행할 수 있는 구체적 방법
+            ## 리스크 완화 방안
+            법적 리스크를 최소화하면서 실행할 수 있는 구체적 방법을 제시하세요.
 
-            **[미실행 시 손실 분석]**
-            - 실행하지 않았을 때 발생할 수 있는 비즈니스 손실과 경쟁 열위
+            ## 미실행 시 손실
+            실행하지 않았을 때 발생할 수 있는 비즈니스 손실과 경쟁 열위를 설명하세요.
 
-            중요: 답변은 한국어로, 각 항목을 충분히 설명하여 총 500자 이상 작성하세요.""";
+            중요: 답변은 한국어로, 총 500자 이상 작성하세요.
+            불필요한 인사말이나 서두 없이 바로 본론으로 시작하세요.""";
 
     private static final String LEGAL_SYSTEM = """
             당신은 기업 법무팀 소속 법률 전문가입니다.
             관련 법령과 판례를 근거로, 법적 리스크와 규정 위반 가능성을 분석하세요.
 
-            반드시 아래 3개 항목을 소제목과 함께 작성하세요:
+            다음 3가지를 자연스러운 문단 형태로 작성하세요. 소제목은 간결하게 사용하고,
+            각 항목은 2~3문장의 문단으로 구성하세요:
 
-            **[법적 리스크 분석]**
-            - 관련 법령 및 규정 위반 가능성
+            ## 법적 리스크
+            관련 법령 및 규정 위반 가능성을 구체적으로 분석하세요.
 
-            **[판례 및 행정처분 사례]**
-            - 유사 사례의 판결 또는 행정 처분 내용
+            ## 판례 및 행정처분
+            유사 사례의 판결 또는 행정 처분 내용을 제시하세요.
 
-            **[법적 권고사항]**
-            - 리스크를 줄이기 위한 구체적 법적 조치
+            ## 법적 권고사항
+            리스크를 줄이기 위한 구체적 법적 조치를 제안하세요.
 
-            중요: 답변은 한국어로, 각 항목을 충분히 설명하여 총 500자 이상 작성하세요.""";
+            중요: 답변은 한국어로, 총 500자 이상 작성하세요.
+            불필요한 인사말이나 서두 없이 바로 본론으로 시작하세요.""";
 
     private static final String JUDGE_SYSTEM = """
             당신은 법률 검토 최종 판정관입니다.
@@ -69,7 +74,7 @@ public class OllamaAnalysisService {
             반드시 아래 JSON 형식으로만 응답하세요. JSON 외의 텍스트는 포함하지 마세요:
 
             {
-              "verdict": "approve" 또는 "conditional" 또는 "reject",
+              "verdict": "approved" 또는 "conditional" 또는 "rejected",
               "riskLevel": "LOW" 또는 "MEDIUM" 또는 "HIGH",
               "summary": "종합 판정 요약 (2-3문장)",
               "recommendation": "구체적 권고사항",
@@ -84,16 +89,27 @@ public class OllamaAnalysisService {
             }
 
             verdict 기준:
-            - approve: 법적 리스크가 낮아 그대로 진행 가능
+            - approved: 법적 리스크가 낮아 그대로 진행 가능
             - conditional: 일부 수정 후 진행 가능
-            - reject: 법적 리스크가 높아 진행 불가""";
+            - rejected: 법적 리스크가 높아 진행 불가""";
 
     /**
      * Ollama를 사용하여 멀티에이전트 토론을 실행한다.
      *
      * @return AiAnalysisResponse (기존 Python 응답과 동일 포맷)
      */
+    /**
+     * 기존 호환성 유지: 콜백 없이 호출
+     */
     public AiAnalysisResponse analyze(Long sessionId, SessionCreateRequest request) {
+        return analyze(sessionId, request, phase -> {});
+    }
+
+    /**
+     * 멀티에이전트 토론 실행.
+     * @param phaseCallback 각 단계 전환 시 호출되는 콜백 (DB phase 업데이트용)
+     */
+    public AiAnalysisResponse analyze(Long sessionId, SessionCreateRequest request, Consumer<String> phaseCallback) {
         String topic = String.format(
                 "[기업] %s (%s)\n[검토 유형] %s\n[상황] %s\n[검토 대상 원문] %s",
                 request.getCompanyName(), request.getIndustry(),
@@ -104,37 +120,63 @@ public class OllamaAnalysisService {
         StringBuilder history = new StringBuilder("[검토 안건]\n").append(topic);
         List<Map<String, Object>> messages = new ArrayList<>();
 
-        // ── 2라운드 토론: BIZ → LEGAL 반복 ──
+        // ── 3라운드 토론: BIZ → LEGAL 반복 ──
         for (int round = 1; round <= MAX_ROUNDS; round++) {
             log.info("[Ollama] 라운드 {} 시작 (sessionId={})", round, sessionId);
 
             // BIZ 에이전트
-            String bizPrompt = "검토 대상 안건:\n" + topic
-                    + "\n\n현재까지의 토론 내용:\n" + history
-                    + "\n\n비즈니스 관점에서 분석해주세요.";
+            phaseCallback.accept("ROUND" + round + "_BIZ");
+
+            String bizPrompt;
+            if (round == 1) {
+                bizPrompt = "검토 대상 안건:\n" + topic + "\n\n비즈니스 관점에서 분석해주세요.";
+            } else if (round == 2) {
+                bizPrompt = "검토 대상 안건:\n" + topic
+                      + "\n\n현재까지의 토론 내용:\n" + history
+                      + "\n\n법률 전문가의 지적을 참고하여, 비즈니스 관점에서 반박하거나 보완 분석해주세요.";
+            } else {
+                bizPrompt = "검토 대상 안건:\n" + topic
+                      + "\n\n현재까지의 토론 내용:\n" + history
+                      + "\n\n라운드 3 최종 입장 정리: 지금까지의 모든 논점을 종합하여,"
+                      + " 비즈니스 실행 가능성을 위한 최선의 타협안이나 실행 방안을 제시해주세요.";
+            }
 
             String bizResponse = ollamaClient.chat(BIZ_SYSTEM, bizPrompt);
             history.append("\n\n[비즈니스 전략가]: ").append(bizResponse);
 
             messages.add(createMessage(
                     "risk", "비즈니스 전략가", bizResponse,
-                    round == 1 ? "analysis" : "concern",
+                    round == 1 ? "analysis" : "rebuttal",
                     round, "PRO", "비즈니스 성장 및 실행 관점 분석"
             ));
 
             log.info("[Ollama] 라운드 {} BIZ 완료 (sessionId={})", round, sessionId);
 
             // LEGAL 에이전트
-            String legalPrompt = "검토 대상 안건:\n" + topic
-                    + "\n\n현재까지의 토론 내용:\n" + history
-                    + "\n\n법적 관점에서 분석해주세요.";
+            phaseCallback.accept("ROUND" + round + "_LEGAL");
+
+            String legalPrompt;
+            if (round == 1) {
+                legalPrompt = "검토 대상 안건:\n" + topic
+                      + "\n\n비즈니스 전략가의 의견:\n" + bizResponse
+                      + "\n\n법적 관점에서 분석해주세요.";
+            } else if (round == 2) {
+                legalPrompt = "검토 대상 안건:\n" + topic
+                      + "\n\n현재까지의 토론 내용:\n" + history
+                      + "\n\n비즈니스 전략가의 반박을 고려하여, 법적 관점에서 재반박 또는 보완 분석해주세요.";
+            } else {
+                legalPrompt = "검토 대상 안건:\n" + topic
+                      + "\n\n현재까지의 토론 내용:\n" + history
+                      + "\n\n라운드 3 최종 입장 정리: 지금까지의 모든 법적 논점을 종합하여,"
+                      + " 법적 리스크를 최소화하면서도 사업 실행이 가능한 최종 법적 권고안을 제시해주세요.";
+            }
 
             String legalResponse = ollamaClient.chat(LEGAL_SYSTEM, legalPrompt);
             history.append("\n\n[법률 전문가]: ").append(legalResponse);
 
             messages.add(createMessage(
                     "legal", "법률 전문가", legalResponse,
-                    round == 1 ? "analysis" : "concern",
+                    round == 1 ? "analysis" : "rebuttal",
                     round, "CON", "법적 리스크 및 규정 위반 가능성 분석"
             ));
 
@@ -142,6 +184,8 @@ public class OllamaAnalysisService {
         }
 
         // ── JUDGE 에이전트: 최종 판정 ──
+        phaseCallback.accept("JUDGING");
+
         String judgePrompt = "다음은 비즈니스 전략가와 법률 전문가의 토론 내용입니다:\n\n"
                 + history + "\n\n위 토론을 종합하여 최종 판정을 JSON 형식으로 내려주세요.";
 
@@ -151,13 +195,13 @@ public class OllamaAnalysisService {
         // 판정 JSON 파싱
         Map<String, Object> finalDecision = parseJudgeResponse(judgeResponse);
 
-        // 판정 메시지도 messages에 추가
+        // 판정 메시지도 messages에 추가 — JSON이 아닌 사람이 읽을 수 있는 형식으로 저장
         messages.add(createMessage(
-                "ethics", "최종 판정관", judgeResponse.length() > 500 ? judgeResponse.substring(0, 500) : judgeResponse,
+                "judge", "최종 판정관", buildJudgeMessageContent(finalDecision),
                 "recommendation", MAX_ROUNDS, "NEUTRAL", "양측 주장을 종합한 최종 판정"
         ));
 
-        // evidences는 빈 리스트 — 법제처 검색은 SessionService에서 별도 처리
+        // evidences는 빈 리스트 — 법제처 검색은 AnalysisAsyncRunner에서 별도 처리
         return new AiAnalysisResponse(messages, finalDecision, List.of());
     }
 
@@ -212,11 +256,44 @@ public class OllamaAnalysisService {
                     Map.of("category", "종합 리스크", "level", "medium", "description", "AI 토론 기반 종합 평가")
             ));
 
+            // verdict 값 정규화: LLM이 "approve"/"reject"로 반환하는 경우 프론트엔드 키에 맞게 변환
+            Object verdict = parsed.get("verdict");
+            if ("approve".equals(verdict)) {
+                parsed.put("verdict", "approved");
+            } else if ("reject".equals(verdict)) {
+                parsed.put("verdict", "rejected");
+            }
+
             return parsed;
         } catch (Exception e) {
             log.warn("JUDGE 응답 JSON 파싱 실패, 기본값 사용: {}", e.getMessage());
             return createFallbackDecision(response);
         }
+    }
+
+    /**
+     * JUDGE 판정 결과를 사람이 읽을 수 있는 마크다운 형식으로 변환.
+     * 프론트엔드에서 JSON이 그대로 노출되는 문제를 방지한다.
+     */
+    private String buildJudgeMessageContent(Map<String, Object> fd) {
+        StringBuilder sb = new StringBuilder();
+        String summary = fd.getOrDefault("summary", "") instanceof String s ? s : "";
+        String recommendation = fd.getOrDefault("recommendation", "") instanceof String r ? r : "";
+        String revisedContent = fd.getOrDefault("revisedContent", "") instanceof String rc ? rc : "";
+
+        if (!summary.isBlank()) {
+            sb.append("## 종합 판정\n").append(summary.trim());
+        }
+        if (!recommendation.isBlank()) {
+            if (!sb.isEmpty()) sb.append("\n\n");
+            sb.append("## 권고사항\n").append(recommendation.trim());
+        }
+        if (!revisedContent.isBlank()) {
+            sb.append("\n\n## 수정 문안 제안\n").append(revisedContent.trim());
+        }
+        return sb.isEmpty()
+                ? "최종 판정이 완료되었습니다. 상세 결과는 판정 결과 페이지에서 확인하세요."
+                : sb.toString();
     }
 
     private Map<String, Object> createFallbackDecision(String rawResponse) {

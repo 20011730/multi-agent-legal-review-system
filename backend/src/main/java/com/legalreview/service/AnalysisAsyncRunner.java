@@ -44,8 +44,14 @@ public class AnalysisAsyncRunner {
      * 비동기 AI 분석 실행.
      * Spring 프록시를 통해 호출되므로 @Async가 정상 동작한다.
      */
+    /**
+     * @Transactional 제거 이유:
+     * @Transactional을 걸면 runAnalysis() 전체가 하나의 트랜잭션으로 묶여,
+     * 내부의 saveAndFlush(phase)가 커밋 전 상태가 된다.
+     * 폴링(READ_COMMITTED)은 미커밋 데이터를 볼 수 없으므로 phase가 5%에 고정됨.
+     * 제거하면 각 save/saveAndFlush 호출이 Spring Data JPA의 기본 트랜잭션(메서드 단위)으로 즉시 커밋됨.
+     */
     @Async
-    @Transactional
     public void runAnalysis(Long sessionId, SessionCreateRequest request) {
         try {
             log.info("비동기 AI 분석 시작 — engine={}, sessionId={}", aiEngine, sessionId);
@@ -53,17 +59,24 @@ public class AnalysisAsyncRunner {
             ReviewSession session = sessionRepository.findById(sessionId)
                     .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
 
+            // phase 업데이트 콜백 — 각 LLM 호출 전에 DB에 현재 단계를 저장
+            java.util.function.Consumer<String> phaseCallback = (phase) -> {
+                session.setAnalysisPhase(phase);
+                sessionRepository.saveAndFlush(session);
+                log.debug("분석 단계 변경: {} (sessionId={})", phase, sessionId);
+            };
+
             // AI 엔진 선택: ollama → 로컬 Ollama, python → 기존 Python 서버
             AiAnalysisResponse aiResponse;
             if ("ollama".equalsIgnoreCase(aiEngine)) {
                 log.info("Ollama 엔진으로 분석 실행 (sessionId={})", sessionId);
-                aiResponse = ollamaAnalysisService.analyze(sessionId, request);
+                aiResponse = ollamaAnalysisService.analyze(sessionId, request, phaseCallback);
             } else {
                 log.info("Python AI 서버로 분석 실행 (sessionId={})", sessionId);
                 aiResponse = aiAnalysisClient.analyze(sessionId, request);
             }
 
-            // 토론 메시지 저장
+            // 토론 메시지 저장 (개별 저장 → 폴링 시 messageCount 실시간 반영)
             saveDebateMessages(session, aiResponse.messages());
 
             // 최종 판정 저장
@@ -76,9 +89,17 @@ public class AnalysisAsyncRunner {
             }
 
             // 법제처 OPEN API 검색으로 추가 근거 보강
+            phaseCallback.accept("COLLECTING_EVIDENCE");
             enrichWithLawSearch(session, request.getContent());
 
+            // 안전망: 어떤 이유로든 final_decision이 없으면 fallback 강제 저장
+            if (finalDecisionRepository.findBySessionId(sessionId).isEmpty()) {
+                log.warn("[FD-SAFETY] 분석은 완료됐지만 final_decision이 누락됨 — fallback 저장 (sessionId={})", sessionId);
+                createFallbackFinalDecision(session);
+            }
+
             session.setStatus("COMPLETED");
+            session.setAnalysisPhase(null); // 분석 완료 — phase 초기화
             sessionRepository.save(session);
             log.info("비동기 AI 분석 완료 (sessionId={})", sessionId);
 
@@ -119,7 +140,7 @@ public class AnalysisAsyncRunner {
             msg.setRound(((Number) m.get("round")).intValue());
             msg.setStance((String) m.get("stance"));
             msg.setEvidenceSummary((String) m.get("evidenceSummary"));
-            messageRepository.save(msg);
+            messageRepository.saveAndFlush(msg); // 즉시 flush → 폴링 시 messageCount 실시간 반영
         }
     }
 
@@ -127,25 +148,43 @@ public class AnalysisAsyncRunner {
     private void saveFinalDecision(ReviewSession session, Map<String, Object> fdMap) {
         FinalDecision fd = new FinalDecision();
         fd.setSession(session);
-        fd.setVerdict((String) fdMap.get("verdict"));
-        fd.setRiskLevel((String) fdMap.get("riskLevel"));
-        fd.setSummary((String) fdMap.get("summary"));
-        fd.setRecommendation((String) fdMap.get("recommendation"));
-        fd.setRevisedContent((String) fdMap.get("revisedContent"));
-        finalDecisionRepository.save(fd);
+        // null-safe 변환 — FinalDecision의 5개 컬럼은 nullable=false이므로
+        // LLM이 "revisedContent": null 같은 명시적 null을 보낸 경우에도 빈 문자열로 보장
+        fd.setVerdict(safeStr(fdMap.get("verdict"), "conditional"));
+        fd.setRiskLevel(safeStr(fdMap.get("riskLevel"), "MEDIUM"));
+        fd.setSummary(safeStr(fdMap.get("summary"), "AI 분석 결과입니다."));
+        fd.setRecommendation(safeStr(fdMap.get("recommendation"), "전문가 검토를 권장합니다."));
+        fd.setRevisedContent(safeStr(fdMap.get("revisedContent"), ""));
 
+        // risks를 fd 컬렉션에 먼저 모두 추가 (cascade=ALL이라 한 번의 save로 함께 INSERT)
         List<Map<String, Object>> risks = (List<Map<String, Object>>) fdMap.get("risks");
         if (risks != null) {
             for (Map<String, Object> r : risks) {
                 Risk risk = new Risk();
                 risk.setFinalDecision(fd);
-                risk.setCategory((String) r.get("category"));
-                risk.setLevel((String) r.get("level"));
-                risk.setDescription((String) r.get("description"));
+                risk.setCategory(safeStr(r.get("category"), "기타"));
+                risk.setLevel(safeStr(r.get("level"), "medium"));
+                risk.setDescription(safeStr(r.get("description"), ""));
                 fd.getRisks().add(risk);
             }
-            finalDecisionRepository.save(fd);
         }
+
+        // 1) FD + risks를 한 번에 저장 (cascade=ALL)
+        finalDecisionRepository.saveAndFlush(fd);
+
+        // 2) ★ 양방향 관계 동기화 ★
+        //    ReviewSession.finalDecision은 mappedBy 측에 cascade=ALL + orphanRemoval=true가 걸려 있다.
+        //    이 양방향 참조를 동기화하지 않으면, 이후 runAnalysis() 끝에서 sessionRepository.save(session)을
+        //    호출할 때 Hibernate가 session.finalDecision == null 상태로 dirty checking을 수행하고
+        //    orphanRemoval=true 규칙에 따라 방금 저장한 fd row를 DELETE 해 버린다.
+        //    (실제로 final_decisions_id_seq는 진행됐지만 row가 0인 현상이 이로 인해 발생)
+        session.setFinalDecision(fd);
+    }
+
+    private static String safeStr(Object v, String fallback) {
+        if (v == null) return fallback;
+        String s = v.toString();
+        return s.isEmpty() ? fallback : s;
     }
 
     private void saveEvidences(ReviewSession session, List<Map<String, Object>> evidences) {
@@ -350,6 +389,11 @@ public class AnalysisAsyncRunner {
     }
 
     private void createFallbackFinalDecision(ReviewSession session) {
+        // 이미 저장된 FD가 있으면 중복 INSERT(unique session_id 위반) 방지
+        if (finalDecisionRepository.findBySessionId(session.getId()).isPresent()) {
+            return;
+        }
+
         FinalDecision fd = new FinalDecision();
         fd.setSession(session);
         fd.setVerdict("error");
@@ -357,7 +401,6 @@ public class AnalysisAsyncRunner {
         fd.setSummary("AI 분석 서버 연결 실패로 자동 판정을 완료하지 못했습니다. 재검토를 권장합니다.");
         fd.setRecommendation("네트워크 연결 상태를 확인한 뒤 다시 검토를 요청해주세요.");
         fd.setRevisedContent("");
-        finalDecisionRepository.save(fd);
 
         Risk risk = new Risk();
         risk.setFinalDecision(fd);
@@ -365,6 +408,11 @@ public class AnalysisAsyncRunner {
         risk.setLevel("high");
         risk.setDescription("AI 분석 서버 연결 실패 — 자동 분석 미완료");
         fd.getRisks().add(risk);
-        finalDecisionRepository.save(fd);
+
+        // 한 번의 save로 cascade=ALL을 통해 fd + risks 동시 저장
+        finalDecisionRepository.saveAndFlush(fd);
+
+        // 양방향 관계 동기화 (orphanRemoval로 인한 삭제 방지)
+        session.setFinalDecision(fd);
     }
 }
