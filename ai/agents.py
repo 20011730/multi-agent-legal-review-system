@@ -1,10 +1,15 @@
 """
 LangGraph 기반 멀티에이전트 법률 토론 시스템.
-법률전문가 / 리스크관리자 / 윤리검토자가 3라운드 토론 후 최종 판정 생성.
+- Round 1: 순차 (직렬) — 에이전트가 앞선 발언 참조하며 토론
+- Round 2: 병렬     — Round 1 전체 참고 후 각자 심화 분석
+- Round 3: 순차 (직렬) — 최종 권고, 앞선 발언 참조하며 토론
+- Supervisor: 전체 종합 판정
 """
 
 import logging
+import re
 from typing import TypedDict, Annotated
+from concurrent.futures import ThreadPoolExecutor
 import operator
 
 from langgraph.graph import StateGraph, END
@@ -15,20 +20,17 @@ from schemas import AgentMessage, FinalDecision, RiskItem
 
 logger = logging.getLogger(__name__)
 
-# LLM 초기화 (phi3.5 로컬 모델)
 llm = ChatOllama(model="phi3.5", temperature=0.4)
 
 
-# ── 공유 상태 정의 ──────────────────────────────────────────
 class DebateState(TypedDict):
-    content: str                              # 검토 원문
-    situation: str                            # 상황 설명
-    review_type: str                          # 검토 유형
-    current_round: int                        # 현재 라운드 (1~3)
-    messages: Annotated[list, operator.add]   # 누적 메시지
+    content: str
+    situation: str
+    review_type: str
+    current_round: int
+    messages: Annotated[list, operator.add]
 
 
-# ── 라운드별 프롬프트 ────────────────────────────────────────
 ROUND_CONTEXT = {
     1: "초기 분석 단계입니다. 핵심 법적 쟁점을 파악하세요.",
     2: "심화 검토 단계입니다. 구체적인 위반 가능성과 리스크를 분석하세요.",
@@ -39,7 +41,6 @@ ROUND_TYPE = {1: "analysis", 2: "concern", 3: "recommendation"}
 
 
 def _call_llm(system_prompt: str, user_prompt: str) -> str:
-    """LLM 호출 공통 함수."""
     try:
         response = llm.invoke([
             SystemMessage(content=system_prompt),
@@ -51,17 +52,14 @@ def _call_llm(system_prompt: str, user_prompt: str) -> str:
         return "분석 중 오류가 발생했습니다."
 
 
-# ── 에이전트 노드 ────────────────────────────────────────────
 def legal_agent(state: DebateState) -> dict:
-    """법률 전문가 에이전트."""
     round_num = state["current_round"]
-    context = ROUND_CONTEXT[round_num]
-
     system = f"""당신은 스타트업 전문 법률 전문가입니다.
 검토 유형: {state['review_type']}
-{context}
-반드시 한국어로 답변하세요. 3문장 이내로 핵심만 간결하게 작성하세요.
-관련 법령명을 구체적으로 언급하세요."""
+{ROUND_CONTEXT[round_num]}
+반드시 순수 한국어로만 답변하세요. 영어나 외래어를 절대 사용하지 마세요.
+3문장 이내로 핵심만 간결하게 작성하세요.
+관련 한국 법령명을 구체적으로 언급하세요."""
 
     user = f"""[상황] {state['situation']}
 [검토 내용] {state['content']}
@@ -72,27 +70,20 @@ def legal_agent(state: DebateState) -> dict:
     content = _call_llm(system, user)
     stance = "CON" if round_num <= 2 else "PRO"
 
-    msg = AgentMessage(
-        agentId="legal",
-        agentName="법률 전문가",
-        content=content,
-        type=ROUND_TYPE[round_num],
-        round=round_num,
-        stance=stance,
+    return {"messages": [AgentMessage(
+        agentId="legal", agentName="법률 전문가", content=content,
+        type=ROUND_TYPE[round_num], round=round_num, stance=stance,
         evidenceSummary=f"라운드 {round_num} 법률 검토 완료",
-    )
-    return {"messages": [msg]}
+    )]}
 
 
 def risk_agent(state: DebateState) -> dict:
-    """리스크 관리자 에이전트."""
     round_num = state["current_round"]
-    context = ROUND_CONTEXT[round_num]
-
     system = f"""당신은 스타트업 리스크 관리 전문가입니다.
 검토 유형: {state['review_type']}
-{context}
-반드시 한국어로 답변하세요. 3문장 이내로 핵심만 간결하게 작성하세요.
+{ROUND_CONTEXT[round_num]}
+반드시 순수 한국어로만 답변하세요. 영어나 외래어를 절대 사용하지 마세요.
+3문장 이내로 핵심만 간결하게 작성하세요.
 재무적 리스크와 사업적 영향을 중심으로 분석하세요."""
 
     user = f"""[상황] {state['situation']}
@@ -104,27 +95,20 @@ def risk_agent(state: DebateState) -> dict:
     content = _call_llm(system, user)
     stance = "CON" if round_num <= 2 else "PRO"
 
-    msg = AgentMessage(
-        agentId="risk",
-        agentName="리스크 관리자",
-        content=content,
-        type=ROUND_TYPE[round_num],
-        round=round_num,
-        stance=stance,
+    return {"messages": [AgentMessage(
+        agentId="risk", agentName="리스크 관리자", content=content,
+        type=ROUND_TYPE[round_num], round=round_num, stance=stance,
         evidenceSummary=f"라운드 {round_num} 리스크 검토 완료",
-    )
-    return {"messages": [msg]}
+    )]}
 
 
 def ethics_agent(state: DebateState) -> dict:
-    """윤리 검토자 에이전트."""
     round_num = state["current_round"]
-    context = ROUND_CONTEXT[round_num]
-
     system = f"""당신은 기업 윤리 및 ESG 전문가입니다.
 검토 유형: {state['review_type']}
-{context}
-반드시 한국어로 답변하세요. 3문장 이내로 핵심만 간결하게 작성하세요.
+{ROUND_CONTEXT[round_num]}
+반드시 순수 한국어로만 답변하세요. 영어나 외래어를 절대 사용하지 마세요.
+3문장 이내로 핵심만 간결하게 작성하세요.
 소비자 보호와 사회적 책임 관점에서 분석하세요."""
 
     user = f"""[상황] {state['situation']}
@@ -136,25 +120,33 @@ def ethics_agent(state: DebateState) -> dict:
     content = _call_llm(system, user)
     stance = "PRO" if round_num == 3 else ("CON" if round_num == 2 else "NEUTRAL")
 
-    msg = AgentMessage(
-        agentId="ethics",
-        agentName="윤리 검토자",
-        content=content,
-        type=ROUND_TYPE[round_num],
-        round=round_num,
-        stance=stance,
+    return {"messages": [AgentMessage(
+        agentId="ethics", agentName="윤리 검토자", content=content,
+        type=ROUND_TYPE[round_num], round=round_num, stance=stance,
         evidenceSummary=f"라운드 {round_num} 윤리 검토 완료",
-    )
-    return {"messages": [msg]}
+    )]}
 
 
-def round_controller(state: DebateState) -> dict:
-    """라운드 카운터를 증가시키는 컨트롤러."""
-    return {"current_round": state["current_round"] + 1}
+def round2_parallel(state: DebateState) -> dict:
+    """Round 2: 3개 에이전트 병렬 실행. Round 1 전체 발언을 보고 각자 심화 분석."""
+    state_r2 = {**state, "current_round": 2}
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [
+            executor.submit(legal_agent, state_r2),
+            executor.submit(risk_agent, state_r2),
+            executor.submit(ethics_agent, state_r2),
+        ]
+        results = [f.result() for f in futures]
+
+    all_messages = []
+    for r in results:
+        all_messages.extend(r["messages"])
+
+    return {"messages": all_messages, "current_round": 3}
 
 
 def supervisor(state: DebateState) -> dict:
-    """슈퍼바이저: 최종 판정 생성."""
     all_opinions = "\n".join([
         f"[{m.agentName} / 라운드{m.round}] {m.content}"
         for m in state["messages"]
@@ -162,7 +154,7 @@ def supervisor(state: DebateState) -> dict:
 
     system = """당신은 법률 검토 슈퍼바이저입니다.
 세 전문가의 토론을 종합하여 최종 판정을 내려주세요.
-반드시 한국어로 답변하고, 아래 형식을 정확히 따르세요.
+반드시 순수 한국어로만 답변하고, 아래 형식을 정확히 따르세요.
 
 위험수준: HIGH 또는 MEDIUM 또는 LOW
 핵심문제: (2문장 이내)
@@ -178,58 +170,45 @@ def supervisor(state: DebateState) -> dict:
 
     verdict_text = _call_llm(system, user)
     return {"messages": [AgentMessage(
-        agentId="supervisor",
-        agentName="슈퍼바이저",
-        content=verdict_text,
-        type="verdict",
-        round=4,
-        stance="NEUTRAL",
+        agentId="supervisor", agentName="슈퍼바이저", content=verdict_text,
+        type="verdict", round=4, stance="NEUTRAL",
         evidenceSummary="최종 종합 판정",
     )]}
 
 
-# ── 라우팅 함수 ──────────────────────────────────────────────
-def should_continue(state: DebateState) -> str:
-    """3라운드 완료 여부에 따라 다음 노드 결정."""
-    if state["current_round"] > 3:
-        return "supervisor"
-    return "legal"
-
-
-# ── 그래프 구성 ──────────────────────────────────────────────
 def build_graph() -> StateGraph:
     graph = StateGraph(DebateState)
 
-    graph.add_node("legal", legal_agent)
-    graph.add_node("risk", risk_agent)
-    graph.add_node("ethics", ethics_agent)
-    graph.add_node("round_controller", round_controller)
+    # Round 1 — 순차 (직렬)
+    graph.add_node("legal_r1", legal_agent)
+    graph.add_node("risk_r1", risk_agent)
+    graph.add_node("ethics_r1", ethics_agent)
+    # Round 2 — 병렬
+    graph.add_node("round2_parallel", round2_parallel)
+    # Round 3 — 순차 (직렬)
+    graph.add_node("legal_r3", legal_agent)
+    graph.add_node("risk_r3", risk_agent)
+    graph.add_node("ethics_r3", ethics_agent)
+    # Supervisor
     graph.add_node("supervisor", supervisor)
 
-    # 한 라운드: legal → risk → ethics → round_controller
-    graph.add_edge("legal", "risk")
-    graph.add_edge("risk", "ethics")
-    graph.add_edge("ethics", "round_controller")
-
-    # 3라운드 반복 or 슈퍼바이저로
-    graph.add_conditional_edges(
-        "round_controller",
-        should_continue,
-        {"legal": "legal", "supervisor": "supervisor"},
-    )
+    graph.add_edge("legal_r1", "risk_r1")
+    graph.add_edge("risk_r1", "ethics_r1")
+    graph.add_edge("ethics_r1", "round2_parallel")
+    graph.add_edge("round2_parallel", "legal_r3")
+    graph.add_edge("legal_r3", "risk_r3")
+    graph.add_edge("risk_r3", "ethics_r3")
+    graph.add_edge("ethics_r3", "supervisor")
     graph.add_edge("supervisor", END)
-    graph.set_entry_point("legal")
 
+    graph.set_entry_point("legal_r1")
     return graph.compile()
 
 
-# 그래프 인스턴스 (앱 시작 시 1회 생성)
 debate_graph = build_graph()
 
 
-# ── 메인 실행 함수 ───────────────────────────────────────────
 def run_debate(content: str, situation: str, review_type: str) -> tuple[list[AgentMessage], FinalDecision]:
-    """토론 실행 후 메시지 목록과 최종 판정 반환."""
     initial_state: DebateState = {
         "content": content,
         "situation": situation,
@@ -242,11 +221,8 @@ def run_debate(content: str, situation: str, review_type: str) -> tuple[list[Age
     result = debate_graph.invoke(initial_state)
     messages = result["messages"]
 
-    # 슈퍼바이저 메시지에서 최종 판정 파싱
     supervisor_msg = next((m for m in messages if m.agentId == "supervisor"), None)
     final_decision = _parse_final_decision(supervisor_msg, content)
-
-    # 슈퍼바이저 메시지는 토론 메시지에서 제외
     debate_messages = [m for m in messages if m.agentId != "supervisor"]
 
     logger.info("토론 완료 — 총 메시지: %d개", len(debate_messages))
@@ -254,11 +230,9 @@ def run_debate(content: str, situation: str, review_type: str) -> tuple[list[Age
 
 
 def _parse_final_decision(supervisor_msg: AgentMessage | None, content: str) -> FinalDecision:
-    """슈퍼바이저 출력을 파싱해서 FinalDecision 생성."""
     verdict_text = supervisor_msg.content if supervisor_msg else ""
 
     risk_level = _extract_field(verdict_text, "위험수준") or "MEDIUM"
-    # 필드 값에서 HIGH/MEDIUM/LOW만 추출
     if "HIGH" in risk_level.upper():
         risk_level = "HIGH"
     elif "LOW" in risk_level.upper():
@@ -271,34 +245,25 @@ def _parse_final_decision(supervisor_msg: AgentMessage | None, content: str) -> 
     verdict = "conditional" if risk_level in ("HIGH", "MEDIUM") else "approved"
 
     risks = [
-        RiskItem(category="법률 리스크", level=risk_level.lower(),
-                 description=summary),
-        RiskItem(category="사업 리스크", level="medium",
-                 description="스타트업 운영 관점 잠재 리스크"),
-        RiskItem(category="윤리 리스크", level="low",
-                 description="소비자·사회적 책임 관점 검토"),
+        RiskItem(category="법률 리스크", level=risk_level.lower(), description=summary),
+        RiskItem(category="사업 리스크", level="medium", description="스타트업 운영 관점 잠재 리스크"),
+        RiskItem(category="윤리 리스크", level="low", description="소비자·사회적 책임 관점 검토"),
     ]
 
     return FinalDecision(
-        verdict=verdict,
-        riskLevel=risk_level,
-        risks=risks,
-        summary=summary,
-        recommendation=recommendation,
+        verdict=verdict, riskLevel=risk_level, risks=risks,
+        summary=summary, recommendation=recommendation,
         revisedContent=content + "\n\n[AI 에이전트 검토 완료 — 상세 수정안은 권고사항 참조]",
     )
 
 
 def _extract_field(text: str, field_name: str) -> str:
-    """'필드명: 값' 형식에서 값을 추출한다."""
-    import re
     pattern = rf"{field_name}\s*:\s*(.+?)(?=\n[가-힣]+\s*:|$)"
     match = re.search(pattern, text, re.DOTALL)
     return match.group(1).strip() if match else ""
 
 
 def _get_previous_opinions(messages: list[AgentMessage], current_round: int) -> str:
-    """현재 라운드 이전 발언 + 같은 라운드 내 앞선 발언 요약."""
     prev = [m for m in messages if m.round <= current_round]
     if not prev:
         return "없음 (첫 번째 라운드 첫 발언)"
