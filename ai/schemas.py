@@ -3,9 +3,13 @@ from typing import Optional
 
 
 class AnalyzeRequest(BaseModel):
-    content: str
+    sessionId: int = 0
+    companyName: str = ""
+    industry: str = ""
     reviewType: str
     situation: str
+    content: str
+    participationMode: str = "ai_only"
 
 
 class AgentMessage(BaseModel):
@@ -27,12 +31,12 @@ class RiskItem(BaseModel):
 class EvidenceItem(BaseModel):
     sourceType: str
     title: str
-    referenceId: str
-    articleOrCourt: str
-    summary: str
-    url: str
-    relevanceReason: str
-    relevanceScore: int
+    referenceId: str = ""
+    articleOrCourt: str = ""
+    summary: str = ""
+    url: str = ""
+    relevanceReason: str = ""
+    relevanceScore: int = 0
     quotedText: str = ""
     metadata: Optional[dict] = None
 
@@ -49,4 +53,4 @@ class FinalDecision(BaseModel):
 class AnalyzeResponse(BaseModel):
     messages: list[AgentMessage]
     finalDecision: FinalDecision
-    evidences: list[EvidenceItem]
+    evidences: list[EvidenceItem] = []

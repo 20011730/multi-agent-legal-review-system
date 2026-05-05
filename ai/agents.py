@@ -17,6 +17,7 @@ from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from schemas import AgentMessage, FinalDecision, RiskItem
+import rag
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ class DebateState(TypedDict):
     content: str
     situation: str
     review_type: str
+    company_name: str
+    industry: str
     current_round: int
     messages: Annotated[list, operator.add]
 
@@ -54,9 +57,13 @@ def _call_llm(system_prompt: str, user_prompt: str) -> str:
 
 def legal_agent(state: DebateState) -> dict:
     round_num = state["current_round"]
+    rag_context = rag.retrieve(f"법률 위반 {state['review_type']} {state['content'][:150]}")
+    rag_section = f"\n\n[관련 법령 조문]\n{rag_context}" if rag_context else ""
+
+    company_ctx = f"기업: {state['company_name']} ({state['industry']})\n" if state.get('company_name') else ""
     system = f"""당신은 스타트업 전문 법률 전문가입니다.
-검토 유형: {state['review_type']}
-{ROUND_CONTEXT[round_num]}
+{company_ctx}검토 유형: {state['review_type']}
+{ROUND_CONTEXT[round_num]}{rag_section}
 
 [출력 규칙]
 - 반드시 순수 한국어로만 작성하세요.
@@ -83,9 +90,12 @@ def legal_agent(state: DebateState) -> dict:
 
 def risk_agent(state: DebateState) -> dict:
     round_num = state["current_round"]
+    rag_context = rag.retrieve(f"과징금 제재 처벌 {state['review_type']} {state['content'][:150]}")
+    rag_section = f"\n\n[관련 법령 조문]\n{rag_context}" if rag_context else ""
+
     system = f"""당신은 스타트업 리스크 관리 전문가입니다.
 검토 유형: {state['review_type']}
-{ROUND_CONTEXT[round_num]}
+{ROUND_CONTEXT[round_num]}{rag_section}
 
 [출력 규칙]
 - 반드시 순수 한국어로만 작성하세요.
@@ -112,9 +122,12 @@ def risk_agent(state: DebateState) -> dict:
 
 def ethics_agent(state: DebateState) -> dict:
     round_num = state["current_round"]
+    rag_context = rag.retrieve(f"소비자 보호 권리 {state['review_type']} {state['content'][:150]}")
+    rag_section = f"\n\n[관련 법령 조문]\n{rag_context}" if rag_context else ""
+
     system = f"""당신은 기업 윤리 및 ESG 전문가입니다.
 검토 유형: {state['review_type']}
-{ROUND_CONTEXT[round_num]}
+{ROUND_CONTEXT[round_num]}{rag_section}
 
 [출력 규칙]
 - 반드시 순수 한국어로만 작성하세요.
@@ -220,11 +233,19 @@ def build_graph() -> StateGraph:
 debate_graph = build_graph()
 
 
-def run_debate(content: str, situation: str, review_type: str) -> tuple[list[AgentMessage], FinalDecision]:
+def run_debate(
+    content: str,
+    situation: str,
+    review_type: str,
+    company_name: str = "",
+    industry: str = "",
+) -> tuple[list[AgentMessage], FinalDecision]:
     initial_state: DebateState = {
         "content": content,
         "situation": situation,
         "review_type": review_type,
+        "company_name": company_name,
+        "industry": industry,
         "current_round": 1,
         "messages": [],
     }
