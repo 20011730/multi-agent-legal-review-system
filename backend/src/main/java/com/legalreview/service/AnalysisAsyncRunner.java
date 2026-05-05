@@ -36,6 +36,8 @@ public class AnalysisAsyncRunner {
     private final AiAnalysisClient aiAnalysisClient;
     private final OllamaAnalysisService ollamaAnalysisService;
     private final LawSearchService lawSearchService;
+    private final com.legalreview.service.rag.LegalRetrievalService legalRetrievalService;
+    private final com.legalreview.config.RagProperties ragProperties;
 
     @Value("${app.ai.engine:python}")
     private String aiEngine;
@@ -53,11 +55,28 @@ public class AnalysisAsyncRunner {
      */
     @Async
     public void runAnalysis(Long sessionId, SessionCreateRequest request) {
+        // ── 분석 시작 시각 기록 (실험 enabled와 무관하게 항상 기록 — 가벼운 1 컬럼) ──
+        final long t0 = System.currentTimeMillis();
         try {
             log.info("비동기 AI 분석 시작 — engine={}, sessionId={}", aiEngine, sessionId);
 
             ReviewSession session = sessionRepository.findById(sessionId)
                     .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+
+            // 시작 시각 + 실험 메타 스냅샷
+            session.setAnalysisStartedAt(java.time.LocalDateTime.now());
+            if (ragProperties.getExperiment().isEnabled()) {
+                session.setExperimentTag(ragProperties.getExperiment().getTag());
+                session.setRagEnabled(ragProperties.isEnabled());
+                session.setRagTopkLaw(ragProperties.getTopK().getLaw());
+                session.setRagTopkCase(ragProperties.getTopK().getCaze());
+                log.info("[EXPERIMENT] 세션 메타 기록 — sessionId={}, tag={}, ragEnabled={}, law={}, case={}",
+                        sessionId, ragProperties.getExperiment().getTag(),
+                        ragProperties.isEnabled(),
+                        ragProperties.getTopK().getLaw(),
+                        ragProperties.getTopK().getCaze());
+            }
+            sessionRepository.saveAndFlush(session);
 
             // phase 업데이트 콜백 — 각 LLM 호출 전에 DB에 현재 단계를 저장
             java.util.function.Consumer<String> phaseCallback = (phase) -> {
@@ -66,11 +85,32 @@ public class AnalysisAsyncRunner {
                 log.debug("분석 단계 변경: {} (sessionId={})", phase, sessionId);
             };
 
+            // ── ★ RAG retrieval (Chroma) — 토론 시작 직전 1회 ★ ──
+            // app.rag.enabled=false면 빈 리스트 반환 → 아래 호출 모두 no-op (기존 동작 100% 유지)
+            // 멀티에이전트 모두 같은 evidence pool을 참조 → 라운드 반복 X, 1회 retrieval 후 공유
+            java.util.List<com.legalreview.dto.response.EvidenceDto> ragEvidences = java.util.List.of();
+            if (ragProperties.isEnabled()) {
+                try {
+                    ragEvidences = legalRetrievalService.retrieveForSession(request);
+                    log.info("[RAG] 분석 전 retrieval — sessionId={}, hits={}",
+                            sessionId, ragEvidences.size());
+                } catch (Exception ragErr) {
+                    log.warn("[RAG] retrieval 실패, 빈 결과로 fallback (sessionId={}): {}",
+                            sessionId, ragErr.getMessage());
+                    ragEvidences = java.util.List.of();
+                }
+            }
+            String legalEvidenceBlock = buildLegalEvidenceBlock(ragEvidences);
+            String commonEvidenceBlock = buildCommonEvidenceBlock(ragEvidences);
+
             // AI 엔진 선택: ollama → 로컬 Ollama, python → 기존 Python 서버
             AiAnalysisResponse aiResponse;
             if ("ollama".equalsIgnoreCase(aiEngine)) {
-                log.info("Ollama 엔진으로 분석 실행 (sessionId={})", sessionId);
-                aiResponse = ollamaAnalysisService.analyze(sessionId, request, phaseCallback);
+                log.info("Ollama 엔진으로 분석 실행 (sessionId={}, ragInjected={})",
+                        sessionId, !ragEvidences.isEmpty());
+                aiResponse = ollamaAnalysisService.analyze(
+                        sessionId, request, phaseCallback,
+                        legalEvidenceBlock, commonEvidenceBlock);
             } else {
                 log.info("Python AI 서버로 분석 실행 (sessionId={})", sessionId);
                 aiResponse = aiAnalysisClient.analyze(sessionId, request);
@@ -88,9 +128,18 @@ public class AnalysisAsyncRunner {
                 log.info("AI 분석 근거 {}건 저장 (sessionId={})", aiResponse.evidences().size(), sessionId);
             }
 
-            // 법제처 OPEN API 검색으로 추가 근거 보강
+            // 법제처 OPEN API 검색으로 추가 근거 보강 (RAG와 무관 — 기존 흐름 유지)
             phaseCallback.accept("COLLECTING_EVIDENCE");
             enrichWithLawSearch(session, request.getContent());
+
+            // RAG 결과를 evidences 테이블에 저장 (결과 페이지/PDF에서 표시 가능하게)
+            if (!ragEvidences.isEmpty()) {
+                for (com.legalreview.dto.response.EvidenceDto dto : ragEvidences) {
+                    evidenceRepository.save(dto.toEntity(session));
+                }
+                log.info("[RAG] retrieval evidence {}건 DB 저장 (sessionId={})",
+                        ragEvidences.size(), sessionId);
+            }
 
             // 안전망: 어떤 이유로든 final_decision이 없으면 fallback 강제 저장
             if (finalDecisionRepository.findBySessionId(sessionId).isEmpty()) {
@@ -100,8 +149,13 @@ public class AnalysisAsyncRunner {
 
             session.setStatus("COMPLETED");
             session.setAnalysisPhase(null); // 분석 완료 — phase 초기화
+            // 종료 시각 + duration 기록
+            java.time.LocalDateTime now = java.time.LocalDateTime.now();
+            session.setAnalysisCompletedAt(now);
+            session.setAnalysisDurationMs(System.currentTimeMillis() - t0);
             sessionRepository.save(session);
-            log.info("비동기 AI 분석 완료 (sessionId={})", sessionId);
+            log.info("비동기 AI 분석 완료 (sessionId={}, durationMs={})",
+                    sessionId, session.getAnalysisDurationMs());
 
         } catch (Exception e) {
             log.error("AI 분석 실패 (sessionId={}): {}", sessionId, e.getMessage(), e);
@@ -114,16 +168,80 @@ public class AnalysisAsyncRunner {
                     createFallbackFinalDecision(session);
                     enrichWithLawSearch(session, request.getContent());
                     session.setStatus("COMPLETED");
+                    java.time.LocalDateTime now = java.time.LocalDateTime.now();
+                    session.setAnalysisCompletedAt(now);
+                    session.setAnalysisDurationMs(System.currentTimeMillis() - t0);
                     sessionRepository.save(session);
                 }
             } catch (Exception fallbackErr) {
                 log.error("폴백 데이터 생성도 실패 (sessionId={}): {}", sessionId, fallbackErr.getMessage());
                 sessionRepository.findById(sessionId).ifPresent(s -> {
                     s.setStatus("FAILED");
+                    s.setAnalysisCompletedAt(java.time.LocalDateTime.now());
+                    s.setAnalysisDurationMs(System.currentTimeMillis() - t0);
                     sessionRepository.save(s);
                 });
             }
         }
+    }
+
+    // ========== RAG evidence → 프롬프트 블록 ==========
+
+    /**
+     * LEGAL 에이전트용 상세 evidence 블록.
+     * - 법령 우선, 그 다음 판례
+     * - app.rag.prompt.maxItemsLegal 만큼만 포함
+     * - 본문은 maxEvidenceChars로 truncate
+     */
+    private String buildLegalEvidenceBlock(java.util.List<com.legalreview.dto.response.EvidenceDto> evs) {
+        if (evs == null || evs.isEmpty()) return "";
+        int maxItems = ragProperties.getPrompt().getMaxItemsLegal();
+        int maxChars = ragProperties.getPrompt().getMaxEvidenceChars();
+
+        // 법령 먼저, 판례 나중 정렬
+        java.util.List<com.legalreview.dto.response.EvidenceDto> ordered = new java.util.ArrayList<>(evs);
+        ordered.sort((a, b) -> {
+            int ra = "LAW".equalsIgnoreCase(a.getSourceType()) ? 0 : 1;
+            int rb = "LAW".equalsIgnoreCase(b.getSourceType()) ? 0 : 1;
+            return Integer.compare(ra, rb);
+        });
+
+        StringBuilder sb = new StringBuilder();
+        int n = Math.min(maxItems, ordered.size());
+        for (int i = 0; i < n; i++) {
+            com.legalreview.dto.response.EvidenceDto e = ordered.get(i);
+            String typeLabel = "LAW".equalsIgnoreCase(e.getSourceType()) ? "법령" : "판례";
+            String title = nullSafe(e.getTitle());
+            String articleOrCourt = nullSafe(e.getArticleOrCourt());
+            String quoted = truncate(nullSafe(e.getQuotedText().isEmpty() ? e.getSummary() : e.getQuotedText()), maxChars);
+            sb.append(String.format("%d) [%s] %s%s%n   %s%n",
+                    i + 1, typeLabel, title,
+                    articleOrCourt.isEmpty() ? "" : " (" + articleOrCourt + ")",
+                    quoted));
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * BIZ/JUDGE 에이전트용 요약 evidence 블록 — 타이틀 위주, 짧게.
+     */
+    private String buildCommonEvidenceBlock(java.util.List<com.legalreview.dto.response.EvidenceDto> evs) {
+        if (evs == null || evs.isEmpty()) return "";
+        int maxItems = ragProperties.getPrompt().getMaxItemsCommon();
+        StringBuilder sb = new StringBuilder();
+        int n = Math.min(maxItems, evs.size());
+        for (int i = 0; i < n; i++) {
+            com.legalreview.dto.response.EvidenceDto e = evs.get(i);
+            String typeLabel = "LAW".equalsIgnoreCase(e.getSourceType()) ? "법령" : "판례";
+            sb.append(String.format("- [%s] %s%n", typeLabel, nullSafe(e.getTitle())));
+        }
+        return sb.toString().trim();
+    }
+
+    private static String nullSafe(String s) { return s == null ? "" : s; }
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max) + "...";
     }
 
     // ========== AI 응답 → DB 저장 ==========

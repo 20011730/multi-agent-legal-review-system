@@ -102,20 +102,40 @@ public class OllamaAnalysisService {
      * 기존 호환성 유지: 콜백 없이 호출
      */
     public AiAnalysisResponse analyze(Long sessionId, SessionCreateRequest request) {
-        return analyze(sessionId, request, phase -> {});
+        return analyze(sessionId, request, phase -> {}, null, null);
     }
 
     /**
-     * 멀티에이전트 토론 실행.
-     * @param phaseCallback 각 단계 전환 시 호출되는 콜백 (DB phase 업데이트용)
+     * 기존 호환성 유지: 콜백만 받음 (evidence context 없이)
      */
     public AiAnalysisResponse analyze(Long sessionId, SessionCreateRequest request, Consumer<String> phaseCallback) {
+        return analyze(sessionId, request, phaseCallback, null, null);
+    }
+
+    /**
+     * 멀티에이전트 토론 실행 (RAG evidence context 주입 가능 버전).
+     *
+     * @param phaseCallback 각 단계 전환 시 호출되는 콜백 (DB phase 업데이트용)
+     * @param legalEvidenceBlock LEGAL 에이전트 프롬프트에 주입할 본문(법령+판례 상세). null이면 미주입.
+     * @param commonEvidenceBlock BIZ/JUDGE 프롬프트에 주입할 요약 본문. null이면 미주입.
+     */
+    public AiAnalysisResponse analyze(Long sessionId, SessionCreateRequest request,
+                                       Consumer<String> phaseCallback,
+                                       String legalEvidenceBlock,
+                                       String commonEvidenceBlock) {
         String topic = String.format(
                 "[기업] %s (%s)\n[검토 유형] %s\n[상황] %s\n[검토 대상 원문] %s",
                 request.getCompanyName(), request.getIndustry(),
                 request.getReviewType(), request.getSituation(),
                 request.getContent()
         );
+
+        // evidence block을 prompt 끝에 덧붙일 형태로 미리 가공
+        String legalEvBlk = (legalEvidenceBlock == null || legalEvidenceBlock.isBlank())
+                ? "" : "\n\n[참고 근거 — 법령/판례 retrieval 결과]\n" + legalEvidenceBlock
+                       + "\n위 근거를 우선적으로 인용하여 분석하세요.";
+        String commonEvBlk = (commonEvidenceBlock == null || commonEvidenceBlock.isBlank())
+                ? "" : "\n\n[참고 근거 요약]\n" + commonEvidenceBlock;
 
         StringBuilder history = new StringBuilder("[검토 안건]\n").append(topic);
         List<Map<String, Object>> messages = new ArrayList<>();
@@ -129,14 +149,16 @@ public class OllamaAnalysisService {
 
             String bizPrompt;
             if (round == 1) {
-                bizPrompt = "검토 대상 안건:\n" + topic + "\n\n비즈니스 관점에서 분석해주세요.";
+                bizPrompt = "검토 대상 안건:\n" + topic + commonEvBlk + "\n\n비즈니스 관점에서 분석해주세요.";
             } else if (round == 2) {
                 bizPrompt = "검토 대상 안건:\n" + topic
                       + "\n\n현재까지의 토론 내용:\n" + history
+                      + commonEvBlk
                       + "\n\n법률 전문가의 지적을 참고하여, 비즈니스 관점에서 반박하거나 보완 분석해주세요.";
             } else {
                 bizPrompt = "검토 대상 안건:\n" + topic
                       + "\n\n현재까지의 토론 내용:\n" + history
+                      + commonEvBlk
                       + "\n\n라운드 3 최종 입장 정리: 지금까지의 모든 논점을 종합하여,"
                       + " 비즈니스 실행 가능성을 위한 최선의 타협안이나 실행 방안을 제시해주세요.";
             }
@@ -159,14 +181,17 @@ public class OllamaAnalysisService {
             if (round == 1) {
                 legalPrompt = "검토 대상 안건:\n" + topic
                       + "\n\n비즈니스 전략가의 의견:\n" + bizResponse
+                      + legalEvBlk
                       + "\n\n법적 관점에서 분석해주세요.";
             } else if (round == 2) {
                 legalPrompt = "검토 대상 안건:\n" + topic
                       + "\n\n현재까지의 토론 내용:\n" + history
+                      + legalEvBlk
                       + "\n\n비즈니스 전략가의 반박을 고려하여, 법적 관점에서 재반박 또는 보완 분석해주세요.";
             } else {
                 legalPrompt = "검토 대상 안건:\n" + topic
                       + "\n\n현재까지의 토론 내용:\n" + history
+                      + legalEvBlk
                       + "\n\n라운드 3 최종 입장 정리: 지금까지의 모든 법적 논점을 종합하여,"
                       + " 법적 리스크를 최소화하면서도 사업 실행이 가능한 최종 법적 권고안을 제시해주세요.";
             }
@@ -187,7 +212,8 @@ public class OllamaAnalysisService {
         phaseCallback.accept("JUDGING");
 
         String judgePrompt = "다음은 비즈니스 전략가와 법률 전문가의 토론 내용입니다:\n\n"
-                + history + "\n\n위 토론을 종합하여 최종 판정을 JSON 형식으로 내려주세요.";
+                + history + commonEvBlk
+                + "\n\n위 토론과 (있다면) 참고 근거를 종합하여 최종 판정을 JSON 형식으로 내려주세요.";
 
         String judgeResponse = ollamaClient.chat(JUDGE_SYSTEM, judgePrompt);
         log.info("[Ollama] JUDGE 완료 (sessionId={})", sessionId);
