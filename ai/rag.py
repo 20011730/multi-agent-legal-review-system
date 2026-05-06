@@ -1,60 +1,59 @@
-"""ChromaDB 기반 법령 RAG 검색 유틸리티."""
+"""법제처 API 실시간 검색 유틸리티 (임시 — ChromaDB 구축 전까지 사용)."""
 
 import logging
 import os
-
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+import requests
+import xml.etree.ElementTree as ET
 
 logger = logging.getLogger(__name__)
 
-CHROMA_DIR = os.getenv("CHROMA_DB_DIR", "./chroma_db")
-EMBED_MODEL = "jhgan/ko-sroberta-multitask"
-
-_vectorstore = None
+API_KEY = os.getenv("LAW_API_KEY", "minijn")
 
 
-def _get_vectorstore() -> Chroma | None:
-    global _vectorstore
-    if _vectorstore is not None:
-        return _vectorstore
-    if not os.path.exists(CHROMA_DIR):
-        logger.warning("ChromaDB 없음 (%s) — RAG 비활성화. build_chroma_db.py를 먼저 실행하세요.", CHROMA_DIR)
-        return None
-    try:
-        # local_files_only=True: 캐시된 모델만 사용, HuggingFace 네트워크 요청 차단
-        embedding = HuggingFaceEmbeddings(
-            model_name=EMBED_MODEL,
-            model_kwargs={"local_files_only": True},
-        )
-        _vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embedding)
-        logger.info("ChromaDB 로드 완료 (%s)", CHROMA_DIR)
-    except Exception as e:
-        logger.error("ChromaDB 로드 실패: %s", e)
-        return None
-    return _vectorstore
+def _get_vectorstore():
+    pass
 
 
 def retrieve(query: str, k: int = 3) -> str:
-    """
-    쿼리와 관련된 법령 조문을 ChromaDB에서 검색한다.
-    ChromaDB가 없으면 빈 문자열을 반환해 기존 흐름을 유지한다.
-    """
-    vs = _get_vectorstore()
-    if vs is None:
-        return ""
-
+    """쿼리 키워드로 법제처 API에서 법령 조문을 실시간 검색한다."""
     try:
-        docs = vs.similarity_search(query, k=k)
+        # 법령 검색
+        search_url = "http://www.law.go.kr/DRF/lawSearch.do"
+        params = {"OC": API_KEY, "target": "law", "type": "XML", "query": query, "display": k}
+        res = requests.get(search_url, params=params, timeout=10)
+        res.raise_for_status()
+
+        root = ET.fromstring(res.content)
+        law_ids = []
+        law_names = []
+        for law in root.findall(".//법령"):
+            law_id = law.findtext("법령ID", default="")
+            law_name = law.findtext("법령명한글", default="")
+            if law_id:
+                law_ids.append(law_id)
+                law_names.append(law_name)
+
+        if not law_ids:
+            return ""
+
+        # 첫 번째 법령 조문 가져오기
+        parts = []
+        for law_id, law_name in zip(law_ids[:2], law_names[:2]):
+            detail_url = "http://www.law.go.kr/DRF/lawService.do"
+            params = {"OC": API_KEY, "target": "law", "type": "XML", "ID": law_id}
+            detail_res = requests.get(detail_url, params=params, timeout=10)
+            detail_res.raise_for_status()
+
+            detail_root = ET.fromstring(detail_res.content)
+            articles = detail_root.findall(".//조문단위")[:2]
+            for article in articles:
+                article_no = article.findtext("조문번호", default="")
+                content = article.findtext("조문내용", default="")
+                if content:
+                    parts.append(f"[{law_name} 제{article_no}조]\n{content}")
+
+        return "\n\n".join(parts)
+
     except Exception as e:
-        logger.warning("RAG 검색 실패: %s", e)
+        logger.warning("법제처 API 검색 실패: %s", e)
         return ""
-
-    parts = []
-    for doc in docs:
-        meta = doc.metadata
-        law_name = meta.get("law_name_kr", "")
-        article_no = meta.get("article_no", "")
-        parts.append(f"[{law_name} {article_no}]\n{doc.page_content}")
-
-    return "\n\n".join(parts)
