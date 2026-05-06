@@ -5,6 +5,8 @@ import os
 import requests
 import xml.etree.ElementTree as ET
 
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
 logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("LAW_API_KEY", "minijn")
@@ -20,7 +22,7 @@ def retrieve(query: str, k: int = 3) -> str:
         # 법령 검색
         search_url = "http://www.law.go.kr/DRF/lawSearch.do"
         params = {"OC": API_KEY, "target": "law", "type": "XML", "query": query, "display": k}
-        res = requests.get(search_url, params=params, timeout=10)
+        res = requests.get(search_url, params=params, timeout=10, headers=HEADERS)
         res.raise_for_status()
 
         root = ET.fromstring(res.content)
@@ -41,7 +43,7 @@ def retrieve(query: str, k: int = 3) -> str:
         for law_id, law_name in zip(law_ids[:2], law_names[:2]):
             detail_url = "http://www.law.go.kr/DRF/lawService.do"
             params = {"OC": API_KEY, "target": "law", "type": "XML", "ID": law_id}
-            detail_res = requests.get(detail_url, params=params, timeout=10)
+            detail_res = requests.get(detail_url, params=params, timeout=10, headers=HEADERS)
             detail_res.raise_for_status()
 
             detail_root = ET.fromstring(detail_res.content)
