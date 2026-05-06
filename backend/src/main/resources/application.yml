@@ -37,6 +37,12 @@ app:
   law-api:
     base-url: https://www.law.go.kr/DRF/lawSearch.do
     oc: ${LAW_API_OC:}
+    # ── RAG 수집(LawApiProperties) 신규 키 ──
+    search-url: ${LAW_API_SEARCH_URL:http://www.law.go.kr/DRF/lawSearch.do}
+    service-url: ${LAW_API_SERVICE_URL:http://www.law.go.kr/DRF/lawService.do}
+    default-display: ${LAW_API_DEFAULT_DISPLAY:100}
+    request-delay-ms: ${LAW_API_REQUEST_DELAY_MS:150}
+    max-pages: ${LAW_API_MAX_PAGES:1}
 
   # 법령/판례 RAG (Chroma) 설정
   # 기본은 비활성. APP_RAG_ENABLED=true 환경변수로만 켠다.

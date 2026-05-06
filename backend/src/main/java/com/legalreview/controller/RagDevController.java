@@ -3,6 +3,7 @@ package com.legalreview.controller;
 import com.legalreview.config.RagProperties;
 import com.legalreview.dto.request.SessionCreateRequest;
 import com.legalreview.dto.response.EvidenceDto;
+import com.legalreview.dto.rag.LawListApiIngestionResult;
 import com.legalreview.dto.response.ExperimentSessionDto;
 import com.legalreview.dto.response.ExperimentSummaryDto;
 import com.legalreview.service.rag.ChromaSearchService;
@@ -78,6 +79,37 @@ public class RagDevController {
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("message", "law_list seed ingestion completed");
         resp.put("count", count);
+        return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * 국가법령정보센터 법령 목록 API에서 직접 적재 (개발용).
+     *
+     * 안전장치:
+     *  - 기본 maxPages=1 (실수로 전체 수집 방지)
+     *  - display는 1~100 범위로 clamp (서비스 내부)
+     *  - 페이지 사이 requestDelayMs sleep
+     *
+     * 환경변수: LAW_API_OC 필요. 미설정 시 결과의 totalCnt=-1, pagesProcessed=0 반환.
+     */
+    @PostMapping("/ingest/law-list/api")
+    public ResponseEntity<?> ingestLawListFromApi(
+            @RequestParam(value = "maxPages", required = false, defaultValue = "1") int maxPages,
+            @RequestParam(value = "display", required = false, defaultValue = "100") int display) {
+        ResponseEntity<?> guard = guardDevEndpoint();
+        if (guard != null) return guard;
+        log.info("[RAG-DEV] /api/rag/ingest/law-list/api 호출 — maxPages={}, display={}",
+                maxPages, display);
+        LawListApiIngestionResult result = lawListIngestionService.ingestLawListFromApi(maxPages, display);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("message", "law_list API ingestion completed");
+        resp.put("totalCnt", result.getTotalCnt());
+        resp.put("pagesProcessed", result.getPagesProcessed());
+        resp.put("savedCount", result.getSavedCount());
+        resp.put("display", result.getDisplay());
+        resp.put("completedAll", result.isCompletedAll());
+        resp.put("skippedRows", result.getSkippedRows());
+        resp.put("failedPages", result.getFailedPages());
         return ResponseEntity.ok(resp);
     }
 

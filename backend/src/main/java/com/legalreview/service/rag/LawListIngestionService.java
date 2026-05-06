@@ -1,7 +1,10 @@
 package com.legalreview.service.rag;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.legalreview.config.LawApiProperties;
 import com.legalreview.domain.LawList;
+import com.legalreview.dto.rag.LawListApiIngestionResult;
 import com.legalreview.dto.rag.LawListImportRow;
 import com.legalreview.repository.LawListRepository;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +18,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +48,8 @@ public class LawListIngestionService {
 
     private final LawListRepository lawListRepository;
     private final LawListImportMapper mapper;
+    private final LawListApiClient lawListApiClient;
+    private final LawApiProperties lawApiProperties;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final String SEED_PATH = "rag-seed/law-list.json";
@@ -317,6 +323,227 @@ public class LawListIngestionService {
         // 파일이 개행 없이 끝난 경우
         fields.add(field.toString());
         return fields;
+    }
+
+    // ─────────────────────── 5. 법령 목록 API 적재 ───────────────────────
+
+    /**
+     * 국가법령정보센터 법령 목록 API에서 페이지 단위로 데이터를 받아 law_list에 적재.
+     *
+     * 안전장치:
+     *  - {@code maxPages <= 0}이면 LawApiProperties의 maxPages 사용 (기본 1)
+     *  - {@code display}는 1~100 범위로 clamp
+     *  - LAW_API_OC 미설정 시 즉시 에러 결과 반환 (실제 호출 안 함)
+     *  - 페이지 사이 requestDelayMs sleep
+     *
+     * @return API 호출 통계 (totalCnt / pagesProcessed / savedCount / completedAll 등)
+     */
+    public LawListApiIngestionResult ingestLawListFromApi(int maxPagesArg, int displayArg) {
+        if (!lawApiProperties.isConfigured()) {
+            log.error("[LAW-LIST-API] LAW_API_OC 미설정 — 호출 중단");
+            return LawListApiIngestionResult.builder()
+                    .totalCnt(-1).pagesProcessed(0).savedCount(0)
+                    .display(displayArg).completedAll(false)
+                    .skippedRows(0).failedPages(List.of())
+                    .build();
+        }
+
+        int display = clampDisplay(displayArg <= 0 ? lawApiProperties.getDefaultDisplay() : displayArg);
+        int maxPages = (maxPagesArg <= 0) ? lawApiProperties.getMaxPages() : maxPagesArg;
+        int delayMs = Math.max(0, lawApiProperties.getRequestDelayMs());
+
+        int totalCnt = -1;
+        int pagesProcessed = 0;
+        int savedTotal = 0;
+        int skippedTotal = 0;
+        List<Integer> failedPages = new ArrayList<>();
+
+        for (int page = 1; page <= maxPages; page++) {
+            JsonNode body = lawListApiClient.fetchLawListPage(page, display);
+            if (body == null) {
+                log.warn("[LAW-LIST-API] page {} 응답 실패 — 다음 페이지로", page);
+                failedPages.add(page);
+                sleepQuiet(delayMs);
+                continue;
+            }
+
+            // 첫 페이지에서 totalCnt 추출
+            if (totalCnt < 0) {
+                totalCnt = extractTotalCnt(body);
+                log.info("[LAW-LIST-API] 시작 — totalCnt={}, display={}, maxPages={}",
+                        totalCnt, display, maxPages);
+            }
+
+            List<JsonNode> lawNodes = extractLawNodes(body);
+            if (lawNodes.isEmpty()) {
+                log.info("[LAW-LIST-API] page {} — 결과 없음 (남은 페이지 종료)", page);
+                pagesProcessed++;
+                break;
+            }
+
+            List<LawListImportRow> rows = new ArrayList<>(lawNodes.size());
+            for (JsonNode node : lawNodes) {
+                LawListImportRow row = toRowFromApi(node);
+                if (row != null) rows.add(row);
+            }
+
+            int beforeSkip = rows.size();
+            int saved = ingestRows(rows);
+            // ingestRows 내부에서 필수필드 누락 row를 skip — 그 차이를 skippedTotal에 누적
+            skippedTotal += Math.max(0, beforeSkip - saved);
+            savedTotal += saved;
+            pagesProcessed++;
+
+            log.info("[LAW-LIST-API] page {} — fetched={}, saved={} (누적 saved={})",
+                    page, lawNodes.size(), saved, savedTotal);
+
+            // 다음 페이지가 의미 없을 때 조기 종료
+            if (totalCnt > 0 && page * display >= totalCnt) {
+                log.info("[LAW-LIST-API] totalCnt 도달 — 조기 종료 (page={}, page*display={}, totalCnt={})",
+                        page, page * display, totalCnt);
+                break;
+            }
+            sleepQuiet(delayMs);
+        }
+
+        boolean completedAll = (totalCnt > 0) && (pagesProcessed * display >= totalCnt);
+        return LawListApiIngestionResult.builder()
+                .totalCnt(totalCnt)
+                .pagesProcessed(pagesProcessed)
+                .savedCount(savedTotal)
+                .display(display)
+                .completedAll(completedAll)
+                .skippedRows(skippedTotal)
+                .failedPages(failedPages)
+                .build();
+    }
+
+    private static int clampDisplay(int v) {
+        if (v < 1) return 1;
+        if (v > 100) return 100;
+        return v;
+    }
+
+    private static void sleepQuiet(int ms) {
+        if (ms <= 0) return;
+        try { Thread.sleep(ms); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+    }
+
+    /**
+     * 응답에서 totalCnt 추출.
+     * 법제처 API 응답 구조 *(추정)*: {"LawSearch": {"totalCnt": "...", "law": [...]}}
+     * - totalCnt가 다른 위치/대소문자/타입(string|number)으로 올 수 있어 모든 후보 탐색.
+     */
+    private static int extractTotalCnt(JsonNode body) {
+        for (String key : new String[]{"totalCnt", "TotalCnt", "totalCount"}) {
+            JsonNode n = findFirstByKey(body, key);
+            if (n != null && !n.isNull()) {
+                try {
+                    return Integer.parseInt(n.asText().trim());
+                } catch (NumberFormatException ignored) { /* try next */ }
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 응답 본문에서 법령 row 노드 목록 추출.
+     * 응답은 {"LawSearch":{"law":[...]}} 형태로 추정.
+     */
+    private static List<JsonNode> extractLawNodes(JsonNode body) {
+        // 1순위: LawSearch.law (배열)
+        JsonNode lawNode = body.has("LawSearch") ? body.get("LawSearch").get("law") : null;
+        // 2순위: 최상위 law
+        if (lawNode == null || lawNode.isNull()) lawNode = body.get("law");
+        // 3순위: 키 트리에서 첫 "law" 찾기
+        if (lawNode == null || lawNode.isNull()) lawNode = findFirstByKey(body, "law");
+
+        if (lawNode == null || lawNode.isNull()) return List.of();
+
+        List<JsonNode> out = new ArrayList<>();
+        if (lawNode.isArray()) {
+            for (JsonNode it : lawNode) out.add(it);
+        } else if (lawNode.isObject()) {
+            // display=1 등으로 단일 객체일 수 있음
+            out.add(lawNode);
+        }
+        return out;
+    }
+
+    /** Jackson 노드 트리에서 처음 만나는 key의 값을 반환 (DFS). */
+    private static JsonNode findFirstByKey(JsonNode root, String key) {
+        if (root == null) return null;
+        if (root.isObject()) {
+            JsonNode hit = root.get(key);
+            if (hit != null) return hit;
+            Iterator<String> it = root.fieldNames();
+            while (it.hasNext()) {
+                JsonNode child = findFirstByKey(root.get(it.next()), key);
+                if (child != null) return child;
+            }
+        } else if (root.isArray()) {
+            for (JsonNode it : root) {
+                JsonNode hit = findFirstByKey(it, key);
+                if (hit != null) return hit;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 법제처 API JSON 한 row → LawListImportRow.
+     * 한글 필드명이 표준이며, 누락된 필드는 null.
+     *
+     * lawId 정책 *(추정)*:
+     *  - 응답에서 "법령ID"가 숫자 문자열로 올 경우 그대로 사용
+     *  - 만약 6자리 미만이고 모두 숫자면 zero-padding(예: "1546" → "011546") 적용
+     *  - 6자리 이상 또는 비숫자면 그대로 보존
+     */
+    private static LawListImportRow toRowFromApi(JsonNode node) {
+        if (node == null) return null;
+        LawListImportRow r = new LawListImportRow();
+        r.setLawMst(parseInteger(text(node, "법령일련번호")));
+        r.setLawId(normalizeLawId(text(node, "법령ID")));
+        r.setCurrentHistoryCode(text(node, "현행연혁코드"));
+        r.setLawNameKr(text(node, "법령명한글"));
+        r.setLawNameShort(text(node, "법령약칭명"));
+        r.setLawTypeName(text(node, "법령구분명"));
+        r.setDeptName(text(node, "소관부처명"));
+        r.setDeptCode(text(node, "소관부처코드"));
+        r.setPromulgateDate(text(node, "공포일자"));
+        r.setEnforceDate(text(node, "시행일자"));
+        r.setPromulgateNo(text(node, "공포번호"));
+        r.setAmendType(text(node, "제개정구분명"));
+        r.setDetailLink(text(node, "법령상세링크"));
+        r.setSelfOtherLaw(text(node, "자법타법여부"));
+        r.setJointDeptInfo(text(node, "공동부령정보"));
+        // 공동부령 공포번호: 응답 키가 가변일 수 있어 후보 탐색
+        String joint = text(node, "공동부령공포번호");
+        if (joint == null) joint = text(node, "공동부령번호");
+        r.setJointPromulgateNo(joint);
+        return r;
+    }
+
+    private static String text(JsonNode node, String key) {
+        if (node == null || !node.has(key)) return null;
+        JsonNode v = node.get(key);
+        if (v == null || v.isNull()) return null;
+        String s = v.asText();
+        return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    private static Integer parseInteger(String v) {
+        if (v == null) return null;
+        try { return Integer.parseInt(v.trim()); } catch (NumberFormatException e) { return null; }
+    }
+
+    /** lawId zero-padding 정책 — 정수형 응답이 들어와도 6자리 보존. */
+    private static String normalizeLawId(String v) {
+        if (v == null) return null;
+        String t = v.trim();
+        if (t.isEmpty()) return null;
+        if (t.matches("\\d{1,5}")) return String.format("%06d", Integer.parseInt(t));
+        return t;
     }
 
     // ─────────────────────── 호환성 (참고: 단건 upsert 헬퍼) ───────────────────────
