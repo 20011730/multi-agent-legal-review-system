@@ -10,6 +10,7 @@ class AnalyzeRequest(BaseModel):
     situation: str
     content: str
     participationMode: str = "ai_only"
+    contextWindow: int = 6   # 이전 라운드 참조 메시지 수 파라미터
 
 
 class AgentMessage(BaseModel):
@@ -51,6 +52,25 @@ class FinalDecision(BaseModel):
 
 
 class AnalyzeResponse(BaseModel):
+    messages: list[AgentMessage]
+    finalDecision: FinalDecision
+    evidences: list[EvidenceItem] = []
+
+
+# ── 인터랙티브 모드용 ──
+
+class PhaseOneResponse(BaseModel):
+    debateSessionId: str          # Phase 2 호출 시 필요한 세션 ID
+    messages: list[AgentMessage]
+
+
+class ContinueRequest(BaseModel):
+    debateSessionId: str          # Phase 1에서 받은 세션 ID
+    userQuestion: str = ""        # 사용자 질문
+    userOpinion: str = ""         # 사용자 의견 (Round 4에 반영)
+
+
+class ContinueResponse(BaseModel):
     messages: list[AgentMessage]
     finalDecision: FinalDecision
     evidences: list[EvidenceItem] = []
