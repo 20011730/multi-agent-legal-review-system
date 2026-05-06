@@ -7,6 +7,7 @@ import com.legalreview.dto.response.ExperimentSessionDto;
 import com.legalreview.dto.response.ExperimentSummaryDto;
 import com.legalreview.service.rag.ChromaSearchService;
 import com.legalreview.service.rag.ExperimentService;
+import com.legalreview.service.rag.LawListIngestionService;
 import com.legalreview.service.rag.LegalIngestionService;
 import com.legalreview.service.rag.LegalRetrievalService;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +45,7 @@ public class RagDevController {
     private final ChromaSearchService chromaSearchService;
     private final RagProperties ragProperties;
     private final ExperimentService experimentService;
+    private final LawListIngestionService lawListIngestionService;
 
     @PostMapping("/ingest")
     public ResponseEntity<?> ingest() {
@@ -52,6 +54,28 @@ public class RagDevController {
         log.info("[RAG-DEV] /api/rag/ingest 호출");
         LegalIngestionService.IngestionReport report = ingestionService.runSeedIngestion();
         return ResponseEntity.ok(report);
+    }
+
+    /**
+     * law_list 메타데이터 시드 적재 (개발용).
+     *
+     * 기존 /ingest는 법령·판례 "본문"을 PG + Chroma에 적재.
+     * 본 endpoint는 법령 "목록 메타데이터"를 PG의 law_list 테이블에만 upsert.
+     *  - lawMst가 이미 존재하면 갱신, 없으면 신규 저장
+     *  - Chroma에는 적재되지 않음 (chunking/임베딩 대상이 아님)
+     *
+     * 가드는 dev-endpoint-enabled만 체크 (rag.enabled와 무관 — Chroma 미실행 환경에서도 적재 가능).
+     */
+    @PostMapping("/ingest/law-list")
+    public ResponseEntity<?> ingestLawList() {
+        ResponseEntity<?> guard = guardDevEndpoint();
+        if (guard != null) return guard;
+        log.info("[RAG-DEV] /api/rag/ingest/law-list 호출");
+        int count = lawListIngestionService.ingestLawListSeed();
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("message", "law_list seed ingestion completed");
+        resp.put("count", count);
+        return ResponseEntity.ok(resp);
     }
 
     /**
