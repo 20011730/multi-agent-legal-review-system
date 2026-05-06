@@ -81,18 +81,36 @@ public class LawSearchService {
      * SessionService 등에서 evidence 후보로 바로 사용 가능.
      */
     public List<EvidenceDto> searchLawsAsEvidence(String query) {
-        return searchLaws(query).getEvidences().stream()
+        LawSearchResponse resp = searchLaws(query);
+        List<EvidenceDto> result = resp.getEvidences().stream()
                 .map(LawSearchItemDto::toEvidenceDto)
                 .toList();
+        log.info("[LAW-DEBUG] searchLawsAsEvidence: query='{}', totalCount={}, dtoCount={}",
+                query, resp.getTotalCount(), result.size());
+        if (!result.isEmpty()) {
+            EvidenceDto sample = result.get(0);
+            log.info("[LAW-DEBUG]   법령 샘플: title='{}', sourceType={}, refId='{}'",
+                    sample.getTitle(), sample.getSourceType(), sample.getReferenceId());
+        }
+        return result;
     }
 
     /**
      * 판례 검색 결과를 기존 EvidenceDto 형식으로 변환.
      */
     public List<EvidenceDto> searchCasesAsEvidence(String query) {
-        return searchCases(query).getEvidences().stream()
+        LawSearchResponse resp = searchCases(query);
+        List<EvidenceDto> result = resp.getEvidences().stream()
                 .map(LawSearchItemDto::toEvidenceDto)
                 .toList();
+        log.info("[LAW-DEBUG] searchCasesAsEvidence: query='{}', totalCount={}, dtoCount={}",
+                query, resp.getTotalCount(), result.size());
+        if (!result.isEmpty()) {
+            EvidenceDto sample = result.get(0);
+            log.info("[LAW-DEBUG]   판례 샘플: title='{}', sourceType={}, refId='{}'",
+                    sample.getTitle(), sample.getSourceType(), sample.getReferenceId());
+        }
+        return result;
     }
 
     // ── 법령 XML 파싱 ──
@@ -218,13 +236,19 @@ public class LawSearchService {
     private Document parseXmlDocument(String xml) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            // XXE 방지
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            // XXE 방지 (DOCTYPE 허용하되 외부 엔티티만 차단)
+            // 법제처 API XML 응답에 DOCTYPE이 포함될 수 있으므로 disallow-doctype-decl 은 사용하지 않음
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            factory.setXIncludeAware(false);
+            factory.setExpandEntityReferences(false);
             DocumentBuilder builder = factory.newDocumentBuilder();
             return builder.parse(new InputSource(new StringReader(xml)));
         } catch (Exception e) {
-            log.error("XML 파싱 실패: {}", e.getMessage());
-            log.debug("파싱 실패한 XML 원문: {}", xml);
+            log.error("[LAW-DEBUG] XML 파싱 실패: {}", e.getMessage());
+            log.info("[LAW-DEBUG] 파싱 실패한 XML 원문 (앞 500자): {}",
+                    xml != null && xml.length() > 500 ? xml.substring(0, 500) : xml);
             return null;
         }
     }

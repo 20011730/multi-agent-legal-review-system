@@ -27,7 +27,33 @@ logging:
 
 app:
   ai:
+    # engine: python → 기존 Python FastAPI 호출, ollama → 로컬 Ollama 직접 호출
+    engine: ${AI_ENGINE:python}
     base-url: ${AI_SERVER_URL:http://localhost:8001}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      model: ${OLLAMA_MODEL:glm-4.7-flash:q4_K_M}
+      timeout-seconds: ${OLLAMA_TIMEOUT:300}
   law-api:
     base-url: https://www.law.go.kr/DRF/lawSearch.do
     oc: ${LAW_API_OC:}
+
+  # 법령/판례 RAG (Chroma) 설정
+  # 기본은 비활성. APP_RAG_ENABLED=true 환경변수로만 켠다.
+  rag:
+    enabled: ${APP_RAG_ENABLED:false}
+    chroma:
+      base-url: ${CHROMA_BASE_URL:http://localhost:8000}
+      laws-collection: ${CHROMA_LAWS_COLLECTION:laws}
+      cases-collection: ${CHROMA_CASES_COLLECTION:cases}
+      timeout-seconds: ${CHROMA_TIMEOUT_SECONDS:15}
+    top-k:
+      law: ${RAG_TOPK_LAW:3}
+      caze: ${RAG_TOPK_CASE:2}     # "case"는 Java 예약어 → 설정 키도 caze로 통일
+    embedding:
+      model: ${RAG_EMBEDDING_MODEL:BAAI/bge-m3}
+      dimension: ${RAG_EMBEDDING_DIM:1024}
+    # 실험 추적 — RAG enabled와 독립적으로 ON 가능 (baseline 측정용)
+    experiment:
+      enabled: ${RAG_EXPERIMENT_ENABLED:false}
+      tag: ${RAG_EXPERIMENT_TAG:default}

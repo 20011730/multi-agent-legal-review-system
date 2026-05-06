@@ -1,25 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
-import { Separator } from "../components/ui/separator";
 import {
-  Scale,
-  ArrowLeft,
-  FileText,
+  Download,
+  Loader2,
+  MessageSquare,
+  RotateCcw,
+  Share2,
   AlertTriangle,
   CheckCircle2,
-  XCircle,
-  TrendingDown,
-  TrendingUp,
-  Minus,
-  Download,
-  RotateCcw,
-  ClipboardList,
+  FileText,
 } from "lucide-react";
-import { EvidenceSection } from "../components/EvidenceSection";
-import type { EvidenceItem } from "../components/EvidenceSection";
+import { toast } from "sonner";
+import { exportElementToPdf } from "../utils/exportVerdictPdf";
+import { EvidenceCardList, type EvidenceItem } from "../components/EvidenceCard";
+import { normalizeEvidences } from "../utils/normalizeEvidence";
 
 interface ReviewData {
   companyName: string;
@@ -29,8 +26,6 @@ interface ReviewData {
   content: string;
 }
 
-type VerdictLevel = "approved" | "conditional" | "rejected";
-
 interface RiskItem {
   category: string;
   level: "high" | "medium" | "low";
@@ -38,7 +33,7 @@ interface RiskItem {
 }
 
 interface FinalDecision {
-  verdict: VerdictLevel;
+  verdict: "approved" | "conditional" | "rejected";
   riskLevel: string;
   risks: RiskItem[];
   summary: string;
@@ -46,13 +41,19 @@ interface FinalDecision {
   revisedContent: string;
 }
 
-// EvidenceItem은 ../components/EvidenceSection에서 import
-
 export function Verdict() {
   const navigate = useNavigate();
+  const reportRef = useRef<HTMLDivElement>(null);
+  const pdfRef = useRef<HTMLDivElement>(null);
   const [reviewData, setReviewData] = useState<ReviewData | null>(null);
   const [finalDecision, setFinalDecision] = useState<FinalDecision | null>(null);
   const [evidences, setEvidences] = useState<EvidenceItem[]>([]);
+  const [isPdfExporting, setIsPdfExporting] = useState(false);
+  const [recheckTarget, setRecheckTarget] = useState<"legal" | "business" | "ethics">("legal");
+  const [recheckQuestion, setRecheckQuestion] = useState("");
+  // evidence fetch 진행 상태 — empty-state 카드를 fetch 완료 후에만 보여주기 위함
+  const [evidenceLoadState, setEvidenceLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     const data = sessionStorage.getItem("reviewData");
@@ -62,474 +63,573 @@ export function Verdict() {
     }
     setReviewData(JSON.parse(data));
 
+    // 1차 hydration: sessionStorage 보조 (단, **빈 배열은 무시**해서 stale "[]"가
+    // 화면을 "근거 없음"으로 잘못 단정짓는 것을 차단)
     const fdData = sessionStorage.getItem("finalDecision");
     if (fdData) {
-      setFinalDecision(JSON.parse(fdData));
+      try { setFinalDecision(JSON.parse(fdData)); } catch { /* ignore */ }
     }
 
     const evData = sessionStorage.getItem("evidences");
     if (evData) {
-      try { setEvidences(JSON.parse(evData)); } catch { /* ignore */ }
+      try {
+        const arr = JSON.parse(evData);
+        if (Array.isArray(arr) && arr.length > 0) {
+          setEvidences(normalizeEvidences(arr));
+        }
+      } catch { /* ignore */ }
     }
+
+    // 2차 hydration: 항상 backend에서 fresh fetch (DB가 진실의 원천)
+    const sessionId = sessionStorage.getItem("sessionId");
+    setActiveSessionId(sessionId);
+    if (!sessionId) {
+      // sessionId 없으면 fetch 불가 — 사용자에게 신호를 주기 위해 error 상태로
+      console.warn("[verdict] sessionStorage.sessionId 없음 — fresh fetch 불가");
+      setEvidenceLoadState("error");
+      return;
+    }
+
+    let cancelled = false;
+    setEvidenceLoadState("loading");
+    fetch(`http://localhost:8080/api/sessions/${sessionId}/debates/latest`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((result) => {
+        if (cancelled) return;
+        console.info("[verdict] fetch ok — sessionId=" + sessionId, {
+          hasFinalDecision: !!result?.finalDecision,
+          evidencesLen: Array.isArray(result?.evidences) ? result.evidences.length : 0,
+        });
+
+        if (result?.finalDecision) {
+          setFinalDecision(result.finalDecision);
+          sessionStorage.setItem("finalDecision", JSON.stringify(result.finalDecision));
+        }
+
+        // top-level evidences를 1순위로, finalDecision.evidences fallback 포함
+        const freshEvidences = normalizeEvidences(result);
+        setEvidences(freshEvidences);
+        sessionStorage.setItem("evidences", JSON.stringify(freshEvidences));
+        setEvidenceLoadState("loaded");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn("[verdict] fetch 실패:", err);
+        setEvidenceLoadState("error");
+      });
+
+    return () => { cancelled = true; };
   }, [navigate]);
 
-  if (!reviewData) {
-    return null;
-  }
+  if (!reviewData) return null;
 
-  const verdict: VerdictLevel = finalDecision?.verdict || "conditional";
+  const risks: RiskItem[] =
+    finalDecision?.risks || [
+      { category: "Legal", level: "high", description: "Claim evidence may be insufficient." },
+      { category: "Business", level: "medium", description: "Brand trust may drop due to aggressive tone." },
+      { category: "Ethics", level: "medium", description: "Consumer autonomy can be undermined." },
+    ];
 
-  const risks: RiskItem[] = finalDecision?.risks || [
-    {
-      category: "법률 리스크",
-      level: "high",
-      description: "표시광고법 위반 가능성 (거짓·과장 광고)",
-    },
-    {
-      category: "평판 리스크",
-      level: "medium",
-      description: "경쟁사 비하 표현으로 인한 브랜드 이미지 손상",
-    },
-    {
-      category: "소비자 신뢰",
-      level: "medium",
-      description: "과도한 압박 마케팅으로 인한 반발 가능성",
-    },
-    {
-      category: "윤리 리스크",
-      level: "low",
-      description: "소비자 자율성 침해 우려",
-    },
-  ];
+  const riskScore =
+    finalDecision?.riskLevel === "HIGH" ? 82 : finalDecision?.riskLevel === "LOW" ? 31 : 58;
 
-  const getVerdictConfig = (level: VerdictLevel) => {
-    switch (level) {
-      case "approved":
-        return {
-          label: "승인",
-          icon: CheckCircle2,
-          color: "text-green-700",
-          bgColor: "bg-green-50",
-          borderColor: "border-green-200",
-          description: "법적·윤리적 검토 결과 승인되었습니다",
-        };
-      case "conditional":
-        return {
-          label: "조건부 승인",
-          icon: AlertTriangle,
-          color: "text-amber-700",
-          bgColor: "bg-amber-50",
-          borderColor: "border-amber-200",
-          description: "제시된 수정사항 반영 후 사용 가능합니다",
-        };
-      case "rejected":
-        return {
-          label: "재검토 필요",
-          icon: XCircle,
-          color: "text-red-700",
-          bgColor: "bg-red-50",
-          borderColor: "border-red-200",
-          description: "중대한 법적·윤리적 문제가 발견되었습니다",
-        };
+  const handlePdfDownload = async () => {
+    // PDF 전용 hidden 마크업을 캡처 (재검토/공유/유의사항 등 UI 제외, 콤팩트 레이아웃)
+    const el = pdfRef.current ?? reportRef.current;
+    if (!el) return;
+    setIsPdfExporting(true);
+    try {
+      await exportElementToPdf(el, `LexRex_report_${new Date().toISOString().slice(0, 19)}.pdf`);
+      toast.success("PDF saved.");
+    } catch (error) {
+      console.error(error);
+      toast.error("PDF export failed.");
+    } finally {
+      setIsPdfExporting(false);
     }
   };
 
-  const getRiskIcon = (level: string) => {
-    switch (level) {
-      case "high":
-        return <TrendingUp className="w-4 h-4 text-red-600" />;
-      case "medium":
-        return <Minus className="w-4 h-4 text-amber-600" />;
-      case "low":
-        return <TrendingDown className="w-4 h-4 text-green-600" />;
-    }
+  const handleRecheck = () => {
+    sessionStorage.setItem(
+      "recheckRequest",
+      JSON.stringify({ target: recheckTarget, question: recheckQuestion, requestedAt: new Date().toISOString() }),
+    );
+    navigate("/result");
   };
 
-  const getRiskBadge = (level: string) => {
-    switch (level) {
-      case "high":
-        return <Badge variant="destructive" className="text-xs">높음</Badge>;
-      case "medium":
-        return <Badge className="bg-amber-500 text-xs">보통</Badge>;
-      case "low":
-        return <Badge className="bg-green-600 text-xs">낮음</Badge>;
+  const handleShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success("Link copied.");
+    } catch {
+      toast.error("Link copy failed.");
     }
   };
-
-  const verdictConfig = getVerdictConfig(verdict);
-  const VerdictIcon = verdictConfig.icon;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
+    <div className="min-h-screen bg-[#F2F2F2] text-slate-900">
+      <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#F2F2F2]/94 backdrop-blur-md shadow-sm">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
-              <Scale className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="font-semibold text-gray-900">LegalReview AI</h1>
-              <p className="text-xs text-gray-500">Multi-Agent Legal Compliance System</p>
-            </div>
-          </div>
+          <button onClick={() => navigate("/")} className="min-w-[220px] text-left py-1">
+            <h1 className="font-menu leading-[1.02] text-[25px] text-[#1E3A8A]">LexRex AI</h1>
+            <p className="text-[11px] leading-[1.3] tracking-[-0.01em] text-[#64748B] mt-[3px] max-h-5">
+              Multi-Agent Legal Compliance System
+            </p>
+          </button>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => navigate("/reviews")}>
-              <ClipboardList className="mr-2 w-4 h-4" />
-              검토 이력
+            <Button variant="outline" onClick={() => void handlePdfDownload()} disabled={isPdfExporting}>
+              {isPdfExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}PDF
             </Button>
-            <Button variant="outline" size="sm">
-              <Download className="mr-2 w-4 h-4" />
-              PDF 다운로드
-            </Button>
-            <Button
-              size="sm"
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={() => {
-                sessionStorage.removeItem("reviewData");
-                sessionStorage.removeItem("sessionId");
-                sessionStorage.removeItem("finalDecision");
-                sessionStorage.removeItem("evidences");
-                navigate("/input");
-              }}
-            >
-              <RotateCcw className="mr-2 w-4 h-4" />
-              새 검토
+            <Button className="bg-[#1E3A8A] hover:bg-[#1E293B] text-white" onClick={() => {
+              sessionStorage.removeItem("reviewData");
+              sessionStorage.removeItem("sessionId");
+              sessionStorage.removeItem("finalDecision");
+              sessionStorage.removeItem("evidences");
+              navigate("/input");
+            }}>
+              <RotateCcw className="w-4 h-4 mr-2" />새 검토
             </Button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-6 py-12">
-        <div className="mb-8">
-          <button
-            onClick={() => navigate("/result")}
-            className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            토의 로그로 돌아가기
-          </button>
-          <h2 className="text-3xl font-semibold text-gray-900 mb-2">최종 검토 보고서</h2>
-          <p className="text-gray-600">멀티 에이전트 분석 결과 및 종합 권고사항</p>
-        </div>
+      <main className="max-w-6xl mx-auto px-6 py-10">
+        <div ref={reportRef} className="rounded-2xl border border-slate-200 bg-white p-6 md:p-8 space-y-6">
+          <div>
+            <h2 className="text-2xl font-semibold text-[#1E3A8A]">최종 법률 리스크 리포트</h2>
+            <p className="text-sm text-slate-600 mt-1">토론 결과를 구조화한 최종 보고서입니다.</p>
+          </div>
 
-        {/* Review Info Summary */}
-        <Card className="border-gray-200 mb-6">
-          <CardContent className="pt-6">
-            <div className="grid md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <p className="text-gray-500 mb-1">기업명</p>
-                <p className="font-medium text-gray-900">{reviewData.companyName}</p>
+          {/* 리스크 스코어 */}
+          <Card className="border-[#1E3A8A]/20 bg-[#1E3A8A]/5">
+            <CardHeader>
+              <CardTitle>리스크 스코어</CardTitle>
+              <CardDescription>0~100 종합 지표</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between gap-6">
+                <p className="text-4xl font-semibold text-[#1E3A8A]">{riskScore}</p>
+                <div className="w-full max-w-[360px]">
+                  <div className="h-3 rounded-full border border-slate-300 overflow-hidden">
+                    <div
+                      className={`h-full ${riskScore >= 70 ? "bg-red-500" : riskScore >= 40 ? "bg-amber-500" : "bg-emerald-500"}`}
+                      style={{ width: `${riskScore}%` }}
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <p className="text-gray-500 mb-1">산업 분야</p>
-                <p className="font-medium text-gray-900">
-                  {reviewData.industry === "tech" ? "IT·소프트웨어" : reviewData.industry}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-500 mb-1">검토 유형</p>
-                <p className="font-medium text-gray-900">
-                  {reviewData.reviewType === "marketing" ? "마케팅·광고 문구" : reviewData.reviewType}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-500 mb-1">검토 완료 일시</p>
-                <p className="font-medium text-gray-900">
-                  {new Date().toLocaleDateString("ko-KR")} {new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        {/* Verdict */}
-        <Card className={`border-2 ${verdictConfig.borderColor} ${verdictConfig.bgColor} mb-6`}>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className={`w-12 h-12 bg-white rounded-lg flex items-center justify-center`}>
-                <VerdictIcon className={`w-7 h-7 ${verdictConfig.color}`} />
-              </div>
-              <div>
-                <CardTitle className={verdictConfig.color}>{verdictConfig.label}</CardTitle>
-                <CardDescription className="text-gray-700">{verdictConfig.description}</CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-gray-700 leading-relaxed">
-              {finalDecision?.summary ||
-                "제출된 마케팅 문구에 대한 법률·리스크·윤리 검토 결과, 여러 개선사항이 확인되었습니다. 하단의 수정안을 반영한 후 사용할 것을 권고드립니다. 특히 법률 리스크가 높게 평가된 부분은 반드시 수정이 필요하며, 법무팀의 최종 검토를 거쳐 주시기 바랍니다."}
-            </p>
-          </CardContent>
-        </Card>
+          {/* 종합 요약 */}
+          {finalDecision?.summary && (
+            <Card className="border-slate-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-[#1E3A8A]" />
+                  종합 요약
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                  {finalDecision.summary}
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
-        {/* Risk Summary */}
-        <Card className="border-gray-200 mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-600" />
-              리스크 요약
-            </CardTitle>
-            <CardDescription>검토 과정에서 식별된 주요 리스크 항목</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {risks.map((risk, index) => (
-                <div
-                  key={index}
-                  className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200"
-                >
-                  <div className="mt-0.5">{getRiskIcon(risk.level)}</div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium text-sm text-gray-900">{risk.category}</span>
-                      {getRiskBadge(risk.level)}
+          {/* 에이전트별 요약 제언 */}
+          <Card className="border-slate-200">
+            <CardHeader>
+              <CardTitle>에이전트별 요약 제언</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid md:grid-cols-3 gap-4 text-sm">
+                <div className="rounded-xl border p-4 bg-slate-50">
+                  <p className="font-semibold mb-2">법무</p>
+                  <p>주장 근거를 명확히 제시하고 법령 위반 소지가 있는 표현을 제거하세요.</p>
+                </div>
+                <div className="rounded-xl border p-4 bg-slate-50">
+                  <p className="font-semibold mb-2">사업</p>
+                  <p>전환율을 유지하되 과도한 공격형 문구 대신 신뢰 중심 문구를 사용하세요.</p>
+                </div>
+                <div className="rounded-xl border p-4 bg-slate-50">
+                  <p className="font-semibold mb-2">윤리</p>
+                  <p>소비자 선택권을 존중하는 정보형 커뮤니케이션으로 전환하세요.</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 리스크 항목 */}
+          <Card className="border-slate-200">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+                리스크 항목
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {risks.map((risk, idx) => (
+                  <div key={idx} className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 p-3 bg-slate-50">
+                    <div>
+                      <p className="font-medium text-sm">{risk.category}</p>
+                      <p className="text-sm text-slate-600">{risk.description}</p>
                     </div>
-                    <p className="text-sm text-gray-600">{risk.description}</p>
+                    <Badge className={risk.level === "high" ? "bg-red-100 text-red-700" : risk.level === "medium" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}>
+                      {risk.level.toUpperCase()}
+                    </Badge>
                   </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Legal Evidences */}
-        <EvidenceSection evidences={evidences} />
-
-        {/* Key Issues */}
-        <Card className="border-gray-200 mb-6">
-          <CardHeader>
-            <CardTitle>주요 쟁점 사항</CardTitle>
-            <CardDescription>에이전트 토의에서 도출된 핵심 문제점</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="border-l-4 border-blue-500 pl-4">
-                <h4 className="font-medium text-gray-900 mb-2">1. 비교 광고의 객관성 부족</h4>
-                <p className="text-sm text-gray-600 mb-2">
-                  '업계 1위 제품보다 2배 빠른 성능'이라는 주장에 대한 공인 기관의 시험 결과나 
-                  객관적 데이터가 제시되지 않았습니다. 표시광고법상 비교 광고는 객관적이고 
-                  입증 가능한 사실에 근거해야 합니다.
-                </p>
-                <Badge variant="outline" className="text-xs">표시광고법 제3조</Badge>
-              </div>
-
-              <Separator />
-
-              <div className="border-l-4 border-emerald-500 pl-4">
-                <h4 className="font-medium text-gray-900 mb-2">2. 경쟁사 비하 표현</h4>
-                <p className="text-sm text-gray-600 mb-2">
-                  '타사 제품은 구시대 유물'이라는 표현은 경쟁사에 대한 직접적 비하에 해당합니다. 
-                  이는 부정경쟁방지법상 문제가 될 수 있으며, 기업 이미지에도 부정적 영향을 줄 수 있습니다.
-                </p>
-                <Badge variant="outline" className="text-xs">부정경쟁방지법</Badge>
-              </div>
-
-              <Separator />
-
-              <div className="border-l-4 border-violet-500 pl-4">
-                <h4 className="font-medium text-gray-900 mb-2">3. 과도한 긴박감 조성</h4>
-                <p className="text-sm text-gray-600 mb-2">
-                  '한정 수량', '서둘러', '놓치면 후회' 등의 표현이 실제 재고 현황과 무관하게 
-                  사용된다면 소비자를 기만하는 것으로 간주될 수 있습니다. 소비자의 합리적 
-                  의사결정을 방해하는 압박 마케팅은 지양해야 합니다.
-                </p>
-                <Badge variant="outline" className="text-xs">소비자보호</Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Original vs Revised */}
-        <div className="grid md:grid-cols-2 gap-6 mb-6">
-          <Card className="border-red-200 bg-red-50/50">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <XCircle className="w-5 h-5 text-red-600" />
-                원본 (검토 전)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="p-4 bg-white rounded-lg border border-red-200">
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap font-mono">
-                  {reviewData.content}
-                </p>
-              </div>
-              <div className="mt-4 space-y-2">
-                <div className="flex items-center gap-2 text-xs text-red-700">
-                  <AlertTriangle className="w-3 h-3" />
-                  <span>법적 리스크: 높음</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-red-700">
-                  <AlertTriangle className="w-3 h-3" />
-                  <span>객관성 부족, 비하 표현 포함</span>
-                </div>
+                ))}
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-green-200 bg-green-50/50">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-green-600" />
-                수정안 (권고)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="p-4 bg-white rounded-lg border border-green-200">
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap font-mono">
-                  {finalDecision?.revisedContent ||
-                    "자사 테스트 결과 기존 대비 2배 향상된 성능을 확인했습니다. 혁신적인 기술로 더 나은 사용 경험을 제공합니다.\n\n지금 구매 시 특별 할인 50% 및 추가 사은품을 드립니다. (재고 소진 시까지, 상세 조건은 페이지 하단 참조)"}
+          {/* 수정안 (원문 vs 권고) */}
+          {finalDecision?.revisedContent && (
+            <div className="grid md:grid-cols-2 gap-4">
+              <Card className="border-red-200 bg-red-50/50">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                    원문
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                    {reviewData.content}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-green-200 bg-green-50/50">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600" />
+                    수정안 (권고)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                    {finalDecision.revisedContent}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* 최종 권고사항 */}
+          {finalDecision?.recommendation && (
+            <Card className="border-slate-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-[#1E3A8A]" />
+                  최종 권고사항
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                  {finalDecision.recommendation}
                 </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* 법령·판례 근거 — fetch 진행 중에는 empty-state를 그리지 않음 */}
+          {evidenceLoadState === "loading" && evidences.length === 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+              법령·판례 근거를 불러오는 중...
+            </div>
+          )}
+          {evidenceLoadState === "error" && evidences.length === 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+              <p className="font-medium mb-1">법령·판례 근거를 불러오지 못했습니다.</p>
+              <p className="text-xs text-amber-700">
+                {activeSessionId
+                  ? `세션 ${activeSessionId}의 응답을 가져오는 중 오류가 발생했습니다. 백엔드 서버가 실행 중인지 확인해 주세요.`
+                  : "현재 세션 식별자가 없어 백엔드에서 근거를 다시 불러올 수 없습니다. 새로 검토를 시작하면 정상 표시됩니다."}
+              </p>
+            </div>
+          )}
+          {(evidences.length > 0 || evidenceLoadState === "loaded") && (
+            <EvidenceCardList evidences={evidences} />
+          )}
+
+          {/* 재검토 */}
+          <Card className="border-slate-200">
+            <CardHeader>
+              <CardTitle>재검토(Recheck)</CardTitle>
+              <CardDescription>특정 에이전트 대상으로 추가 질문을 보내 다시 토론합니다.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2 flex-wrap">
+                <Button variant={recheckTarget === "legal" ? "default" : "outline"} className={recheckTarget === "legal" ? "bg-[#1E3A8A] text-white" : ""} onClick={() => setRecheckTarget("legal")}>법무</Button>
+                <Button variant={recheckTarget === "business" ? "default" : "outline"} className={recheckTarget === "business" ? "bg-[#1E3A8A] text-white" : ""} onClick={() => setRecheckTarget("business")}>사업</Button>
+                <Button variant={recheckTarget === "ethics" ? "default" : "outline"} className={recheckTarget === "ethics" ? "bg-[#1E3A8A] text-white" : ""} onClick={() => setRecheckTarget("ethics")}>윤리</Button>
               </div>
-              <div className="mt-4 space-y-2">
-                <div className="flex items-center gap-2 text-xs text-green-700">
-                  <CheckCircle2 className="w-3 h-3" />
-                  <span>법적 리스크: 낮음</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-green-700">
-                  <CheckCircle2 className="w-3 h-3" />
-                  <span>객관성 확보, 긍정적 표현 사용</span>
-                </div>
+              <textarea
+                value={recheckQuestion}
+                onChange={(e) => setRecheckQuestion(e.target.value)}
+                placeholder="추가 질문 또는 변경 조건을 입력하세요"
+                className="w-full min-h-[90px] rounded-xl border border-slate-300 p-3 text-sm"
+              />
+              <div className="flex gap-2 flex-wrap">
+                <Button onClick={handleRecheck} className="bg-[#1E3A8A] hover:bg-[#1E293B] text-white"><MessageSquare className="w-4 h-4 mr-2" />재검토 시작</Button>
+                <Button variant="outline" onClick={() => void handlePdfDownload()}><Download className="w-4 h-4 mr-2" />PDF 저장</Button>
+                <Button variant="outline" onClick={() => void handleShareLink()}><Share2 className="w-4 h-4 mr-2" />링크 공유</Button>
               </div>
             </CardContent>
           </Card>
+
+          {/* 유의사항 */}
+          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-500 leading-relaxed">
+            <strong>유의사항:</strong> 본 보고서는 AI 기반 멀티 에이전트 시스템에 의한 분석 결과이며,
+            참고 자료로 활용하시기 바랍니다. 최종 의사결정은 법무팀, 컴플라이언스팀 등
+            사내 전문가의 검토를 거쳐 진행하시고, 필요시 외부 법률 자문을 받으시기 바랍니다.
+          </div>
         </div>
 
-        {/* Recommendations */}
-        <Card className="border-gray-200 mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="w-5 h-5 text-blue-600" />
-              최종 권고사항
-            </CardTitle>
-            <CardDescription>실무 적용을 위한 구체적 가이드라인</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                  <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center text-xs font-semibold text-blue-700">
-                    1
-                  </div>
-                  법적 안전성 확보
-                </h4>
-                <ul className="space-y-2 ml-8 text-sm text-gray-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">•</span>
-                    <span>성능 비교 데이터는 '자사 테스트', '당사 기준' 등 출처를 명확히 표시</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">•</span>
-                    <span>제3자 검증 기관의 인증이 있다면 해당 내용을 추가로 명시</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">•</span>
-                    <span>경쟁사 직접 비하 표현은 전면 삭제하고 자사 강점에 집중</span>
-                  </li>
-                </ul>
+        {/* ─────────────────────────────────────────────────────
+             PDF 전용 off-screen 마크업
+             - 화면에는 보이지 않음 (absolute, left: -10000px)
+             - 인터랙션 UI(재검토/버튼/공유) 제외
+             - 콤팩트 폰트/패딩/간격으로 페이지 효율 극대화
+             - 각 섹션이 PDF 페이지 단위 후보가 됨
+           ───────────────────────────────────────────────────── */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            left: "-10000px",
+            top: 0,
+            width: "780px",       // A4 폭(210mm)에 가깝게 (margin 16mm 빼고 ~178mm)
+            background: "#ffffff",
+            color: "#0f172a",
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif",
+          }}
+        >
+          <div ref={pdfRef} style={{ background: "#ffffff", padding: "0 0 12px 0" }}>
+            {/* 1. 헤더 */}
+            <div style={{ padding: "12px 16px", borderBottom: "2px solid #1E3A8A", marginBottom: "10px" }}>
+              <div style={{ fontSize: "20px", fontWeight: 700, color: "#1E3A8A" }}>
+                LexRex AI · 최종 법률 리스크 리포트
               </div>
-
-              <Separator />
-
-              <div>
-                <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                  <div className="w-6 h-6 bg-emerald-100 rounded-full flex items-center justify-center text-xs font-semibold text-emerald-700">
-                    2
-                  </div>
-                  리스크 관리
-                </h4>
-                <ul className="space-y-2 ml-8 text-sm text-gray-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-emerald-600 mt-1">•</span>
-                    <span>할인율 및 사은품 관련 상세 조건을 명시하여 소비자 오해 방지</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-emerald-600 mt-1">•</span>
-                    <span>한정 수량은 실제 재고를 기반으로 하며, 소진 시 안내 문구 자동 변경</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-emerald-600 mt-1">•</span>
-                    <span>사후 소비자 불만 대응 프로세스 및 환불 정책 사전 수립</span>
-                  </li>
-                </ul>
-              </div>
-
-              <Separator />
-
-              <div>
-                <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                  <div className="w-6 h-6 bg-violet-100 rounded-full flex items-center justify-center text-xs font-semibold text-violet-700">
-                    3
-                  </div>
-                  윤리적 커뮤니케이션
-                </h4>
-                <ul className="space-y-2 ml-8 text-sm text-gray-700">
-                  <li className="flex items-start gap-2">
-                    <span className="text-violet-600 mt-1">•</span>
-                    <span>압박적 표현 대신 제품 혜택과 가치를 중심으로 재구성</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-violet-600 mt-1">•</span>
-                    <span>소비자 선택권을 존중하는 톤앤매너 유지</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-violet-600 mt-1">•</span>
-                    <span>ESG 경영 원칙에 부합하는 투명하고 공정한 마케팅 메시지 구사</span>
-                  </li>
-                </ul>
+              <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                생성일: {new Date().toLocaleString("ko-KR")} · {reviewData.companyName} ({reviewData.industry})
               </div>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Next Steps */}
-        <Card className="border-blue-200 bg-blue-50/50">
-          <CardHeader>
-            <CardTitle className="text-base">다음 단계</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ol className="space-y-3 text-sm text-gray-700">
-              <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-semibold">
-                  1
-                </span>
-                <span>제시된 수정안을 기반으로 최종 문구 작성</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-semibold">
-                  2
-                </span>
-                <span>법무팀 또는 외부 법률 자문을 통한 최종 검토</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-semibold">
-                  3
-                </span>
-                <span>성능 비교 데이터의 객관적 근거 자료 확보 및 보관</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-semibold">
-                  4
-                </span>
-                <span>마케팅 캠페인 론칭 후 소비자 피드백 모니터링</span>
-              </li>
-            </ol>
-          </CardContent>
-        </Card>
+            {/* 2. 검토 안건 메타 */}
+            <div style={{ padding: "8px 16px", marginBottom: "8px", fontSize: "11px", color: "#475569" }}>
+              <div><b>검토 유형:</b> {reviewData.reviewType}</div>
+              <div style={{ marginTop: 2 }}><b>상황:</b> {reviewData.situation}</div>
+            </div>
 
-        {/* Footer Note */}
-        <div className="mt-8 p-6 bg-gray-100 rounded-lg border border-gray-200">
-          <p className="text-sm text-gray-700 leading-relaxed">
-            <strong>유의사항:</strong> 본 보고서는 AI 기반 멀티 에이전트 시스템에 의한 분석 결과이며, 
-            참고 자료로 활용하시기 바랍니다. 최종 의사결정은 법무팀, 컴플라이언스팀 등 
-            사내 전문가의 검토를 거쳐 진행하시고, 필요시 외부 법률 자문을 받으시기 바랍니다. 
-            본 시스템은 법률 자문을 제공하지 않으며, 실제 법적 판단에 대한 책임을 지지 않습니다.
-          </p>
+            {/* 3. 종합 요약 */}
+            {finalDecision?.summary && (
+              <div style={pdfCardStyle}>
+                <div style={pdfTitleStyle}>종합 요약</div>
+                <div style={pdfBodyStyle}>{finalDecision.summary}</div>
+              </div>
+            )}
+
+            {/* 4. 리스크 스코어 (한 줄로 콤팩트) */}
+            <div style={pdfCardStyle}>
+              <div style={pdfTitleStyle}>리스크 스코어</div>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "4px" }}>
+                <div style={{ fontSize: "28px", fontWeight: 700, color: "#1E3A8A" }}>{riskScore}</div>
+                <div style={{ flex: 1, height: "8px", background: "#e2e8f0", borderRadius: "4px", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${riskScore}%`,
+                      background: riskScore >= 70 ? "#ef4444" : riskScore >= 40 ? "#f59e0b" : "#10b981",
+                    }}
+                  />
+                </div>
+                <div style={{ fontSize: "11px", color: "#64748b" }}>
+                  위험도: {finalDecision?.riskLevel ?? "MEDIUM"}
+                </div>
+              </div>
+            </div>
+
+            {/* 5. 리스크 항목 — 각 아이템을 별도 섹션으로 (페이지 break 자유도 확보) */}
+            {risks.length > 0 && (
+              <>
+                <div style={{ ...pdfCardStyle, paddingBottom: "10px" }}>
+                  <div style={pdfTitleStyle}>리스크 항목 ({risks.length}건)</div>
+                </div>
+                {risks.map((risk, idx) => (
+                  <div key={idx} style={{ ...pdfSubCardStyle, marginTop: "0" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: "12px", fontWeight: 600, color: "#0f172a" }}>{risk.category}</div>
+                        <div style={{ fontSize: "11px", color: "#475569", marginTop: "2px", lineHeight: 1.5 }}>
+                          {risk.description}
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: "10px",
+                          background: risk.level === "high" ? "#fee2e2" : risk.level === "medium" ? "#fef3c7" : "#d1fae5",
+                          color: risk.level === "high" ? "#b91c1c" : risk.level === "medium" ? "#92400e" : "#065f46",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {risk.level.toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* 6. 원문 vs 수정안 */}
+            {finalDecision?.revisedContent && (
+              <div style={{ ...pdfCardStyle }}>
+                <div style={pdfTitleStyle}>수정 문안 제안</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "4px" }}>
+                  <div style={{ padding: "8px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px" }}>
+                    <div style={{ fontSize: "10px", fontWeight: 600, color: "#b91c1c", marginBottom: "3px" }}>원문</div>
+                    <div style={{ fontSize: "11px", color: "#0f172a", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                      {reviewData.content}
+                    </div>
+                  </div>
+                  <div style={{ padding: "8px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "6px" }}>
+                    <div style={{ fontSize: "10px", fontWeight: 600, color: "#166534", marginBottom: "3px" }}>수정안 (권고)</div>
+                    <div style={{ fontSize: "11px", color: "#0f172a", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                      {finalDecision.revisedContent}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 7. 최종 권고사항 */}
+            {finalDecision?.recommendation && (
+              <div style={pdfCardStyle}>
+                <div style={pdfTitleStyle}>최종 권고사항</div>
+                <div style={pdfBodyStyle}>{finalDecision.recommendation}</div>
+              </div>
+            )}
+
+            {/* 8. 법령/판례 근거 — 각 항목을 펼침 상태로 별도 섹션 */}
+            {evidences.length === 0 && (
+              <div style={pdfCardStyle}>
+                <div style={pdfTitleStyle}>법령·판례 근거</div>
+                <div style={{ ...pdfBodyStyle, color: "#64748b", fontStyle: "italic" }}>
+                  이 검토에 매칭된 법령·판례 근거가 없거나 법제처 검색 결과가 없습니다.
+                </div>
+              </div>
+            )}
+            {evidences.length > 0 && (
+              <>
+                <div style={{ ...pdfCardStyle, paddingBottom: "10px" }}>
+                  <div style={pdfTitleStyle}>법령·판례 근거 ({evidences.length}건)</div>
+                </div>
+                {evidences.map((ev, idx) => (
+                  <div key={idx} style={{ ...pdfSubCardStyle, marginTop: "0" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
+                      <span style={{
+                        fontSize: "9px", fontWeight: 700, padding: "1px 6px", borderRadius: "8px",
+                        background: ev.sourceType === "LAW" ? "#dbeafe" : "#f3e8ff",
+                        color: ev.sourceType === "LAW" ? "#1e40af" : "#6b21a8",
+                      }}>
+                        {ev.sourceType === "LAW" ? "법령" : "판례"}
+                      </span>
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#0f172a" }}>
+                        {ev.title}{ev.articleOrCourt ? ` · ${ev.articleOrCourt}` : ""}
+                      </div>
+                    </div>
+                    {ev.summary && (
+                      <div style={{ fontSize: "11px", color: "#334155", lineHeight: 1.5, marginTop: "2px" }}>
+                        {ev.summary}
+                      </div>
+                    )}
+                    {ev.relevanceReason && (
+                      <div style={{ fontSize: "10px", color: "#64748b", marginTop: "3px", fontStyle: "italic" }}>
+                        관련성: {ev.relevanceReason}
+                      </div>
+                    )}
+                    {ev.url && (
+                      <div style={{ fontSize: "9px", color: "#3b82f6", marginTop: "3px", wordBreak: "break-all" }}>
+                        {ev.url}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* 9. Footer */}
+            <div style={{ padding: "8px 16px", marginTop: "12px", borderTop: "1px solid #e2e8f0", fontSize: "9px", color: "#94a3b8", lineHeight: 1.5 }}>
+              본 보고서는 AI 기반 멀티에이전트 시스템의 분석 결과이며 참고용입니다.
+              최종 의사결정은 사내 법무·컴플라이언스 검토를 거쳐 진행하십시오.
+            </div>
+          </div>
         </div>
       </main>
     </div>
   );
 }
+
+// ── PDF 전용 인라인 스타일 ──
+// 핵심 원칙:
+//   - border-radius 0~2px (둥근 모서리 안티앨리어싱이 캡처 경계와 충돌하지 않게)
+//   - 명확한 1px solid border + 진한 색상 (#94a3b8)
+//   - padding-bottom 18px 충분히 — 카드 내부 콘텐츠와 하단 border 사이 시각적 여유
+//   - box-shadow / transform / overflow-hidden 없음
+//   - boxSizing border-box로 폭/높이 계산 안정화
+//   - line-height 명시 (브라우저 기본값 변동 차단)
+const pdfCardStyle: CSSProperties = {
+  padding: "14px 16px 18px 16px",
+  margin: "0 0 10px 0",
+  border: "1px solid #94a3b8",
+  borderRadius: "2px",
+  background: "#ffffff",
+  boxShadow: "none",
+  overflow: "visible",
+  boxSizing: "border-box",
+  pageBreakInside: "avoid",
+  breakInside: "avoid",
+  lineHeight: 1.5,
+};
+
+const pdfSubCardStyle: CSSProperties = {
+  padding: "10px 14px 14px 14px",
+  margin: "0 0 6px 0",
+  border: "1px solid #94a3b8",
+  borderRadius: "2px",
+  background: "#f8fafc",
+  boxShadow: "none",
+  overflow: "visible",
+  boxSizing: "border-box",
+  pageBreakInside: "avoid",
+  breakInside: "avoid",
+  lineHeight: 1.5,
+};
+
+const pdfTitleStyle: CSSProperties = {
+  fontSize: "13px",
+  fontWeight: 700,
+  color: "#1E3A8A",
+  marginTop: 0,
+  marginBottom: "8px",
+  lineHeight: 1.3,
+  letterSpacing: "-0.01em",
+};
+
+const pdfBodyStyle: CSSProperties = {
+  fontSize: "11px",
+  color: "#0f172a",
+  lineHeight: 1.65,
+  whiteSpace: "pre-wrap",
+  margin: 0,
+  paddingBottom: 0,
+};
