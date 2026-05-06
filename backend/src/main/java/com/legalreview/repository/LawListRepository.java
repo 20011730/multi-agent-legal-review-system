@@ -18,8 +18,18 @@ import java.util.Optional;
  */
 public interface LawListRepository extends JpaRepository<LawList, Integer> {
 
-    /** law_id (앞자리 0 보존 String) 기반 단건 조회. */
+    /**
+     * law_id (앞자리 0 보존 String) 기반 단건 조회.
+     * @apiNote 같은 lawId로 lawMst가 여러 개일 수 있어 NonUniqueResultException 위험 존재.
+     *          단건이 명확히 보장되는 환경에서만 사용. 일반적으로 {@link #findFirstByLawIdOrderByLawMstDesc(String)} 권장.
+     */
     Optional<LawList> findByLawId(String lawId);
+
+    /**
+     * lawId 기준 가장 최근 등록(=가장 큰 lawMst) 1건만 조회.
+     * 같은 lawId가 여러 row(개정 이력 등)일 때 안전하게 1건만 반환한다.
+     */
+    Optional<LawList> findFirstByLawIdOrderByLawMstDesc(String lawId);
 
     /** 법령명 부분일치 검색 (관리자/검색 화면용). */
     List<LawList> findByLawNameKrContaining(String keyword);

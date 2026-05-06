@@ -3,11 +3,14 @@ package com.legalreview.controller;
 import com.legalreview.config.RagProperties;
 import com.legalreview.dto.request.SessionCreateRequest;
 import com.legalreview.dto.response.EvidenceDto;
+import com.legalreview.dto.rag.LawDocumentBatchIngestionResult;
+import com.legalreview.dto.rag.LawDocumentIngestionResult;
 import com.legalreview.dto.rag.LawListApiIngestionResult;
 import com.legalreview.dto.response.ExperimentSessionDto;
 import com.legalreview.dto.response.ExperimentSummaryDto;
 import com.legalreview.service.rag.ChromaSearchService;
 import com.legalreview.service.rag.ExperimentService;
+import com.legalreview.service.rag.LawDocumentIngestionService;
 import com.legalreview.service.rag.LawListIngestionService;
 import com.legalreview.service.rag.LegalIngestionService;
 import com.legalreview.service.rag.LegalRetrievalService;
@@ -50,6 +53,7 @@ public class RagDevController {
     private final RagProperties ragProperties;
     private final ExperimentService experimentService;
     private final LawListIngestionService lawListIngestionService;
+    private final LawDocumentIngestionService lawDocumentIngestionService;
 
     @PostMapping("/ingest")
     public ResponseEntity<?> ingest() {
@@ -111,6 +115,73 @@ public class RagDevController {
         resp.put("skippedRows", result.getSkippedRows());
         resp.put("failedPages", result.getFailedPages());
         return ResponseEntity.ok(resp);
+    }
+
+    // ─────────────────────── law_documents 본문 적재 (개발용) ───────────────────────
+    //  - 기본 정책: 5,583건 일괄 수집 X. lawMst/lawId/keyword/recommended 단위 선별 수집.
+    //  - Chroma upsert는 본 단계의 책임 X (다음 단계: LegalChunker → ChromaSearchService).
+
+    /**
+     * lawMst(법령일련번호) 단건 본문 수집.
+     * 예: POST /api/rag/ingest/law-documents/api?lawMst=280119
+     */
+    @PostMapping("/ingest/law-documents/api")
+    public ResponseEntity<?> ingestLawDocumentByMstOrId(
+            @RequestParam(value = "lawMst", required = false) Integer lawMst,
+            @RequestParam(value = "lawId", required = false) String lawId) {
+        ResponseEntity<?> guard = guardDevEndpoint();
+        if (guard != null) return guard;
+
+        if (lawMst == null && (lawId == null || lawId.isBlank())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "lawMst 또는 lawId 중 하나는 필수입니다."));
+        }
+
+        log.info("[RAG-DEV] /api/rag/ingest/law-documents/api — lawMst={}, lawId={}", lawMst, lawId);
+        LawDocumentIngestionResult result = (lawMst != null)
+                ? lawDocumentIngestionService.ingestByLawMst(lawMst)
+                : lawDocumentIngestionService.ingestByLawId(lawId);
+        return ResponseEntity.ok(toResultMap(result, "law document ingestion completed"));
+    }
+
+    /**
+     * keyword 부분일치 batch 수집.
+     * 예: POST /api/rag/ingest/law-documents/api/by-keyword?keyword=표시&limit=5
+     */
+    @PostMapping("/ingest/law-documents/api/by-keyword")
+    public ResponseEntity<?> ingestLawDocumentsByKeyword(
+            @RequestParam("keyword") String keyword,
+            @RequestParam(value = "limit", required = false, defaultValue = "5") int limit) {
+        ResponseEntity<?> guard = guardDevEndpoint();
+        if (guard != null) return guard;
+        log.info("[RAG-DEV] /api/rag/ingest/law-documents/api/by-keyword — keyword={}, limit={}", keyword, limit);
+        LawDocumentBatchIngestionResult result = lawDocumentIngestionService.ingestByKeyword(keyword, limit);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * 추천 주요 법령 batch 수집 (정확명칭 우선 + 부분일치 fallback, 최대 20건).
+     * 예: POST /api/rag/ingest/law-documents/api/recommended
+     */
+    @PostMapping("/ingest/law-documents/api/recommended")
+    public ResponseEntity<?> ingestRecommendedLawDocuments() {
+        ResponseEntity<?> guard = guardDevEndpoint();
+        if (guard != null) return guard;
+        log.info("[RAG-DEV] /api/rag/ingest/law-documents/api/recommended");
+        LawDocumentBatchIngestionResult result = lawDocumentIngestionService.ingestRecommendedLaws();
+        return ResponseEntity.ok(result);
+    }
+
+    private static Map<String, Object> toResultMap(LawDocumentIngestionResult r, String message) {
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("success", r.isSuccess());
+        resp.put("lawMst", r.getLawMst());
+        resp.put("lawId", r.getLawId());
+        resp.put("title", r.getTitle());
+        resp.put("documentId", r.getDocumentId());
+        resp.put("contentLength", r.getContentLength());
+        resp.put("message", r.isSuccess() ? message : r.getMessage());
+        return resp;
     }
 
     /**
