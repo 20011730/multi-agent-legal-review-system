@@ -2,12 +2,15 @@
 
 import logging
 import os
+import threading
 import httpx
 import xml.etree.ElementTree as ET
 
 logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("LAW_API_KEY", "minijn")
+_cache: dict[str, str] = {}
+_lock = threading.Lock()
 
 
 def _get_vectorstore():
@@ -16,6 +19,11 @@ def _get_vectorstore():
 
 def retrieve(query: str, k: int = 3) -> str:
     """쿼리 키워드로 법제처 API에서 법령 조문을 실시간 검색한다."""
+    if query in _cache:
+        return _cache[query]
+    with _lock:
+        if query in _cache:
+            return _cache[query]
     try:
         search_url = "http://www.law.go.kr/DRF/lawSearch.do"
         params = {"OC": API_KEY, "target": "law", "type": "XML", "query": query, "display": k}
@@ -52,7 +60,9 @@ def retrieve(query: str, k: int = 3) -> str:
                     if content:
                         parts.append(f"[{law_name} 제{article_no}조]\n{content}")
 
-        return "\n\n".join(parts)
+        result = "\n\n".join(parts)
+        _cache[query] = result
+        return result
 
     except Exception as e:
         logger.warning("법제처 API 검색 실패: %s", e)
