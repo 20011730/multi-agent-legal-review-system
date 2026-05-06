@@ -3,6 +3,7 @@ package com.legalreview.controller;
 import com.legalreview.config.RagProperties;
 import com.legalreview.dto.request.SessionCreateRequest;
 import com.legalreview.dto.response.EvidenceDto;
+import com.legalreview.dto.rag.LawChromaIngestionResult;
 import com.legalreview.dto.rag.LawDocumentBatchIngestionResult;
 import com.legalreview.dto.rag.LawDocumentIngestionResult;
 import com.legalreview.dto.rag.LawListApiIngestionResult;
@@ -10,6 +11,7 @@ import com.legalreview.dto.response.ExperimentSessionDto;
 import com.legalreview.dto.response.ExperimentSummaryDto;
 import com.legalreview.service.rag.ChromaSearchService;
 import com.legalreview.service.rag.ExperimentService;
+import com.legalreview.service.rag.LawDocumentChromaIngestionService;
 import com.legalreview.service.rag.LawDocumentIngestionService;
 import com.legalreview.service.rag.LawListIngestionService;
 import com.legalreview.service.rag.LegalIngestionService;
@@ -54,6 +56,7 @@ public class RagDevController {
     private final ExperimentService experimentService;
     private final LawListIngestionService lawListIngestionService;
     private final LawDocumentIngestionService lawDocumentIngestionService;
+    private final LawDocumentChromaIngestionService lawDocumentChromaIngestionService;
 
     @PostMapping("/ingest")
     public ResponseEntity<?> ingest() {
@@ -169,6 +172,35 @@ public class RagDevController {
         if (guard != null) return guard;
         log.info("[RAG-DEV] /api/rag/ingest/law-documents/api/recommended");
         LawDocumentBatchIngestionResult result = lawDocumentIngestionService.ingestRecommendedLaws();
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * law_documents → Chroma laws collection 적재 (개발용).
+     * 동작:
+     *   - chunked=false 인 LawDocument를 limit개 가져와
+     *   - LegalChunker로 조문 단위 chunk 생성
+     *   - Chroma laws 컬렉션에 upsert
+     *   - upsert 성공 문서만 chunked=true 마킹
+     *
+     * 예: POST /api/rag/ingest/chroma/laws?limit=20
+     *
+     * 응답: {processedDocuments, chunkedDocuments, totalChunks, failedDocuments, failedReferenceIds, collectionName}
+     */
+    @PostMapping("/ingest/chroma/laws")
+    public ResponseEntity<?> ingestChromaLaws(
+            @RequestParam(value = "limit", required = false, defaultValue = "20") int limit) {
+        ResponseEntity<?> guard = guardDevEndpoint();
+        if (guard != null) return guard;
+
+        if (!ragProperties.isEnabled()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "app.rag.enabled=false — Chroma 적재 불가",
+                    "hint", ".env에 APP_RAG_ENABLED=true 설정 후 재시작"));
+        }
+
+        log.info("[RAG-DEV] /api/rag/ingest/chroma/laws — limit={}", limit);
+        LawChromaIngestionResult result = lawDocumentChromaIngestionService.ingestPendingLawDocuments(limit);
         return ResponseEntity.ok(result);
     }
 
