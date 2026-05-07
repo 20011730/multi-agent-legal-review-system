@@ -99,7 +99,9 @@ def fetch_law_data_pure(api_key):
                         "current_history_code": law.get('현행연혁코드'),
                         "dept_code": law.get('소관부처코드'),
                         "dept_name": law.get('소관부처명'),
-                        "detail_link": law.get('법령상세링크'),
+                        #"detail_link": law.get('법령상세링크'),
+                        # 가져온 링크 문자열에서 HTML을 XML로 곧바로 치환해서 저장
+                        "detail_link": law.get('법령상세링크', '').replace('type=HTML', 'type=XML').replace('type=json', 'type=XML') if law.get('법령상세링크') else None,
                         "enforce_date": law.get('시행일자'),
                         "joint_dept_info": law.get('공동부령구분'), 
                         "joint_promulgate_no": law.get('공포번호(공동부령의 공포번호)'),
