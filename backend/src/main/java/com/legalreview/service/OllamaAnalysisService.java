@@ -132,10 +132,10 @@ public class OllamaAnalysisService {
 
         // evidence block을 prompt 끝에 덧붙일 형태로 미리 가공
         String legalEvBlk = (legalEvidenceBlock == null || legalEvidenceBlock.isBlank())
-                ? "" : "\n\n[참고 근거 — 법령/판례 retrieval 결과]\n" + legalEvidenceBlock
+                ? "" : "\n\n[관련 법령 근거]\n" + legalEvidenceBlock
                        + "\n위 근거를 우선적으로 인용하여 분석하세요.";
         String commonEvBlk = (commonEvidenceBlock == null || commonEvidenceBlock.isBlank())
-                ? "" : "\n\n[참고 근거 요약]\n" + commonEvidenceBlock;
+                ? "" : "\n\n[관련 법령 근거 요약]\n" + commonEvidenceBlock;
 
         StringBuilder history = new StringBuilder("[검토 안건]\n").append(topic);
         List<Map<String, Object>> messages = new ArrayList<>();

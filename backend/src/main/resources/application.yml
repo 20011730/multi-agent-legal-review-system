@@ -30,6 +30,9 @@ app:
     # engine: python → 기존 Python FastAPI 호출, ollama → 로컬 Ollama 직접 호출
     engine: ${AI_ENGINE:python}
     base-url: ${AI_SERVER_URL:http://localhost:8001}
+    # Python AI Server 호출 timeout (LangGraph + RunPod/Ollama 호출이 길어질 수 있어 넉넉히)
+    connect-timeout-seconds: ${AI_CONNECT_TIMEOUT_SECONDS:30}
+    read-timeout-seconds: ${AI_READ_TIMEOUT_SECONDS:900}   # 기본 15분 — 필요 시 환경변수로 조정
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       model: ${OLLAMA_MODEL:glm-4.7-flash:q4_K_M}
@@ -57,8 +60,14 @@ app:
       law: ${RAG_TOPK_LAW:3}
       caze: ${RAG_TOPK_CASE:2}     # "case"는 Java 예약어 → 설정 키도 caze로 통일
     embedding:
-      model: ${RAG_EMBEDDING_MODEL:BAAI/bge-m3}
-      dimension: ${RAG_EMBEDDING_DIM:1024}
+      # provider: simple(default) | external | e5(stub)
+      provider: ${APP_RAG_EMBEDDING_PROVIDER:simple}
+      model: ${RAG_EMBEDDING_MODEL:simple-hash-v1}
+      dimension: ${RAG_EMBEDDING_DIM:384}
+      external:
+        base-url: ${RAG_EMBEDDING_EXTERNAL_URL:http://localhost:9100}
+        embed-path: ${RAG_EMBEDDING_EXTERNAL_PATH:/embed}
+        timeout-seconds: ${RAG_EMBEDDING_EXTERNAL_TIMEOUT:30}
     # 실험 추적 — RAG enabled와 독립적으로 ON 가능 (baseline 측정용)
     experiment:
       enabled: ${RAG_EXPERIMENT_ENABLED:false}

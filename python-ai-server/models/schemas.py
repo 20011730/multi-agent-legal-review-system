@@ -60,3 +60,9 @@ class AnalyzeResponse(BaseModel):
     messages: list[AgentMessage]
     finalDecision: FinalDecision
     evidences: list[EvidenceItem] = []
+    # ── 분석 출처 표시 (fallback 구분용, optional) ──
+    # "LANGGRAPH_OLLAMA": 정상 LLM 토론 결과
+    # "RULE_BASED_FALLBACK": LLM 호출 실패 후 규칙 기반 대체 결과
+    analysisSource: str = "LANGGRAPH_OLLAMA"
+    fallbackUsed: bool = False
+    errorMessage: str | None = None

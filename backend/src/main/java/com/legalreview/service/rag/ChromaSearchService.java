@@ -42,6 +42,7 @@ public class ChromaSearchService {
 
     private final RagProperties ragProperties;
     private final RestTemplate restTemplate;
+    private final EmbeddingService embeddingService;
 
     /** name → collection UUID 캐시. ensureCollection / list 응답에서 채워짐. */
     private final Map<String, String> collectionIdByName = new ConcurrentHashMap<>();
@@ -128,16 +129,21 @@ public class ChromaSearchService {
         List<String> ids = new ArrayList<>(chunks.size());
         List<String> documents = new ArrayList<>(chunks.size());
         List<Map<String, Object>> metadatas = new ArrayList<>(chunks.size());
+        List<List<Float>> embeddings = new ArrayList<>(chunks.size());
         for (LegalChunker.Chunk c : chunks) {
             ids.add(c.getChunkId());
-            documents.add(c.getText());
+            String text = c.getText() == null ? "" : c.getText();
+            documents.add(text);
             metadatas.add(c.getMetadata() == null ? Map.of() : c.getMetadata());
+            // ★ Chroma 0.5.x REST는 server-side embedding 자동 생성 X — 클라이언트에서 만들어 전송 필수
+            embeddings.add(toFloatList(embeddingService.embed(text)));
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("ids", ids);
         body.put("documents", documents);
         body.put("metadatas", metadatas);
+        body.put("embeddings", embeddings);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -197,7 +203,8 @@ public class ChromaSearchService {
                 + "/api/v1/collections/" + collectionId + "/query";
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("query_texts", List.of(queryText));
+        // ★ Chroma 0.5.x REST는 query_embeddings 필수 — query_texts만 보내면 422 Field required
+        body.put("query_embeddings", List.of(toFloatList(embeddingService.embed(queryText))));
         body.put("n_results", topK);
         body.put("include", List.of("documents", "metadatas", "distances"));
 
@@ -309,5 +316,53 @@ public class ChromaSearchService {
 
     private static <T> List<T> nullToEmpty(List<T> v) {
         return v == null ? List.of() : v;
+    }
+
+    private static List<Float> toFloatList(float[] arr) {
+        if (arr == null) return List.of();
+        List<Float> out = new ArrayList<>(arr.length);
+        for (float v : arr) out.add(v);
+        return out;
+    }
+
+    /**
+     * 디버깅용 — 컬렉션 sample 조회 (POST /api/v1/collections/{uuid}/get).
+     * @return [{id, document, metadata}, ...] 형태. 실패 시 빈 리스트.
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> dumpSample(String collection, int limit) {
+        if (!ragProperties.isEnabled()) return List.of();
+        String collectionId = resolveCollectionId(collection);
+        if (collectionId == null) return List.of();
+
+        String url = ragProperties.getChroma().getBaseUrl()
+                + "/api/v1/collections/" + collectionId + "/get";
+        Map<String, Object> body = Map.of(
+                "limit", Math.max(1, Math.min(limit, 50)),
+                "include", List.of("documents", "metadatas")
+        );
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        try {
+            ResponseEntity<Map> resp = restTemplate.postForEntity(url, new HttpEntity<>(body, headers), Map.class);
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) return List.of();
+            Map<String, Object> b = resp.getBody();
+            List<String> ids = (List<String>) b.getOrDefault("ids", List.of());
+            List<String> docs = (List<String>) b.getOrDefault("documents", List.of());
+            List<Map<String, Object>> metas = (List<Map<String, Object>>) b.getOrDefault("metadatas", List.of());
+
+            List<Map<String, Object>> out = new ArrayList<>(ids.size());
+            for (int i = 0; i < ids.size(); i++) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", ids.get(i));
+                row.put("document", i < docs.size() ? docs.get(i) : null);
+                row.put("metadata", i < metas.size() ? metas.get(i) : null);
+                out.add(row);
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("[RAG] dumpSample 실패 (collection={}): {}", collection, e.getMessage());
+            return List.of();
+        }
     }
 }

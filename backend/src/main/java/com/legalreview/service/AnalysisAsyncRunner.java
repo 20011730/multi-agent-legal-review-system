@@ -103,6 +103,16 @@ public class AnalysisAsyncRunner {
             String legalEvidenceBlock = buildLegalEvidenceBlock(ragEvidences);
             String commonEvidenceBlock = buildCommonEvidenceBlock(ragEvidences);
 
+            // 명시적 주입 로그 — 운영 가시성용
+            int injectedLegal = Math.min(ragEvidences.size(), ragProperties.getPrompt().getMaxItemsLegal());
+            int injectedCommon = Math.min(ragEvidences.size(), ragProperties.getPrompt().getMaxItemsCommon());
+            if (ragEvidences.isEmpty()) {
+                log.info("[RAG] evidence 0건 — 분석은 RAG 미주입으로 계속 진행 (fallback 정상)");
+            } else {
+                log.info("[RAG] evidence {}건 retrieved → LEGAL prompt에 {}건 / BIZ·JUDGE prompt에 {}건 주입됨",
+                        ragEvidences.size(), injectedLegal, injectedCommon);
+            }
+
             // AI 엔진 선택: ollama → 로컬 Ollama, python → 기존 Python 서버
             AiAnalysisResponse aiResponse;
             if ("ollama".equalsIgnoreCase(aiEngine)) {
@@ -188,10 +198,19 @@ public class AnalysisAsyncRunner {
     // ========== RAG evidence → 프롬프트 블록 ==========
 
     /**
-     * LEGAL 에이전트용 상세 evidence 블록.
-     * - 법령 우선, 그 다음 판례
-     * - app.rag.prompt.maxItemsLegal 만큼만 포함
-     * - 본문은 maxEvidenceChars로 truncate
+     * LEGAL 에이전트용 상세 evidence 블록 (발표 자료 형식).
+     * 형식 예:
+     *   [관련 법령 근거]
+     *   1. 표시·광고의 공정화에 관한 법률 제3조(부당한 표시·광고 행위의 금지)
+     *   - 출처: LAW
+     *   - 조문: 제3조 (부당한 표시·광고 행위의 금지)
+     *   - 내용: <chunk 본문 max chars 절단>
+     *   - 관련 이유: 사용자 검토 안건과 벡터 유사도 0.NN 매칭
+     *
+     * 정책:
+     *   - 법령 우선, 그 다음 판례
+     *   - app.rag.prompt.maxItemsLegal 만큼만 포함
+     *   - 본문은 maxEvidenceChars로 truncate
      */
     private String buildLegalEvidenceBlock(java.util.List<com.legalreview.dto.response.EvidenceDto> evs) {
         if (evs == null || evs.isEmpty()) return "";
@@ -210,16 +229,39 @@ public class AnalysisAsyncRunner {
         int n = Math.min(maxItems, ordered.size());
         for (int i = 0; i < n; i++) {
             com.legalreview.dto.response.EvidenceDto e = ordered.get(i);
-            String typeLabel = "LAW".equalsIgnoreCase(e.getSourceType()) ? "법령" : "판례";
+            java.util.Map<String, Object> meta = e.getMetadata() == null ? java.util.Map.of() : e.getMetadata();
+            String typeLabel = "LAW".equalsIgnoreCase(e.getSourceType()) ? "LAW" : "CASE";
             String title = nullSafe(e.getTitle());
-            String articleOrCourt = nullSafe(e.getArticleOrCourt());
-            String quoted = truncate(nullSafe(e.getQuotedText().isEmpty() ? e.getSummary() : e.getQuotedText()), maxChars);
-            sb.append(String.format("%d) [%s] %s%s%n   %s%n",
-                    i + 1, typeLabel, title,
-                    articleOrCourt.isEmpty() ? "" : " (" + articleOrCourt + ")",
-                    quoted));
+            String quoted = truncate(
+                    nullSafe(e.getQuotedText() != null && !e.getQuotedText().isEmpty()
+                            ? e.getQuotedText() : e.getSummary()),
+                    maxChars);
+
+            // "조문:" 라인 (LAW이고 articleNo 있을 때만)
+            String articleLine = null;
+            String articleNo = stringMeta(meta, "articleNo");
+            String articleTitle = stringMeta(meta, "articleTitle");
+            if (!articleNo.isEmpty()) {
+                articleLine = "제" + articleNo + "조"
+                        + (articleTitle.isEmpty() ? "" : " (" + articleTitle + ")");
+            }
+            String reason = nullSafe(e.getRelevanceReason());
+            if (reason.isEmpty()) reason = "사용자 검토 안건과 의미 매칭";
+
+            sb.append(String.format("%d. %s%n", i + 1, title));
+            sb.append(String.format("- 출처: %s%n", typeLabel));
+            if (articleLine != null) sb.append(String.format("- 조문: %s%n", articleLine));
+            sb.append(String.format("- 내용: %s%n", quoted));
+            sb.append(String.format("- 관련 이유: %s%n", reason));
+            sb.append('\n');
         }
         return sb.toString().trim();
+    }
+
+    private static String stringMeta(java.util.Map<String, Object> meta, String key) {
+        if (meta == null) return "";
+        Object v = meta.get(key);
+        return v == null ? "" : v.toString();
     }
 
     /**
@@ -364,14 +406,18 @@ public class AnalysisAsyncRunner {
                 for (EvidenceDto dto : lawResults) {
                     if (totalLawSaved >= MAX_ENRICH_PER_TYPE) break;
                     if (existingRefIds.contains(dto.getReferenceId())) continue;
-                    evidenceRepository.save(dto.toEntity(session));
+                    if (isLikelyIrrelevant(dto.getTitle())) continue;     // 무관 법령 필터
+                    EvidenceDto enriched = enrichRelevanceReason(dto, query);
+                    evidenceRepository.save(enriched.toEntity(session));
                     existingRefIds.add(dto.getReferenceId());
                     totalLawSaved++;
                 }
                 for (EvidenceDto dto : caseResults) {
                     if (totalCaseSaved >= MAX_ENRICH_PER_TYPE) break;
                     if (existingRefIds.contains(dto.getReferenceId())) continue;
-                    evidenceRepository.save(dto.toEntity(session));
+                    if (isLikelyIrrelevant(dto.getTitle())) continue;     // 무관 판례 필터
+                    EvidenceDto enriched = enrichRelevanceReason(dto, query);
+                    evidenceRepository.save(enriched.toEntity(session));
                     existingRefIds.add(dto.getReferenceId());
                     totalCaseSaved++;
                 }
@@ -433,51 +479,133 @@ public class AnalysisAsyncRunner {
         List<String> keywords = new ArrayList<>();
         String contentLower = content != null ? content : "";
 
-        // 마케팅/광고 유형
+        // ── 화장품 / 의료적 효능 표현 (가장 많이 잘못 분류되던 도메인) ──
+        // 효능/효과를 암시하는 표현이 있으면 화장품법/의약품법 우선
+        boolean cosmeticEfficacyHint = contentLower.matches(
+                ".*(?:화장품|에센스|크림|로션|세럼|토너|마스크팩|클렌저|선크림|자외선|수분|보습|미백|주름|탄력|모공|여드름|아토피|피부.*개선|피부.*회복|콜라겐|히알루론|레티놀|비타민C).*");
+        boolean medicalEfficacyHint = contentLower.matches(
+                ".*(?:치료|완화|예방|회복|개선|효과|효능|면역|진정|항염|항균|항산화|재생|복원|되돌|정상.*화|살균).*");
+        if (cosmeticEfficacyHint) {
+            keywords.add("화장품법");
+            keywords.add("화장품 표시광고");          // 표시광고법 + 화장품 시행규칙 매칭 유도
+            // 화장품에 의약품적 효능 표현이 있으면 위반 가능성 매우 높음
+            if (medicalEfficacyHint) {
+                keywords.add("의약외품");              // 의약외품/의약품 경계 검토
+                keywords.add("부당한 표시광고");
+            }
+        } else if (medicalEfficacyHint
+                && contentLower.matches(".*(?:먹는|복용|섭취|영양제|건강기능식품|식이|식품).*")) {
+            keywords.add("건강기능식품");
+            keywords.add("식품표시광고법");
+        }
+
+        // ── 마케팅/광고 유형 ──
         if (reviewType != null && (reviewType.contains("marketing") || reviewType.contains("광고") || reviewType.contains("마케팅"))) {
-            keywords.add("표시광고");
-            // 과장/허위 표현 감지
-            if (contentLower.matches(".*(?:최고|최초|유일|업계.*1위|No\\.?1|넘버원|세계.*최|국내.*최|가장).*")) {
-                keywords.add("부당광고");
+            keywords.add("표시광고의 공정화");           // 정확한 법령명 → 매칭 정확도↑
+            // 과장/허위/절대적 표현 감지
+            if (contentLower.matches(".*(?:최고|최초|유일|업계.*1위|No\\.?1|넘버원|세계.*최|국내.*최|가장|완벽|100%|전부|모두).*")) {
+                keywords.add("부당한 표시광고");
             }
             // 비교 표현 감지
             if (contentLower.matches(".*(?:배.*빠|배.*높|보다.*우수|대비|비교|경쟁사).*")) {
                 keywords.add("비교광고");
             }
+            // 효능 보장/체험기 등
+            if (contentLower.matches(".*(?:보장|약속|확실|반드시|증명|체험|후기).*")) {
+                keywords.add("기만적인 표시광고");
+            }
         }
 
-        // 개인정보/보안 관련
+        // ── 개인정보/보안 관련 ──
         if (contentLower.matches(".*(?:개인정보|보안|데이터|암호|인증|정보보호|ISMS|SSL).*")) {
             keywords.add("개인정보보호법");
         }
 
-        // 전자상거래 관련
+        // ── 전자상거래 관련 ──
         if (contentLower.matches(".*(?:구매|결제|환불|반품|배송|할인|쿠폰|이벤트|무료).*")) {
-            keywords.add("전자상거래");
+            keywords.add("전자상거래 등에서의 소비자보호");
         }
 
-        // 계약/서비스 관련
+        // ── 계약/서비스 관련 ──
         if (reviewType != null && (reviewType.contains("contract") || reviewType.contains("계약") || reviewType.contains("약관"))) {
-            keywords.add("약관규제법");
+            keywords.add("약관의 규제");
         }
 
-        // 산업별
+        // ── 산업별 (사용자가 입력한 industry 기반) ──
         if (industry != null) {
-            if (industry.contains("tech") || industry.contains("IT") || industry.contains("소프트웨어")) {
+            String ind = industry.toLowerCase();
+            if (ind.contains("tech") || ind.contains("it") || ind.contains("소프트웨어")) {
                 keywords.add("정보통신망법");
             }
-            if (industry.contains("food") || industry.contains("식품")) {
+            if (ind.contains("food") || ind.contains("식품")) {
                 keywords.add("식품표시광고법");
             }
-            if (industry.contains("finance") || industry.contains("금융")) {
+            if (ind.contains("finance") || ind.contains("금융")) {
                 keywords.add("금융소비자보호법");
             }
-            if (industry.contains("health") || industry.contains("의료") || industry.contains("건강")) {
-                keywords.add("의료법");
+            if (ind.contains("health") || ind.contains("의료") || ind.contains("건강")) {
+                keywords.add("의료기기 광고");
+            }
+            if (ind.contains("cosmetic") || ind.contains("뷰티") || ind.contains("화장품")) {
+                if (!keywords.contains("화장품법")) keywords.add("화장품법");
             }
         }
 
+        // ── 무관 도메인 키워드 보호: 너무 일반적 키워드 제거 ──
+        // (국가계약법, 양도소득세 등은 키워드로 직접 추가하지 않음)
         return keywords;
+    }
+
+    /**
+     * 검토 안건과 무관할 가능성이 매우 높은 법령/판례를 필터링.
+     * 표시광고/화장품/식품/개인정보 검토 안건에 흔히 잘못 매칭되는 도메인 차단.
+     * 보수적으로 적용 — 애매하면 통과 (false 반환).
+     */
+    private static boolean isLikelyIrrelevant(String title) {
+        if (title == null || title.isBlank()) return false;
+        String t = title.replaceAll("\\s+", "");
+        // 공공계약/세무/부동산 등 — 화장품/광고 안건과 거의 무관
+        String[] blockPatterns = {
+                "국가를당사자로하는계약",
+                "공기업.*계약사무",
+                "공공기관의운영에관한법률",
+                "지방계약",
+                "조달사업",
+                "양도소득세",
+                "종합부동산세",
+                "상속세",
+                "증여세",
+                "관세법",
+                "출입국",
+                "병역법",
+                "군인사법",
+        };
+        for (String p : blockPatterns) {
+            if (t.matches(".*" + p + ".*")) return true;
+        }
+        return false;
+    }
+
+    /**
+     * relevance_reason 강화: 단순 "키워드 매칭"이 아니라
+     * "왜 이 법령/판례가 이 검토 안건과 관련 있는지" 한 줄 설명 자동 부착.
+     */
+    private static EvidenceDto enrichRelevanceReason(EvidenceDto dto, String query) {
+        String existing = dto.getRelevanceReason();
+        if (existing != null && !existing.isBlank() && existing.length() > 20) {
+            return dto;  // 이미 풍부한 reason이 있으면 그대로
+        }
+        String reason = String.format("검토 키워드 '%s' 기반으로 매칭 — 검토 안건의 표현/맥락이 본 법령·판례의 규율 대상과 관련이 있을 수 있습니다.", query);
+        return new EvidenceDto(
+                dto.getSourceType(),
+                dto.getTitle(),
+                dto.getReferenceId(),
+                dto.getArticleOrCourt(),
+                dto.getSummary(),
+                dto.getUrl(),
+                reason,
+                dto.getQuotedText()
+        );
     }
 
     /** 기존 방식: 원문에서 불용어 제거 후 앞 20자 */

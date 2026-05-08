@@ -41,6 +41,7 @@ export function normalizeEvidences(source: unknown): EvidenceItem[] {
 function isEvidenceLike(x: unknown): boolean {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
-  // 최소 조건: title이 있고 sourceType이 있음
+  // 최소 조건: title이 있어야 evidence로 인정
+  // (score / metadata 등 부가 키는 자동 통과 — Jackson NON_NULL 직렬화로 누락 가능하나 객체 자체는 통과)
   return typeof o.title === "string" && o.title.length > 0;
 }

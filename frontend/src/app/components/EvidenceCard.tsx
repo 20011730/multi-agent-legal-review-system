@@ -31,12 +31,74 @@ export interface EvidenceItem {
   url?: string;
   relevanceReason?: string;
   quotedText?: string;
+  /** RAG cosine similarity (0~1). RAG 외 evidence는 undefined. */
+  score?: number;
+  /** 백엔드 EvidenceDto.metadata — RAG chunk 풍부화 정보 (있을 때만). */
+  metadata?: EvidenceMetadata;
+}
+
+/** RAG chunk metadata. 모든 키는 optional — 백엔드 변경/구버전 응답에서도 안전. */
+export interface EvidenceMetadata {
+  sourceType?: string;
+  lawMst?: string | number;
+  lawId?: string;
+  lawNameKr?: string;
+  lawTypeName?: string;
+  deptName?: string;
+  deptCode?: string;
+  enforceDate?: string;
+  promulgateDate?: string;
+  articleNo?: string | number;
+  articleTitle?: string;
+  caseNumber?: string;
+  court?: string;
+  judgmentDate?: string;
+  caseType?: string;
+  section?: string;
+  chunkIndex?: number;
+  chunkingStrategy?: string;
+  embeddingProvider?: string;
+  embeddingModel?: string;
+  url?: string;
+  shortName?: string;
+  revisionType?: string;
+  referenceId?: string | number;
+  chunkId?: string;
+  // forward-compat: 알 수 없는 키도 허용
+  [key: string]: unknown;
+}
+
+/* ── metadata 안전 접근 헬퍼 (모든 키 optional) ── */
+function metaStr(meta: EvidenceMetadata | undefined, key: keyof EvidenceMetadata): string {
+  if (!meta) return "";
+  const v = meta[key];
+  if (v === null || v === undefined) return "";
+  return String(v);
+}
+
+/* score(0~1) → 사람이 읽기 쉬운 라벨. */
+function formatScore(score: number | undefined): string {
+  if (typeof score !== "number" || !isFinite(score)) return "";
+  return `${(score * 100).toFixed(0)}%`;
 }
 
 /* ── 개별 Evidence 아이템 ── */
 function EvidenceRow({ ev }: { ev: EvidenceItem }) {
   const [open, setOpen] = useState(false);
   const isLaw = ev.sourceType === "LAW";
+
+  // RAG metadata 우선, 없으면 기본 필드 fallback
+  const articleNo = metaStr(ev.metadata, "articleNo");
+  const articleTitle = metaStr(ev.metadata, "articleTitle");
+  const lawNameKr = metaStr(ev.metadata, "lawNameKr");
+  const lawTypeName = metaStr(ev.metadata, "lawTypeName");
+  const deptName = metaStr(ev.metadata, "deptName") || ev.articleOrCourt || "";
+  const enforceDate = metaStr(ev.metadata, "enforceDate");
+  const scoreLabel = formatScore(ev.score);
+
+  const articleLabel = articleNo
+    ? `제${articleNo}조${articleTitle ? `(${articleTitle})` : ""}`
+    : "";
 
   const handleCopy = () => {
     const text = ev.title + (ev.referenceId ? ` (${ev.referenceId})` : "");
@@ -64,14 +126,28 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
         </Badge>
 
         <div className="flex-1 min-w-0">
-          <span className="font-medium text-sm text-gray-900 line-clamp-1">
-            {ev.title}
-          </span>
-          {(ev.articleOrCourt || ev.referenceId) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-sm text-gray-900 line-clamp-1">
+              {ev.title}
+            </span>
+            {scoreLabel && (
+              <span
+                className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 shrink-0"
+                title="RAG 벡터 유사도"
+              >
+                관련도 {scoreLabel}
+              </span>
+            )}
+          </div>
+          {(deptName || ev.referenceId || articleLabel) && (
             <p className="text-xs text-gray-500 mt-0.5">
-              {isLaw ? "소관: " : "법원: "}
-              {ev.articleOrCourt}
-              {ev.referenceId ? ` | ${ev.referenceId}` : ""}
+              {isLaw && articleLabel
+                ? articleLabel
+                : isLaw
+                ? "소관: "
+                : "법원: "}
+              {!articleLabel && deptName ? deptName : ""}
+              {ev.referenceId && !articleLabel ? ` | ${ev.referenceId}` : ""}
             </p>
           )}
         </div>
@@ -127,17 +203,58 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
             </div>
           </div>
 
-          {/* 조문/사건번호 */}
-          {(ev.articleOrCourt || ev.referenceId) && (
+          {/* 조문 (RAG metadata 우선) */}
+          {isLaw && articleLabel && (
+            <div className="flex items-start gap-2 text-xs">
+              <Scale className="w-3.5 h-3.5 text-gray-400 mt-0.5" />
+              <div>
+                <span className="text-gray-500">조문:</span>
+                <p className="font-medium text-gray-900 mt-0.5">{articleLabel}</p>
+              </div>
+            </div>
+          )}
+
+          {/* 소관부처 / 법원·사건번호 (조문이 별도로 있으면 보조 정보) */}
+          {(deptName || ev.referenceId) && (
             <div className="flex items-start gap-2 text-xs">
               <Scale className="w-3.5 h-3.5 text-gray-400 mt-0.5" />
               <div>
                 <span className="text-gray-500">
-                  {isLaw ? "소관부처/조문:" : "법원/사건번호:"}
+                  {isLaw ? "소관부처:" : "법원/사건번호:"}
                 </span>
                 <p className="font-medium text-gray-900 mt-0.5">
-                  {ev.articleOrCourt}
-                  {ev.referenceId ? ` | ${ev.referenceId}` : ""}
+                  {deptName}
+                  {ev.referenceId && !articleLabel ? ` | ${ev.referenceId}` : ""}
+                  {lawTypeName ? ` | ${lawTypeName}` : ""}
+                  {enforceDate ? ` | 시행 ${enforceDate}` : ""}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* 인용 본문 (RAG chunk) */}
+          {ev.quotedText && (
+            <div className="flex items-start gap-2 text-xs">
+              <BookOpen className="w-3.5 h-3.5 text-indigo-500 mt-0.5" />
+              <div className="flex-1">
+                <span className="text-gray-500">인용 본문:</span>
+                <p className="text-gray-800 mt-0.5 leading-relaxed bg-white border border-gray-200 rounded-md px-2 py-1.5 whitespace-pre-wrap">
+                  {ev.quotedText.length > 600
+                    ? ev.quotedText.slice(0, 600) + "…"
+                    : ev.quotedText}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* 관련 이유 / 점수 */}
+          {(ev.relevanceReason || scoreLabel) && (
+            <div className="flex items-start gap-2 text-xs">
+              <Info className="w-3.5 h-3.5 text-indigo-500 mt-0.5" />
+              <div>
+                <span className="text-gray-500">관련 이유:</span>
+                <p className="text-indigo-700 mt-0.5 leading-relaxed">
+                  {ev.relevanceReason || (scoreLabel && `벡터 유사도 ${scoreLabel}`)}
                 </p>
               </div>
             </div>

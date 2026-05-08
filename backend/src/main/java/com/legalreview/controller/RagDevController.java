@@ -299,6 +299,54 @@ public class RagDevController {
         return ResponseEntity.ok(resp);
     }
 
+    /**
+     * 빠른 검증용 GET 변형 — 단일 query string으로 retrieval 호출.
+     * 예: GET /api/rag/retrieve?query=표시광고%20부당광고%20사업자
+     *
+     * SessionCreateRequest의 content 필드에 query 그대로 넣어 동일 흐름 사용.
+     */
+    @GetMapping("/retrieve")
+    public ResponseEntity<?> retrieveByQuery(
+            @RequestParam("query") String query,
+            @RequestParam(value = "reviewType", required = false, defaultValue = "marketing") String reviewType,
+            @RequestParam(value = "industry", required = false, defaultValue = "tech") String industry) {
+        ResponseEntity<?> guard = guardEnabled();
+        if (guard != null) return guard;
+
+        SessionCreateRequest req = new SessionCreateRequest();
+        req.setCompanyName("debug");
+        req.setIndustry(industry);
+        req.setReviewType(reviewType);
+        req.setSituation("debug retrieval");
+        req.setContent(query == null ? "" : query);
+        req.setParticipationMode("observe");
+
+        List<EvidenceDto> evidences = retrievalService.retrieveForSession(req);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("query", query);
+        resp.put("count", evidences.size());
+        resp.put("evidences", evidences);
+        return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * 디버깅용 — Chroma 컬렉션 sample 조회.
+     * 예: GET /api/rag/debug/laws/sample?limit=5
+     */
+    @GetMapping("/debug/{collection}/sample")
+    public ResponseEntity<?> debugSample(
+            @PathVariable String collection,
+            @RequestParam(value = "limit", defaultValue = "5") int limit) {
+        ResponseEntity<?> guard = guardDevEndpoint();
+        if (guard != null) return guard;
+        List<Map<String, Object>> sample = chromaSearchService.dumpSample(collection, limit);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("collection", collection);
+        resp.put("count", sample.size());
+        resp.put("samples", sample);
+        return ResponseEntity.ok(resp);
+    }
+
     @GetMapping("/health")
     public ResponseEntity<?> health() {
         Map<String, Object> resp = new LinkedHashMap<>();

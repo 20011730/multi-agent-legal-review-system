@@ -18,11 +18,11 @@ if [ -f .env ]; then
 fi
 
 # 기본값 (env에 없으면)
-export LAW_API_OC="${LAW_API_OC:-}"
+export LAW_API_OC="${LAW_API_OC:-SangHoon}"
 export APP_RAG_ENABLED="${APP_RAG_ENABLED:-true}"
 export APP_RAG_INGESTION_DEV_ENDPOINT_ENABLED="${APP_RAG_INGESTION_DEV_ENDPOINT_ENABLED:-true}"
 
-if [ -z "$LAW_API_OC" ] || [ "$LAW_API_OC" = "여기에_본인_OC값_입력" ]; then
+if [ -z "$LAW_API_OC" ]; then
   cat <<'WARN'
 ⚠️  LAW_API_OC 미설정 — 다음 기능이 비활성화됩니다:
    - POST /api/rag/ingest/law-list/api          (법령 목록 API 수집)

@@ -533,37 +533,69 @@ export function Verdict() {
                 <div style={{ ...pdfCardStyle, paddingBottom: "10px" }}>
                   <div style={pdfTitleStyle}>법령·판례 근거 ({evidences.length}건)</div>
                 </div>
-                {evidences.map((ev, idx) => (
-                  <div key={idx} style={{ ...pdfSubCardStyle, marginTop: "0" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
-                      <span style={{
-                        fontSize: "9px", fontWeight: 700, padding: "1px 6px", borderRadius: "8px",
-                        background: ev.sourceType === "LAW" ? "#dbeafe" : "#f3e8ff",
-                        color: ev.sourceType === "LAW" ? "#1e40af" : "#6b21a8",
-                      }}>
-                        {ev.sourceType === "LAW" ? "법령" : "판례"}
-                      </span>
-                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#0f172a" }}>
-                        {ev.title}{ev.articleOrCourt ? ` · ${ev.articleOrCourt}` : ""}
+                {evidences.map((ev, idx) => {
+                  const m = ev.metadata ?? {};
+                  const articleNo = m.articleNo != null ? String(m.articleNo) : "";
+                  const articleTitle = m.articleTitle ? String(m.articleTitle) : "";
+                  const articleLabel = articleNo
+                    ? `제${articleNo}조${articleTitle ? `(${articleTitle})` : ""}`
+                    : "";
+                  const dept = (m.deptName ? String(m.deptName) : ev.articleOrCourt) || "";
+                  const lawType = m.lawTypeName ? String(m.lawTypeName) : "";
+                  const enforce = m.enforceDate ? String(m.enforceDate) : "";
+                  const scorePct = typeof ev.score === "number" && isFinite(ev.score)
+                    ? `${(ev.score * 100).toFixed(0)}%` : "";
+                  const body = ev.quotedText || ev.summary || "";
+
+                  return (
+                    <div key={idx} style={{ ...pdfSubCardStyle, marginTop: "0" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px", flexWrap: "wrap" }}>
+                        <span style={{
+                          fontSize: "9px", fontWeight: 700, padding: "1px 6px", borderRadius: "8px",
+                          background: ev.sourceType === "LAW" ? "#dbeafe" : "#f3e8ff",
+                          color: ev.sourceType === "LAW" ? "#1e40af" : "#6b21a8",
+                        }}>
+                          {ev.sourceType === "LAW" ? "법령" : "판례"}
+                        </span>
+                        <div style={{ fontSize: "12px", fontWeight: 600, color: "#0f172a", flex: 1, minWidth: 0 }}>
+                          {ev.title}
+                        </div>
+                        {scorePct && (
+                          <span style={{
+                            fontSize: "9px", fontWeight: 600, padding: "1px 6px", borderRadius: "8px",
+                            background: "#eef2ff", color: "#4338ca", whiteSpace: "nowrap",
+                          }}>
+                            관련도 {scorePct}
+                          </span>
+                        )}
                       </div>
+                      {(articleLabel || dept || lawType || enforce) && (
+                        <div style={{ fontSize: "10px", color: "#475569", marginBottom: "3px" }}>
+                          {articleLabel && <span>{articleLabel}</span>}
+                          {articleLabel && (dept || lawType || enforce) && <span> · </span>}
+                          {dept && <span>{dept}</span>}
+                          {lawType && <span> · {lawType}</span>}
+                          {enforce && <span> · 시행 {enforce}</span>}
+                        </div>
+                      )}
+                      {body && (
+                        <div style={{ fontSize: "11px", color: "#334155", lineHeight: 1.5, marginTop: "2px", whiteSpace: "pre-wrap" }}>
+                          {body.length > 350 ? body.slice(0, 350) + "…" : body}
+                        </div>
+                      )}
+                      {ev.relevanceReason && (
+                        <div style={{ fontSize: "10px", color: "#4338ca", marginTop: "3px", fontStyle: "italic" }}>
+                          관련 이유: {ev.relevanceReason}
+                        </div>
+                      )}
+                      {ev.url && (
+                        <div style={{ fontSize: "9px", color: "#3b82f6", marginTop: "3px", wordBreak: "break-all" }}>
+                          {ev.url}
+                        </div>
+                      )}
                     </div>
-                    {ev.summary && (
-                      <div style={{ fontSize: "11px", color: "#334155", lineHeight: 1.5, marginTop: "2px" }}>
-                        {ev.summary}
-                      </div>
-                    )}
-                    {ev.relevanceReason && (
-                      <div style={{ fontSize: "10px", color: "#64748b", marginTop: "3px", fontStyle: "italic" }}>
-                        관련성: {ev.relevanceReason}
-                      </div>
-                    )}
-                    {ev.url && (
-                      <div style={{ fontSize: "9px", color: "#3b82f6", marginTop: "3px", wordBreak: "break-all" }}>
-                        {ev.url}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </>
             )}
 

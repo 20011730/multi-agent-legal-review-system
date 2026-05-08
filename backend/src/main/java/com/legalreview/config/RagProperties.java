@@ -63,10 +63,32 @@ public class RagProperties {
 
     @Getter @Setter
     public static class Embedding {
-        /** 임베딩 모델 이름. Chroma 컬렉션 생성 시 일관성 유지를 위해 메타데이터 기록 권장. */
-        private String model = "BAAI/bge-m3";
-        /** 임베딩 차원수. 컬렉션 생성 시 검증용. */
-        private int dimension = 1024;
+        /**
+         * 임베딩 provider 선택자.
+         * 지원 값:
+         *   - "simple"   : SimpleHashEmbeddingService (기본 / fallback / 의존성 0)
+         *   - "external" : ExternalEmbeddingService (HTTP 마이크로서비스 — sentence-transformers 등)
+         *   - "e5"       : E5 계열 (현재는 stub — 향후 ONNX/HTTP 어댑터로 교체)
+         */
+        private String provider = "simple";
+
+        /** 임베딩 모델 이름 (메타데이터/식별용). Chroma chunk metadata에 함께 기록. */
+        private String model = "simple-hash-v1";
+
+        /** 임베딩 차원수. SimpleHash=384, MiniLM-L6=384, bge-m3=1024 등. */
+        private int dimension = 384;
+
+        private final External external = new External();
+
+        @Getter @Setter
+        public static class External {
+            /** 외부 임베딩 마이크로서비스 base URL. */
+            private String baseUrl = "http://localhost:9100";
+            /** 임베딩 endpoint path. body: {"texts":[...]} → {"embeddings":[[...]]} */
+            private String embedPath = "/embed";
+            /** HTTP timeout(초). */
+            private int timeoutSeconds = 30;
+        }
     }
 
     @Getter @Setter

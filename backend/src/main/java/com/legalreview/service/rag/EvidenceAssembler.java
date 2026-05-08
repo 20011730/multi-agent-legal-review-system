@@ -5,7 +5,9 @@ import com.legalreview.dto.response.EvidenceDto;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * RAG retrieval 결과(RetrievedChunk)를 기존 EvidenceDto로 변환한다.
@@ -72,7 +74,7 @@ public class EvidenceAssembler {
         String url = c.metaString("url");
         String relevanceReason = formatRelevance(c.getDistance());
 
-        return new EvidenceDto(
+        EvidenceDto dto = new EvidenceDto(
                 isLaw ? "LAW" : "CASE",
                 title,
                 referenceId,
@@ -82,6 +84,44 @@ public class EvidenceAssembler {
                 relevanceReason,
                 chunkText // quotedText: 인용문 박스로 그대로 노출
         );
+
+        // ── RAG 부가 필드: score + metadata ──
+        // 응답에만 노출, DB 저장 X (Evidence 엔티티에는 컬럼 없음)
+        Double dist = c.getDistance();
+        if (dist != null) {
+            double sim = Math.max(0.0, Math.min(1.0, 1.0 - dist / 2.0));
+            dto.setScore(sim);
+        }
+        dto.setMetadata(buildExposedMetadata(c));
+        return dto;
+    }
+
+    /**
+     * 화면/프롬프트에서 활용할 metadata만 추려 노출.
+     * Chroma 내부 키 일부(rowId 등)는 응답에 안 보이게 의도적으로 제외 가능 — 여기선 모두 패스스루.
+     */
+    private static Map<String, Object> buildExposedMetadata(RetrievedChunk c) {
+        Map<String, Object> src = c.getMetadata();
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (src != null) {
+            // 우선순위 키만 정렬해서 응답에 일관된 순서로 노출
+            String[] orderedKeys = {
+                    "sourceType", "lawMst", "lawId", "lawNameKr", "lawTypeName",
+                    "deptName", "deptCode", "enforceDate", "promulgateDate",
+                    "articleNo", "articleTitle",
+                    "section", "caseNumber", "court", "judgmentDate", "caseType",
+                    "chunkIndex", "chunkingStrategy",
+                    "embeddingProvider", "embeddingModel",
+                    "url", "shortName", "revisionType", "referenceId"
+            };
+            for (String k : orderedKeys) {
+                if (src.containsKey(k) && src.get(k) != null && !src.get(k).toString().isEmpty()) {
+                    out.put(k, src.get(k));
+                }
+            }
+        }
+        out.put("chunkId", c.getChunkId());
+        return out;
     }
 
     private static String sectionLabel(String section) {

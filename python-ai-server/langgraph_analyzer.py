@@ -43,23 +43,122 @@ class DebateState(TypedDict):
 
 
 # ── 노드 함수 ──
-def biz_node(state: DebateState) -> dict:
-    """비즈니스 에이전트 노드."""
-    logger.info("[라운드 %d] 비즈니스 에이전트 실행 중...", state["round_num"])
+def _count_prev_messages(state: DebateState) -> int:
+    """현재까지 누적된 발언 수 (디버깅 메트릭)."""
+    return len(state.get("messages", []) or [])
+
+
+def _build_judge_display_content(raw_response: str) -> str:
+    """
+    판정 에이전트의 raw 응답(JSON 또는 텍스트)을 토론 로그에 표시하기 좋은
+    마크다운 섹션으로 변환한다.
+
+    - JSON 파싱 성공 시: ## 종합 판정 / ## 핵심 위험 요소 / ## 권고사항 / ## 수정 문안 제안
+    - 파싱 실패 시: raw 응답을 최대 2000자까지 그대로 보존 (절단되더라도 길게 유지)
+    """
+    import json
+    if not raw_response:
+        return "(판정 생성 실패 — 토론 결과를 다시 확인해주세요.)"
+
+    text = raw_response.strip()
+    # 코드블록 안의 JSON 추출
+    parsed = None
     try:
-        response = run_biz_agent(state["history"], state["topic"])
+        if "```json" in text:
+            chunk = text.split("```json", 1)[1].split("```", 1)[0].strip()
+            parsed = json.loads(chunk)
+        elif "```" in text:
+            chunk = text.split("```", 1)[1].split("```", 1)[0].strip()
+            parsed = json.loads(chunk)
+        elif text.startswith("{"):
+            # 마지막 } 까지 시도
+            end = text.rfind("}")
+            if end > 0:
+                parsed = json.loads(text[: end + 1])
+    except Exception:
+        parsed = None
+
+    if not isinstance(parsed, dict):
+        # 파싱 실패 — raw 텍스트를 충분히 길게 보존
+        return text[:2000] + ("…" if len(text) > 2000 else "")
+
+    parts = []
+    summary = (parsed.get("summary") or "").strip()
+    recommendation = (parsed.get("recommendation") or "").strip()
+    revised = (parsed.get("revisedContent") or "").strip()
+    risks = parsed.get("risks") or []
+    verdict = (parsed.get("verdict") or "").strip()
+    risk_level = (parsed.get("riskLevel") or "").strip()
+
+    header_bits = []
+    if verdict:
+        verdict_label = {
+            "approved": "승인",
+            "conditional": "조건부 승인 (수정 권고)",
+            "rejected": "반려",
+        }.get(verdict.lower(), verdict)
+        header_bits.append(f"**판정:** {verdict_label}")
+    if risk_level:
+        header_bits.append(f"**리스크 등급:** {risk_level}")
+    if header_bits:
+        parts.append(" · ".join(header_bits))
+
+    if summary:
+        parts.append(f"## 종합 판정\n{summary}")
+
+    if isinstance(risks, list) and risks:
+        risk_lines = ["## 핵심 위험 요소"]
+        for r in risks[:8]:
+            if isinstance(r, dict):
+                cat = (r.get("category") or "").strip()
+                lvl = (r.get("level") or "").strip()
+                desc = (r.get("description") or "").strip()
+                tag = f"[{lvl.upper()}] " if lvl else ""
+                risk_lines.append(f"- {tag}**{cat}**: {desc}")
+        if len(risk_lines) > 1:
+            parts.append("\n".join(risk_lines))
+
+    if recommendation:
+        parts.append(f"## 권고사항\n{recommendation}")
+
+    if revised:
+        parts.append(f"## 수정 문안 제안\n{revised}")
+
+    if not parts:
+        return text[:2000] + ("…" if len(text) > 2000 else "")
+    return "\n\n".join(parts)
+
+
+def biz_node(state: DebateState) -> dict:
+    """비즈니스 에이전트 노드 — 라운드별 prompt 전달."""
+    import time
+    round_num = state["round_num"]
+    prev_count = _count_prev_messages(state)
+    t0 = time.time()
+    logger.info(
+        "[BIZ] round=%d 시작 (prev_messages=%d, history_len=%d)",
+        round_num, prev_count, len(state.get("history", "") or ""),
+    )
+    try:
+        response = run_biz_agent(state["history"], state["topic"], round_num=round_num)
     except Exception as e:
         logger.error("비즈니스 에이전트 실패: %s", e)
         response = f"(비즈니스 관점 분석 중 오류 발생: {str(e)[:100]})"
 
-    new_history = state["history"] + f"\n\n[비즈니스 전략가]: {response}"
+    elapsed = time.time() - t0
+    logger.info(
+        "[BIZ] round=%d 완료 (response_len=%d, elapsed=%.1fs)",
+        round_num, len(response or ""), elapsed,
+    )
+
+    new_history = state["history"] + f"\n\n[비즈니스 전략가 / 라운드 {round_num}]: {response}"
 
     msg = AgentMessage(
         agentId="risk",
         agentName="비즈니스 전략가",
         content=response,
-        type="analysis" if state["round_num"] == 1 else "concern",
-        round=state["round_num"],
+        type="analysis" if round_num == 1 else "concern",
+        round=round_num,
         stance="PRO",
         evidenceSummary="비즈니스 성장 및 실행 관점 분석",
     )
@@ -75,22 +174,35 @@ def biz_node(state: DebateState) -> dict:
 
 
 def legal_node(state: DebateState) -> dict:
-    """법무 에이전트 노드 (RAG 포함)."""
-    logger.info("[라운드 %d] 법무 에이전트 실행 중...", state["round_num"])
+    """법무 에이전트 노드 (RAG 포함) — 라운드별 prompt 전달."""
+    import time
+    round_num = state["round_num"]
+    prev_count = _count_prev_messages(state)
+    t0 = time.time()
+    logger.info(
+        "[LEGAL] round=%d 시작 (prev_messages=%d, history_len=%d)",
+        round_num, prev_count, len(state.get("history", "") or ""),
+    )
     try:
-        response = run_legal_agent(state["history"], state["topic"])
+        response = run_legal_agent(state["history"], state["topic"], round_num=round_num)
     except Exception as e:
         logger.error("법무 에이전트 실패: %s", e)
         response = f"(법적 분석 중 오류 발생: {str(e)[:100]})"
 
-    new_history = state["history"] + f"\n\n[법률 전문가]: {response}"
+    elapsed = time.time() - t0
+    logger.info(
+        "[LEGAL] round=%d 완료 (response_len=%d, elapsed=%.1fs)",
+        round_num, len(response or ""), elapsed,
+    )
+
+    new_history = state["history"] + f"\n\n[법률 전문가 / 라운드 {round_num}]: {response}"
 
     msg = AgentMessage(
         agentId="legal",
         agentName="법률 전문가",
         content=response,
-        type="analysis" if state["round_num"] == 1 else "concern",
-        round=state["round_num"],
+        type="analysis" if round_num == 1 else "concern",
+        round=round_num,
         stance="CON",
         evidenceSummary="법적 리스크 및 규정 위반 가능성 분석",
     )
@@ -111,21 +223,35 @@ def round_increment_node(state: DebateState) -> dict:
 
 
 def judge_node(state: DebateState) -> dict:
-    """판정 에이전트 노드."""
-    logger.info("판정 에이전트 실행 중...")
+    """판정 에이전트 노드 — 전체 토론 종합."""
+    import time
+    prev_count = _count_prev_messages(state)
+    t0 = time.time()
+    logger.info(
+        "[JUDGE] 시작 (prev_messages=%d, history_len=%d)",
+        prev_count, len(state.get("history", "") or ""),
+    )
     try:
         response = run_judge_agent(state["history"], state["topic"])
     except Exception as e:
         logger.error("판정 에이전트 실패: %s", e)
         response = ""
 
+    elapsed = time.time() - t0
+    logger.info("[JUDGE] 완료 (response_len=%d, elapsed=%.1fs)", len(response or ""), elapsed)
+
     new_history = state["history"] + f"\n\n[최종 판정]: {response}"
 
-    # 판정 결과를 메시지에도 추가 (ethics 역할로 매핑)
+    # 판정 결과를 토론 로그용으로 사람이 읽을 수 있는 형태로 변환:
+    #   - JSON 그대로 [:500] 절단하지 않고 summary/recommendation/revisedContent를
+    #     사람이 보기 좋은 마크다운 섹션 형태로 재구성
+    #   - 파싱 실패 시 raw response를 충분한 길이(2000자)까지 보존
+    judge_display = _build_judge_display_content(response)
+
     msg = AgentMessage(
-        agentId="ethics",
+        agentId="judge",                 # 'ethics' → 'judge'로 명확화 (frontend 호환성: 둘 다 처리됨)
         agentName="최종 판정관",
-        content=response[:500] if response else "(판정 생성 실패)",
+        content=judge_display,
         type="recommendation",
         round=state["round_num"],
         stance="NEUTRAL",
@@ -186,10 +312,12 @@ def _get_graph():
 def analyze_with_langgraph(request: AnalyzeRequest) -> AnalyzeResponse:
     """LangGraph 멀티에이전트 토론을 실행하고 AnalyzeResponse로 변환한다."""
 
-    # GEMINI_API_KEY 사전 검증 — 없으면 바로 에러를 raise하여 main.py에서 폴백
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY 미설정 — 규칙 기반 엔진으로 폴백합니다.")
+    # provider 사전 검증 — 미설정/불충분이면 main.py에서 규칙 기반 폴백
+    from agents.llm_client import is_provider_configured, get_provider
+    ok, reason = is_provider_configured()
+    if not ok:
+        raise RuntimeError(f"LLM provider 사용 불가 — 규칙 기반 폴백: {reason}")
+    logger.info("✓ LLM provider 검증 통과: %s", reason)
 
     # 안건 텍스트 구성
     topic = (
