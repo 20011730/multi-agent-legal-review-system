@@ -3,11 +3,15 @@ package com.legalreview.controller;
 import com.legalreview.dto.request.SessionCreateRequest;
 import com.legalreview.dto.response.DebateResultResponse;
 import com.legalreview.dto.response.SessionCreateResponse;
+import com.legalreview.dto.response.SessionStatusResponse;
+import com.legalreview.service.OllamaClient;
 import com.legalreview.service.SessionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/sessions")
@@ -15,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 public class SessionController {
 
     private final SessionService sessionService;
+    private final OllamaClient ollamaClient;
 
     /**
      * 세션 생성 API
@@ -30,6 +35,17 @@ public class SessionController {
     }
 
     /**
+     * 세션 상태 조회 API (폴링용)
+     * 프론트 /result 페이지에서 분석 진행 상태를 확인
+     */
+    @GetMapping("/{sessionId}/status")
+    public ResponseEntity<SessionStatusResponse> getSessionStatus(
+            @PathVariable Long sessionId) {
+        SessionStatusResponse response = sessionService.getSessionStatus(sessionId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * 최신 토론 결과 조회 API
      * 프론트 /result, /verdict 페이지에서 호출
      */
@@ -38,5 +54,18 @@ public class SessionController {
             @PathVariable Long sessionId) {
         DebateResultResponse response = sessionService.getLatestDebateResult(sessionId);
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Ollama 연결 테스트 (개발용)
+     * GET /api/sessions/ollama/health
+     */
+    @GetMapping("/ollama/health")
+    public ResponseEntity<Map<String, Object>> ollamaHealth() {
+        boolean available = ollamaClient.isAvailable();
+        return ResponseEntity.ok(Map.of(
+                "ollamaAvailable", available,
+                "message", available ? "Ollama 서버 연결 성공" : "Ollama 서버 연결 실패"
+        ));
     }
 }

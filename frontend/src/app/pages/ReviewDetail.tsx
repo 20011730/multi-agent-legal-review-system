@@ -22,10 +22,63 @@ import {
   Minus,
   Loader2,
   Shield,
-  FileCheck,
-  BookOpen,
-  ExternalLink,
+  Gavel,
 } from "lucide-react";
+import { EvidenceCardList } from "../components/EvidenceCard";
+import { normalizeEvidences } from "../utils/normalizeEvidence";
+
+/* ── 메시지 렌더링 유틸 (Result.tsx와 동일한 로직) ── */
+function renderAgentContent(content: string) {
+  return content.split("\n").map((line, i) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("## ")) {
+      return <h4 key={i} className="font-semibold text-slate-800 mt-3 mb-1 text-sm">{trimmed.replace(/^##\s*/, "")}</h4>;
+    }
+    if (trimmed === "") return <div key={i} className="h-2" />;
+    return <p key={i} className="text-sm text-slate-700 leading-relaxed">{line}</p>;
+  });
+}
+
+function renderJudgeContent(content: string) {
+  if (content.includes("## ")) {
+    return (
+      <div className="space-y-1">
+        {content.split("\n").map((line, i) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("## "))
+            return <h4 key={i} className="font-semibold text-violet-800 mt-2 mb-1 text-sm">{trimmed.replace(/^##\s*/, "")}</h4>;
+          if (trimmed === "") return <div key={i} className="h-1" />;
+          return <p key={i} className="text-sm text-slate-700 leading-relaxed">{line}</p>;
+        })}
+      </div>
+    );
+  }
+  try {
+    let json = content.trim();
+    if (json.includes("```json")) {
+      json = json.substring(json.indexOf("```json") + 7, json.indexOf("```", json.indexOf("```json") + 7)).trim();
+    }
+    if (json.startsWith("{")) {
+      const parsed = JSON.parse(json) as Record<string, unknown>;
+      const summary = typeof parsed.summary === "string" ? parsed.summary : "";
+      const recommendation = typeof parsed.recommendation === "string" ? parsed.recommendation : "";
+      const revisedContent = typeof parsed.revisedContent === "string" ? parsed.revisedContent : "";
+      return (
+        <div className="space-y-2 text-sm text-slate-700">
+          {summary && <p className="leading-relaxed">📋 {summary}</p>}
+          {recommendation && <p className="leading-relaxed mt-1">💡 {recommendation}</p>}
+          {revisedContent && (
+            <div className="mt-2 p-3 bg-violet-50 rounded-lg border border-violet-200">
+              <p className="text-xs font-semibold text-violet-700 mb-1">수정 문안 제안</p>
+              <p className="text-violet-800">{revisedContent}</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+  } catch { /* fallback */ }
+  return <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{content}</p>;
+}
 
 interface AgentMessage {
   agentId: string;
@@ -87,9 +140,10 @@ const reviewTypeLabels: Record<string, string> = {
 };
 
 const agentConfig: Record<string, { icon: typeof Shield; color: string; bg: string }> = {
-  legal: { icon: Scale, color: "text-blue-700", bg: "bg-blue-50 border-blue-200" },
-  risk: { icon: Shield, color: "text-amber-700", bg: "bg-amber-50 border-amber-200" },
-  ethics: { icon: FileCheck, color: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200" },
+  legal:  { icon: Scale,  color: "text-blue-700",   bg: "bg-blue-50 border-blue-200" },
+  risk:   { icon: Shield, color: "text-amber-700",  bg: "bg-amber-50 border-amber-200" },
+  ethics: { icon: Gavel,  color: "text-violet-700", bg: "bg-violet-50 border-violet-200" },
+  judge:  { icon: Gavel,  color: "text-violet-700", bg: "bg-violet-50 border-violet-200" },
 };
 
 const verdictConfig: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
@@ -292,22 +346,32 @@ export function ReviewDetailPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {msgs.map((msg, idx) => {
-                    const ac = agentConfig[msg.agentId] || agentConfig.legal;
+                    // ethics → judge 호환 처리
+                    const resolvedId = msg.agentId === "ethics" ? "judge" : msg.agentId;
+                    const ac = agentConfig[resolvedId] || agentConfig.legal;
                     const AgentIcon = ac.icon;
+                    const isJudge = resolvedId === "judge";
                     return (
                       <div key={idx} className={`p-4 rounded-xl border ${ac.bg}`}>
-                        <div className="flex items-center gap-2 mb-2">
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
                           <AgentIcon className={`w-4 h-4 ${ac.color}`} />
                           <span className={`font-medium text-sm ${ac.color}`}>
                             {msg.agentName}
                           </span>
+                          {msg.stance && (
+                            <Badge variant="outline" className="text-xs">
+                              {msg.stance}
+                            </Badge>
+                          )}
                           <Badge variant="outline" className="text-xs">
-                            {msg.stance}
+                            {msg.type}
                           </Badge>
                         </div>
-                        <p className="text-sm text-slate-800 mb-2">{msg.content}</p>
+                        <div className="mt-1">
+                          {isJudge ? renderJudgeContent(msg.content) : renderAgentContent(msg.content)}
+                        </div>
                         {msg.evidenceSummary && (
-                          <p className="text-xs text-slate-500">
+                          <p className="text-xs text-slate-500 mt-2">
                             근거: {msg.evidenceSummary}
                           </p>
                         )}
@@ -320,6 +384,33 @@ export function ReviewDetailPage() {
           </div>
         )}
 
+        {activeTab === "verdict" && !fd && (
+          <div className="space-y-6">
+            <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
+              <CardContent className="py-12 text-center">
+                <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
+                <p className="text-slate-700 font-medium mb-1">최종 판정 정보가 아직 없습니다.</p>
+                <p className="text-sm text-slate-500">
+                  {detail.status === "COMPLETED"
+                    ? "분석이 완료되었지만 판정 데이터가 저장되지 않았습니다. 새로 검토를 시작해 주세요."
+                    : "분석이 진행 중이거나 미완료 상태입니다. 분석이 끝난 뒤 다시 확인해 주세요."}
+                </p>
+                <div className="mt-6 flex justify-center gap-3">
+                  <Button variant="outline" onClick={() => navigate("/reviews")}>목록으로</Button>
+                  <Button
+                    onClick={() => navigate("/input")}
+                    className="rounded-full bg-[#1E3A8A] hover:bg-[#1E293B] text-white"
+                  >
+                    새 검토 시작
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+            {/* 판정이 없어도 evidence가 있으면 일관되게 표시 */}
+            <EvidenceCardList evidences={normalizeEvidences(detail)} />
+          </div>
+        )}
+
         {activeTab === "verdict" && fd && (
           <div className="space-y-6">
             <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
@@ -327,28 +418,37 @@ export function ReviewDetailPage() {
                 <CardTitle>판정 요약</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center gap-4">
-                  {vc && VerdictIcon && (
+                <div className="flex items-center gap-4 flex-wrap">
+                  {vc && VerdictIcon ? (
                     <div className="flex items-center gap-2">
                       <VerdictIcon className={`w-6 h-6 ${vc.color}`} />
                       <span className={`text-lg font-semibold ${vc.color}`}>
                         {vc.label}
                       </span>
                     </div>
+                  ) : fd.verdict ? (
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-6 h-6 text-slate-500" />
+                      <span className="text-lg font-semibold text-slate-700">{fd.verdict}</span>
+                    </div>
+                  ) : null}
+                  {fd.riskLevel && (
+                    <Badge className={
+                      fd.riskLevel === "HIGH" ? "bg-red-100 text-red-700" :
+                      fd.riskLevel === "MEDIUM" ? "bg-amber-100 text-amber-700" :
+                      "bg-green-100 text-green-700"
+                    }>
+                      위험도: {fd.riskLevel}
+                    </Badge>
                   )}
-                  <Badge className={
-                    fd.riskLevel === "HIGH" ? "bg-red-100 text-red-700" :
-                    fd.riskLevel === "MEDIUM" ? "bg-amber-100 text-amber-700" :
-                    "bg-green-100 text-green-700"
-                  }>
-                    위험도: {fd.riskLevel}
-                  </Badge>
                 </div>
-                <p className="text-slate-700">{fd.summary}</p>
+                {fd.summary
+                  ? <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">{fd.summary}</p>
+                  : <p className="text-sm text-slate-400">요약이 제공되지 않았습니다.</p>}
               </CardContent>
             </Card>
 
-            {fd.risks.length > 0 && (
+            {Array.isArray(fd.risks) && fd.risks.length > 0 && (
               <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
                 <CardHeader>
                   <CardTitle>위험 요소</CardTitle>
@@ -356,12 +456,13 @@ export function ReviewDetailPage() {
                 <CardContent>
                   <div className="space-y-3">
                     {fd.risks.map((risk, idx) => {
-                      const RiskIcon = riskLevelIcon[risk.level?.toUpperCase()] || Minus;
+                      const lvl = (risk.level || "").toLowerCase();
+                      const RiskIcon = riskLevelIcon[(risk.level || "").toUpperCase()] || Minus;
                       return (
                         <div key={idx} className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl">
                           <RiskIcon className={`w-5 h-5 mt-0.5 ${
-                            risk.level === "high" ? "text-red-600" :
-                            risk.level === "medium" ? "text-amber-600" :
+                            lvl === "high" ? "text-red-600" :
+                            lvl === "medium" ? "text-amber-600" :
                             "text-green-600"
                           }`} />
                           <div>
@@ -376,89 +477,32 @@ export function ReviewDetailPage() {
               </Card>
             )}
 
-            <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
-              <CardHeader>
-                <CardTitle>권고사항</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-slate-700 mb-4">{fd.recommendation}</p>
-                {fd.revisedContent && (
-                  <>
-                    <Separator className="my-4" />
-                    <div>
-                      <p className="text-sm font-medium text-slate-900 mb-2">수정 제안 문구</p>
-                      <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
-                        <p className="text-sm text-green-900 whitespace-pre-wrap">{fd.revisedContent}</p>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-
-            {detail.evidences && detail.evidences.length > 0 && (
+            {(fd.recommendation || fd.revisedContent) && (
               <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <BookOpen className="w-5 h-5 text-indigo-600" />
-                    법령·판례 근거
-                  </CardTitle>
-                  <CardDescription>분석에 참조된 법령 및 판례 자료</CardDescription>
+                  <CardTitle>권고사항</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-3">
-                    {detail.evidences.map((ev, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200"
-                      >
-                        <Badge
-                          className={`text-xs flex-shrink-0 mt-0.5 ${
-                            ev.sourceType === "LAW"
-                              ? "bg-blue-600"
-                              : "bg-purple-600"
-                          }`}
-                        >
-                          {ev.sourceType === "LAW" ? "법령" : "판례"}
-                        </Badge>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-sm text-slate-900 truncate">
-                              {ev.title}
-                            </span>
-                            {ev.url && (
-                              <a
-                                href={ev.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex-shrink-0 text-blue-600 hover:text-blue-800"
-                              >
-                                <ExternalLink className="w-3.5 h-3.5" />
-                              </a>
-                            )}
-                          </div>
-                          {ev.articleOrCourt && (
-                              <p className="text-xs text-slate-500 mb-1">
-                              {ev.sourceType === "LAW" ? "소관: " : "법원: "}
-                              {ev.articleOrCourt}
-                              {ev.referenceId ? ` | ${ev.referenceId}` : ""}
-                            </p>
-                          )}
-                          {ev.summary && (
-                            <p className="text-xs text-slate-600">{ev.summary}</p>
-                          )}
-                          {ev.relevanceReason && (
-                            <p className="text-xs text-indigo-600 mt-1">
-                              {ev.relevanceReason}
-                            </p>
-                          )}
+                  {fd.recommendation && (
+                    <p className="text-slate-700 whitespace-pre-wrap leading-relaxed mb-4">{fd.recommendation}</p>
+                  )}
+                  {fd.revisedContent && (
+                    <>
+                      {fd.recommendation && <Separator className="my-4" />}
+                      <div>
+                        <p className="text-sm font-medium text-slate-900 mb-2">수정 제안 문구</p>
+                        <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
+                          <p className="text-sm text-green-900 whitespace-pre-wrap">{fd.revisedContent}</p>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             )}
+
+            {/* Legal Evidences — 공통 컴포넌트 사용 */}
+            <EvidenceCardList evidences={normalizeEvidences(detail)} />
 
             <div className="flex justify-center gap-3">
               <Button
