@@ -4,7 +4,16 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
-import { Activity, ArrowRight, CheckCircle2, FileCheck, Loader2, Scale, Shield, Zap } from "lucide-react";
+import { Textarea } from "../components/ui/textarea";
+import { Activity, ArrowRight, CheckCircle2, FileCheck, Loader2, MessageSquare, Scale, Shield, UserCircle2, Zap } from "lucide-react";
+import {
+  buildMockDebatePayload,
+  createMockSessionId,
+  getMockReviewDetail,
+  type MockReviewData,
+  type RecheckRequest,
+  saveMockReviewDetail,
+} from "../utils/mockReviewData";
 
 interface Message {
   agentId: "legal" | "risk" | "ethics";
@@ -14,6 +23,21 @@ interface Message {
 }
 
 type AgentId = "legal" | "risk" | "ethics";
+
+interface LiveDebateEntry {
+  id: number;
+  speaker: AgentId | "user";
+  content: string;
+  createdAt: string;
+  kind: "agent" | "user";
+}
+
+interface DebateResultPayload {
+  messages: Message[];
+  finalDecision: unknown;
+  evidences: unknown;
+  usingMockData: boolean;
+}
 
 const agentMap: Record<
   AgentId,
@@ -97,60 +121,132 @@ export function Result() {
   const [recheckRequest, setRecheckRequest] = useState<{ target: string; question: string } | null>(null);
   const [tickerIndex, setTickerIndex] = useState(0);
   const [simulatedProgress, setSimulatedProgress] = useState(4);
+  const [userTurnState, setUserTurnState] = useState<"waiting" | "open" | "done">("waiting");
+  const [interventionInput, setInterventionInput] = useState("");
+  const [liveDebateEntries, setLiveDebateEntries] = useState<LiveDebateEntry[]>([]);
+  const [interventionEntries, setInterventionEntries] = useState<LiveDebateEntry[]>([]);
+  const [resolvedPayload, setResolvedPayload] = useState<DebateResultPayload | null>(null);
+  const [isServerResolved, setIsServerResolved] = useState(false);
 
   useEffect(() => {
+    let isMounted = true;
+
     const reviewDataRaw = sessionStorage.getItem("reviewData");
     if (!reviewDataRaw) {
       navigate("/input");
       return;
     }
 
+    let reviewData: MockReviewData;
+    try {
+      reviewData = JSON.parse(reviewDataRaw) as MockReviewData;
+    } catch {
+      navigate("/input");
+      return;
+    }
+
     const recheckRaw = sessionStorage.getItem("recheckRequest");
+    let parsedRecheck: RecheckRequest | null = null;
     if (recheckRaw) {
       try {
-        setRecheckRequest(JSON.parse(recheckRaw));
+        parsedRecheck = JSON.parse(recheckRaw) as RecheckRequest;
+        setRecheckRequest(parsedRecheck);
       } catch {
         setRecheckRequest(null);
       }
     }
 
-    const sessionId = sessionStorage.getItem("sessionId");
-    if (!sessionId) {
-      setError("세션 정보를 찾을 수 없습니다.");
-      setIsFetchingDebate(false);
-      return;
+    const rawSessionId = sessionStorage.getItem("sessionId");
+    const numericSessionId = Number(rawSessionId) || createMockSessionId();
+    if (!rawSessionId) {
+      sessionStorage.setItem("sessionId", String(numericSessionId));
+      sessionStorage.setItem("usingMockData", "true");
     }
 
-    setIsFetchingDebate(true);
-    fetch(`http://localhost:8080/api/sessions/${sessionId}/debates/latest`)
-      .then((res) => {
+    const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+    const minInteractiveMs = 9000;
+
+    const run = async () => {
+      setIsFetchingDebate(true);
+      setIsServerResolved(false);
+      setResolvedPayload(null);
+      const startedAt = Date.now();
+      try {
+        const res = await fetch(`http://localhost:8080/api/sessions/${numericSessionId}/debates/latest`);
         if (!res.ok) throw new Error("토론 결과 조회 실패");
-        return res.json();
-      })
-      .then((result) => {
+        const result = await res.json();
+
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < minInteractiveMs) {
+          await wait(minInteractiveMs - elapsed);
+        }
+        if (!isMounted) return;
+
         const mapped: Message[] = (result.messages || []).map((m: any) => ({
           agentId: (m.agentId as AgentId) || "legal",
           content: m.content || "",
           type: m.type || "analysis",
           round: m.round || 1,
         }));
-        setMessages(mapped);
-        if (result.finalDecision) {
-          sessionStorage.setItem("finalDecision", JSON.stringify(result.finalDecision));
-        }
-        if (result.evidences) {
-          sessionStorage.setItem("evidences", JSON.stringify(result.evidences));
-        }
-        setIsComplete(true);
-        setSimulatedProgress(100);
-      })
-      .catch((fetchError) => {
+        setResolvedPayload({
+          messages: mapped,
+          finalDecision: result.finalDecision,
+          evidences: result.evidences,
+          usingMockData: false,
+        });
+        setIsServerResolved(true);
+      } catch (fetchError) {
         console.error(fetchError);
-        setError("토론 결과를 불러오는 중 문제가 발생했습니다.");
-      })
-      .finally(() => {
-        setIsFetchingDebate(false);
-      });
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < minInteractiveMs) {
+          await wait(minInteractiveMs - elapsed);
+        }
+        if (!isMounted) return;
+
+        const existingDetail = getMockReviewDetail(numericSessionId);
+        const mockPayload = existingDetail
+          ? {
+              messages: existingDetail.messages,
+              finalDecision: existingDetail.finalDecision,
+              evidences: existingDetail.evidences,
+            }
+          : buildMockDebatePayload(reviewData, parsedRecheck);
+
+        setResolvedPayload({
+          messages: mockPayload.messages,
+          finalDecision: mockPayload.finalDecision,
+          evidences: mockPayload.evidences,
+          usingMockData: true,
+        });
+        setIsServerResolved(true);
+
+        if (!existingDetail) {
+          saveMockReviewDetail({
+            sessionId: numericSessionId,
+            companyName: reviewData.companyName || "데모 기업",
+            industry: reviewData.industry || "etc",
+            reviewType: reviewData.reviewType || "contract",
+            situation: reviewData.situation || "서버 연결 없이 결과 확인용 데모 요청",
+            content: reviewData.content || "",
+            participationMode: "observe",
+            status: "COMPLETED",
+            createdAt: new Date().toISOString(),
+            messages: mockPayload.messages,
+            finalDecision: mockPayload.finalDecision,
+            evidences: mockPayload.evidences,
+          });
+        }
+      } finally {
+        if (!isMounted) return;
+        setSimulatedProgress((prev) => Math.min(prev, 96));
+      }
+    };
+
+    run();
+
+    return () => {
+      isMounted = false;
+    };
   }, [navigate]);
 
   useEffect(() => {
@@ -174,6 +270,114 @@ export function Result() {
       window.clearInterval(progressTimer);
     };
   }, [isFetchingDebate]);
+
+  useEffect(() => {
+    if (!isFetchingDebate) return;
+
+    setLiveDebateEntries([
+      {
+        id: Date.now(),
+        speaker: "legal",
+        content: "에이전트 토론이 시작되었습니다. 모든 에이전트가 1회씩 발언하면 사용자 질문 차례가 열립니다.",
+        createdAt: new Date().toISOString(),
+        kind: "agent",
+      },
+    ]);
+    setInterventionEntries([]);
+    setInterventionInput("");
+    setUserTurnState("waiting");
+  }, [isFetchingDebate]);
+
+  useEffect(() => {
+    if (!isFetchingDebate) return;
+
+    const scripted: AgentId[] = ["risk", "ethics"];
+    let scriptedIdx = 0;
+    const streamTimer = window.setInterval(() => {
+      const scriptedSpeaker = scripted[scriptedIdx];
+      if (scriptedSpeaker) scriptedIdx += 1;
+      const item = scriptedSpeaker
+        ? liveTicker.find((entry) => entry.speaker === scriptedSpeaker) || liveTicker[0]
+        : liveTicker[Math.floor(Math.random() * liveTicker.length)];
+      const nextEntry: LiveDebateEntry = {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        speaker: item.speaker,
+        content: item.text,
+        createdAt: new Date().toISOString(),
+        kind: "agent",
+      };
+      setLiveDebateEntries((prev) => [...prev, nextEntry].slice(-12));
+    }, 3600);
+
+    return () => {
+      window.clearInterval(streamTimer);
+    };
+  }, [isFetchingDebate]);
+
+  const hasAllAgentsSpokenOnce = useMemo(
+    () => (["legal", "risk", "ethics"] as AgentId[]).every((agentId) => liveDebateEntries.some((entry) => entry.kind === "agent" && entry.speaker === agentId)),
+    [liveDebateEntries],
+  );
+
+  useEffect(() => {
+    if (userTurnState === "waiting" && hasAllAgentsSpokenOnce) {
+      setUserTurnState("open");
+    }
+  }, [hasAllAgentsSpokenOnce, userTurnState]);
+
+  useEffect(() => {
+    if (!isFetchingDebate || !isServerResolved || userTurnState !== "done" || !resolvedPayload) return;
+
+    setMessages(resolvedPayload.messages);
+    if (resolvedPayload.finalDecision) {
+      sessionStorage.setItem("finalDecision", JSON.stringify(resolvedPayload.finalDecision));
+    }
+    if (resolvedPayload.evidences) {
+      sessionStorage.setItem("evidences", JSON.stringify(resolvedPayload.evidences));
+    }
+    if (resolvedPayload.usingMockData) {
+      sessionStorage.setItem("usingMockData", "true");
+    } else {
+      sessionStorage.removeItem("usingMockData");
+    }
+    setError("");
+    setIsComplete(true);
+    setSimulatedProgress(100);
+    setIsFetchingDebate(false);
+  }, [isFetchingDebate, isServerResolved, resolvedPayload, userTurnState]);
+
+  const handleInterventionSubmit = () => {
+    if (!isFetchingDebate || userTurnState !== "open") return;
+    const trimmed = interventionInput.trim();
+    if (!trimmed) return;
+
+    const userEntry: LiveDebateEntry = {
+      id: Date.now(),
+      speaker: "user",
+      content: trimmed,
+      createdAt: new Date().toISOString(),
+      kind: "user",
+    };
+
+    setInterventionEntries((prev) => [...prev, userEntry]);
+    setLiveDebateEntries((prev) => [...prev, userEntry].slice(-12));
+    setInterventionInput("");
+    setUserTurnState("done");
+  };
+
+  const handlePassTurn = () => {
+    if (!isFetchingDebate || userTurnState !== "open") return;
+    const passEntry: LiveDebateEntry = {
+      id: Date.now(),
+      speaker: "user",
+      content: "사용자가 이번 턴의 발언권을 패스했습니다.",
+      createdAt: new Date().toISOString(),
+      kind: "user",
+    };
+    setInterventionEntries((prev) => [...prev, passEntry]);
+    setLiveDebateEntries((prev) => [...prev, passEntry].slice(-12));
+    setUserTurnState("done");
+  };
 
   const ticker = liveTicker[tickerIndex];
   const humorLabel = useMemo(() => getHumorLabel(simulatedProgress), [simulatedProgress]);
@@ -277,6 +481,82 @@ export function Result() {
                 </div>
               </CardContent>
             </Card>
+
+            <Card className="border-slate-200 bg-white">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-[#1E3A8A]" />
+                  실시간 토론 스트림
+                </CardTitle>
+                <CardDescription>
+                  모든 에이전트가 1회씩 발언하면 사용자 질문 턴이 열립니다. 질문이 없으면 발언권을 패스할 수 있습니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2 max-h-[280px] overflow-auto">
+                  {liveDebateEntries.map((entry) => (
+                    <div key={entry.id} className="text-sm rounded-lg border border-slate-200 bg-white p-2">
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        {entry.speaker === "user" ? (
+                          <>
+                            <UserCircle2 className="w-3.5 h-3.5" />
+                            사용자
+                          </>
+                        ) : (
+                          <>
+                            <span>{agentMap[entry.speaker as AgentId].name}</span>
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                              실시간
+                            </Badge>
+                          </>
+                        )}
+                      </div>
+                      <p className="mt-1 text-slate-700 whitespace-pre-wrap">{entry.content}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  <Textarea
+                    value={interventionInput}
+                    onChange={(e) => setInterventionInput(e.target.value)}
+                    placeholder={
+                      userTurnState === "open"
+                        ? "모르는 점을 질문하거나 조건을 추가해 주세요"
+                        : "모든 에이전트가 1회 발언하면 질문 입력이 활성화됩니다"
+                    }
+                    className="min-h-[90px]"
+                    disabled={userTurnState !== "open"}
+                  />
+                  <div className="flex justify-between items-center gap-2">
+                    <Badge variant="outline" className="text-xs">
+                      {userTurnState === "open"
+                        ? "지금은 사용자 질문 턴입니다"
+                        : userTurnState === "done"
+                          ? "사용자 턴이 종료되었습니다"
+                          : "에이전트 발언 진행 중"}
+                    </Badge>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handlePassTurn}
+                        disabled={userTurnState !== "open"}
+                      >
+                        발언권 패스
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={handleInterventionSubmit}
+                        className="bg-[#1E3A8A] hover:bg-[#1E293B] text-white"
+                        disabled={userTurnState !== "open" || !interventionInput.trim()}
+                      >
+                        질문 보내기
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </>
         )}
 
@@ -299,6 +579,11 @@ export function Result() {
               <p className="text-sm text-emerald-700 mt-2">
                 에이전트들이 나눈 {messages.length}개의 논쟁 로그가 준비되었습니다.
               </p>
+              {interventionEntries.length > 0 && (
+                <p className="text-sm text-emerald-700 mt-1">
+                  사용자 개입 메시지 {interventionEntries.length}건이 토론 과정에 반영되었습니다.
+                </p>
+              )}
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button variant="outline" className="rounded-full" onClick={() => navigate("/verdict")}>
                   판정 결과 보기
@@ -323,6 +608,23 @@ export function Result() {
               <CardDescription>전체 로그는 판정 결과 창에서도 확인 가능합니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
+              {interventionEntries.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-slate-700">사용자 개입 로그</p>
+                  {interventionEntries.map((entry) => (
+                    <div key={entry.id} className="rounded-xl border p-3 bg-violet-50 border-violet-200">
+                      <div className="text-sm font-medium flex items-center gap-2 text-violet-700">
+                        <UserCircle2 className="w-4 h-4" />
+                        사용자
+                        <Badge variant="outline" className="ml-1 text-xs">
+                          intervention
+                        </Badge>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-700 whitespace-pre-wrap">{entry.content}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
               {Object.entries(groupedRounds).map(([round, roundMessages]) => (
                 <div key={round} className="space-y-3">
                   <p className="text-sm font-semibold text-slate-700">라운드 {round}</p>

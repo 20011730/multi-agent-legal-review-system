@@ -4,6 +4,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Clock, FileText, Loader2 } from "lucide-react";
+import { getMockReviewHistory } from "../utils/mockReviewData";
 
 interface ReviewSummary {
   sessionId: number;
@@ -61,6 +62,12 @@ export function ReviewHistory() {
       .then((data) => setReviews(data))
       .catch((err) => {
         console.error(err);
+        const mockHistory = getMockReviewHistory();
+        if (mockHistory.length > 0) {
+          setReviews(mockHistory);
+          setError("");
+          return;
+        }
         setError("히스토리를 불러오지 못했습니다.");
       })
       .finally(() => setIsLoading(false));

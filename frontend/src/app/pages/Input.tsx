@@ -5,9 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { AlertCircle, ArrowLeft, ArrowRight, Building2, Eye, FileText, FolderOpen, MessageSquare, Sparkles, Upload } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, Building2, FileText, FolderOpen, Sparkles, Upload } from "lucide-react";
+import { createMockSessionId } from "../utils/mockReviewData";
 
 const personaCategories = [
   {
@@ -77,7 +77,6 @@ export function InputPage() {
     reviewType: "contract",
     situation: "",
     content: "",
-    participationMode: "observe",
   });
 
   useEffect(() => {
@@ -122,7 +121,7 @@ export function InputPage() {
       return true;
     }
     if (currentStep === 3) {
-      return Boolean(formData.situation && formData.content && formData.participationMode);
+      return Boolean(formData.situation && formData.content);
     }
     return true;
   }, [currentStep, formData, scenarioCategory]);
@@ -147,7 +146,6 @@ export function InputPage() {
       reviewType: scenarioCategory,
       situation: formData.situation,
       content: formData.content,
-      participationMode: formData.participationMode,
     };
 
     sessionStorage.setItem(
@@ -171,8 +169,12 @@ export function InputPage() {
       });
       const data = await res.json();
       sessionStorage.setItem("sessionId", String(data.sessionId));
+      sessionStorage.removeItem("usingMockData");
     } catch (err) {
       console.error("Session creation failed:", err);
+      const mockSessionId = createMockSessionId();
+      sessionStorage.setItem("sessionId", String(mockSessionId));
+      sessionStorage.setItem("usingMockData", "true");
     }
 
     setIsSubmitting(false);
@@ -413,37 +415,6 @@ export function InputPage() {
                       </div>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-slate-200 bg-white">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <MessageSquare className="w-5 h-5 text-[#1E3A8A]" />
-                    토론 참여 모드
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <RadioGroup
-                    value={formData.participationMode}
-                    onValueChange={(value) => setFormData({ ...formData, participationMode: value })}
-                    className="space-y-3"
-                  >
-                    <div className="flex items-start gap-3">
-                      <RadioGroupItem value="observe" id="observe" />
-                      <Label htmlFor="observe" className="cursor-pointer">
-                        <Eye className="inline w-4 h-4 mr-1" />
-                        관찰 모드
-                      </Label>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <RadioGroupItem value="participate" id="participate" />
-                      <Label htmlFor="participate" className="cursor-pointer">
-                        <MessageSquare className="inline w-4 h-4 mr-1" />
-                        참여 모드
-                      </Label>
-                    </div>
-                  </RadioGroup>
                 </CardContent>
               </Card>
 
