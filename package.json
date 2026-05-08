@@ -6,5 +6,9 @@
     "build": "npm run build --prefix frontend",
     "preview": "npm run preview --prefix frontend",
     "backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-backend.ps1"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.100.9",
+    "zustand": "^5.0.13"
   }
 }
