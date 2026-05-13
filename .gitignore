@@ -15,3 +15,49 @@ __pycache__/
 venv/
 *.egg-info/
 *.log
+
+# ─────────────────────────────────────────────────────────
+# AI/RAG 보조 도구 산출물 (ai/generate_rag/)
+# 본 디렉터리는 서비스 본체가 아니라 RAG 초기 데이터 생성 도구.
+# 대용량 데이터/모델/캐시는 git에 포함하지 않음 (재생성 가능).
+# ─────────────────────────────────────────────────────────
+# ChromaDB 로컬 저장소 (Docker가 아닌 PersistentClient 산출물)
+ai/generate_rag/chroma_data/
+ai/generate_rag/chroma_db/
+
+# 법령 데이터 dump (1.beforeInsert.py 실행 결과 — 재생성 가능)
+ai/generate_rag/current_laws.json
+ai/generate_rag/scheduled_laws.json
+
+# 개인 IDE 세션 / 임시 디버그 / 임시 테스트 파일
+ai/generate_rag/legalreview.session.sql
+ai/generate_rag/debug.py
+ai/generate_rag/test.py
+ai/generate_rag/test2.py
+# 별개 시스템(legal_graph DB)용 prototype — 본 프로젝트와 무관
+ai/generate_rag/generate_law.py
+
+# E5 임베딩 모델 가중치/토크나이저 (HuggingFace에서 별도 다운로드)
+ai/generate_rag/legal-e5-finetuned/tokenizer.json
+ai/generate_rag/legal-e5-finetuned/*.bin
+ai/generate_rag/legal-e5-finetuned/*.safetensors
+ai/generate_rag/legal-e5-finetuned/pytorch_model.bin
+ai/generate_rag/legal-e5-finetuned/model.safetensors
+
+# ─────────────────────────────────────────────────────────
+# 전역 — DB / 벡터 인덱스 / 모델 가중치 / 큰 토크나이저
+# ─────────────────────────────────────────────────────────
+**/chroma_data/
+**/chroma_db/
+*.sqlite
+*.sqlite3
+*.db
+# HNSW 인덱스 바이너리 (ChromaDB local)
+**/data_level0.bin
+**/header.bin
+**/length.bin
+**/link_lists.bin
+# 모델 가중치
+*.safetensors
+**/pytorch_model.bin
+**/model.safetensors
