@@ -1,7 +1,10 @@
 package com.legalreview.service;
 
 import com.legalreview.domain.*;
+import com.legalreview.domain.enums.AnalysisPhase;
+import com.legalreview.domain.enums.SessionStatus;
 import com.legalreview.dto.request.SessionCreateRequest;
+import com.legalreview.dto.request.SessionFeedbackRequest;
 import com.legalreview.dto.response.*;
 import com.legalreview.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -50,7 +53,7 @@ public class SessionService {
         session.setSituation(request.getSituation());
         session.setContent(request.getContent());
         session.setParticipationMode(request.getParticipationMode());
-        session.setStatus("ANALYZING");
+        session.setStatus(SessionStatus.ANALYZING.name());
         sessionRepository.save(session);
 
         final Long savedSessionId = session.getId();
@@ -83,10 +86,46 @@ public class SessionService {
 
         return new SessionStatusResponse(
                 sessionId,
-                session.getStatus(),
+                SessionStatus.from(session.getStatus()),
                 messageCount,
                 hasFinalDecision,
-                session.getAnalysisPhase()
+                AnalysisPhase.fromNullable(session.getAnalysisPhase())
+        );
+    }
+
+    @Transactional
+    public SessionFeedbackResponse submitFeedback(Long sessionId, SessionFeedbackRequest request) {
+        ReviewSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+
+        AnalysisPhase currentPhase = AnalysisPhase.fromNullable(session.getAnalysisPhase());
+        if (currentPhase == null || !currentPhase.isWaitingForUser()) {
+            throw new IllegalStateException("현재 세션은 사용자 피드백 입력 대기 상태가 아닙니다.");
+        }
+        if (SessionStatus.from(session.getStatus()) != SessionStatus.ANALYZING) {
+            throw new IllegalStateException("분석 중인 세션에서만 피드백을 제출할 수 있습니다.");
+        }
+
+        boolean isPass = Boolean.TRUE.equals(request.getIsPass());
+        String content = request.getContent() == null ? "" : request.getContent().trim();
+        if (!isPass && content.isBlank()) {
+            throw new IllegalArgumentException("isPass=false 인 경우 content를 입력해야 합니다.");
+        }
+
+        saveUserFeedbackMessage(session, currentPhase, content, isPass);
+        AnalysisPhase nextPhase = currentPhase == AnalysisPhase.WAITING_FOR_USER_R1
+                ? AnalysisPhase.ROUND2_BIZ
+                : AnalysisPhase.ROUND3_BIZ;
+        session.setAnalysisPhase(nextPhase.name()); // 중복 피드백 제출 방지
+        sessionRepository.saveAndFlush(session);
+
+        analysisAsyncRunner.resumeAnalysis(sessionId, content, isPass);
+
+        return new SessionFeedbackResponse(
+                sessionId,
+                SessionStatus.ANALYZING,
+                nextPhase,
+                "피드백이 접수되어 다음 라운드 분석을 재개했습니다."
         );
     }
 
@@ -153,5 +192,23 @@ public class SessionService {
                         ev.getQuotedText()
                 ))
                 .toList();
+    }
+
+    private void saveUserFeedbackMessage(
+            ReviewSession session,
+            AnalysisPhase waitingPhase,
+            String content,
+            boolean isPass
+    ) {
+        DebateMessage message = new DebateMessage();
+        message.setSession(session);
+        message.setAgentId("user");
+        message.setAgentName("사용자 피드백");
+        message.setType(isPass ? "user_pass" : "user_feedback");
+        message.setRound(waitingPhase == AnalysisPhase.WAITING_FOR_USER_R1 ? 1 : 2);
+        message.setStance("NEUTRAL");
+        message.setEvidenceSummary(isPass ? "사용자 패스" : "사용자 보정 의견");
+        message.setContent(isPass ? "(사용자 Pass)" : content);
+        messageRepository.saveAndFlush(message);
     }
 }

@@ -1,6 +1,8 @@
 package com.legalreview.service;
 
 import com.legalreview.domain.*;
+import com.legalreview.domain.enums.AnalysisPhase;
+import com.legalreview.domain.enums.SessionStatus;
 import com.legalreview.dto.request.SessionCreateRequest;
 import com.legalreview.dto.response.EvidenceDto;
 import com.legalreview.repository.*;
@@ -112,8 +114,10 @@ public class AnalysisAsyncRunner {
                         sessionId, request, phaseCallback,
                         legalEvidenceBlock, commonEvidenceBlock);
             } else {
-                log.info("Python AI 서버로 분석 실행 (sessionId={})", sessionId);
-                aiResponse = aiAnalysisClient.analyze(sessionId, request);
+                log.info("Python AI 서버로 단계형 분석 시작 (sessionId={})", sessionId);
+                AiAnalysisClient.AiStepResponse stepResponse = aiAnalysisClient.startInteractiveAnalysis(sessionId, request);
+                handlePythonStepResponse(session, request.getContent(), ragEvidences, stepResponse, t0);
+                return;
             }
 
             // 토론 메시지 저장 (개별 저장 → 폴링 시 messageCount 실시간 반영)
@@ -129,7 +133,7 @@ public class AnalysisAsyncRunner {
             }
 
             // 법제처 OPEN API 검색으로 추가 근거 보강 (RAG와 무관 — 기존 흐름 유지)
-            phaseCallback.accept("COLLECTING_EVIDENCE");
+            phaseCallback.accept(AnalysisPhase.COLLECTING_EVIDENCE.name());
             enrichWithLawSearch(session, request.getContent());
 
             // RAG 결과를 evidences 테이블에 저장 (결과 페이지/PDF에서 표시 가능하게)
@@ -147,7 +151,7 @@ public class AnalysisAsyncRunner {
                 createFallbackFinalDecision(session);
             }
 
-            session.setStatus("COMPLETED");
+            session.setStatus(SessionStatus.COMPLETED.name());
             session.setAnalysisPhase(null); // 분석 완료 — phase 초기화
             // 종료 시각 + duration 기록
             java.time.LocalDateTime now = java.time.LocalDateTime.now();
@@ -167,7 +171,7 @@ public class AnalysisAsyncRunner {
                     createFallbackDebateMessages(session);
                     createFallbackFinalDecision(session);
                     enrichWithLawSearch(session, request.getContent());
-                    session.setStatus("COMPLETED");
+                    session.setStatus(SessionStatus.COMPLETED.name());
                     java.time.LocalDateTime now = java.time.LocalDateTime.now();
                     session.setAnalysisCompletedAt(now);
                     session.setAnalysisDurationMs(System.currentTimeMillis() - t0);
@@ -176,12 +180,32 @@ public class AnalysisAsyncRunner {
             } catch (Exception fallbackErr) {
                 log.error("폴백 데이터 생성도 실패 (sessionId={}): {}", sessionId, fallbackErr.getMessage());
                 sessionRepository.findById(sessionId).ifPresent(s -> {
-                    s.setStatus("FAILED");
+                    s.setStatus(SessionStatus.FAILED.name());
                     s.setAnalysisCompletedAt(java.time.LocalDateTime.now());
                     s.setAnalysisDurationMs(System.currentTimeMillis() - t0);
                     sessionRepository.save(s);
                 });
             }
+        }
+    }
+
+    @Async
+    public void resumeAnalysis(Long sessionId, String feedbackContent, boolean isPass) {
+        long t0 = System.currentTimeMillis();
+        try {
+            ReviewSession session = sessionRepository.findById(sessionId)
+                    .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+            AiAnalysisClient.AiStepResponse stepResponse =
+                    aiAnalysisClient.resumeInteractiveAnalysis(sessionId, feedbackContent, isPass);
+            handlePythonStepResponse(session, session.getContent(), List.of(), stepResponse, t0);
+        } catch (Exception e) {
+            log.error("AI resume 실패 (sessionId={}): {}", sessionId, e.getMessage(), e);
+            sessionRepository.findById(sessionId).ifPresent(s -> {
+                s.setStatus(SessionStatus.FAILED.name());
+                s.setAnalysisCompletedAt(java.time.LocalDateTime.now());
+                s.setAnalysisDurationMs(System.currentTimeMillis() - t0);
+                sessionRepository.save(s);
+            });
         }
     }
 
@@ -242,6 +266,58 @@ public class AnalysisAsyncRunner {
     private static String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "...";
+    }
+
+    private void handlePythonStepResponse(
+            ReviewSession session,
+            String originalContent,
+            List<EvidenceDto> ragEvidences,
+            AiAnalysisClient.AiStepResponse stepResponse,
+            long t0
+    ) {
+        saveDebateMessages(session, stepResponse.messages());
+
+        if ("WAITING_FOR_USER".equalsIgnoreCase(stepResponse.state())) {
+            if (!ragEvidences.isEmpty()) {
+                for (EvidenceDto dto : ragEvidences) {
+                    evidenceRepository.save(dto.toEntity(session));
+                }
+            }
+            session.setStatus(SessionStatus.ANALYZING.name());
+            session.setAnalysisPhase(stepResponse.analysisPhase());
+            sessionRepository.saveAndFlush(session);
+            log.info("Python 단계 분석 대기 상태 전환: sessionId={}, phase={}",
+                    session.getId(), stepResponse.analysisPhase());
+            return;
+        }
+
+        if (stepResponse.finalDecision() != null) {
+            saveFinalDecision(session, stepResponse.finalDecision());
+        } else if (finalDecisionRepository.findBySessionId(session.getId()).isEmpty()) {
+            log.warn("[FD-SAFETY] 단계 분석 완료 응답에 finalDecision 누락 — fallback 저장 (sessionId={})", session.getId());
+            createFallbackFinalDecision(session);
+        }
+
+        if (stepResponse.evidences() != null && !stepResponse.evidences().isEmpty()) {
+            saveEvidences(session, stepResponse.evidences());
+        }
+
+        session.setAnalysisPhase(AnalysisPhase.COLLECTING_EVIDENCE.name());
+        sessionRepository.saveAndFlush(session);
+        enrichWithLawSearch(session, originalContent);
+
+        if (!ragEvidences.isEmpty()) {
+            for (EvidenceDto dto : ragEvidences) {
+                evidenceRepository.save(dto.toEntity(session));
+            }
+        }
+
+        session.setStatus(SessionStatus.COMPLETED.name());
+        session.setAnalysisPhase(null);
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        session.setAnalysisCompletedAt(now);
+        session.setAnalysisDurationMs(System.currentTimeMillis() - t0);
+        sessionRepository.save(session);
     }
 
     // ========== AI 응답 → DB 저장 ==========

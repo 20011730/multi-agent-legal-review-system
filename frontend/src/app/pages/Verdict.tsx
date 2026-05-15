@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { exportElementToPdf } from "../utils/exportVerdictPdf";
 import { EvidenceCardList, type EvidenceItem } from "../components/EvidenceCard";
 import { normalizeEvidences } from "../utils/normalizeEvidence";
+import { getMockReviewDetail } from "../utils/mockReviewData";
 
 interface ReviewData {
   companyName: string;
@@ -87,6 +88,23 @@ export function Verdict() {
       // sessionId 없으면 fetch 불가 — 사용자에게 신호를 주기 위해 error 상태로
       console.warn("[verdict] sessionStorage.sessionId 없음 — fresh fetch 불가");
       setEvidenceLoadState("error");
+      return;
+    }
+
+    const usingMockData = sessionStorage.getItem("usingMockData") === "true";
+    if (usingMockData) {
+      const mockDetail = getMockReviewDetail(sessionId);
+      if (mockDetail) {
+        setFinalDecision(mockDetail.finalDecision as FinalDecision);
+        const normalized = normalizeEvidences(mockDetail.evidences);
+        setEvidences(normalized);
+        sessionStorage.setItem("finalDecision", JSON.stringify(mockDetail.finalDecision));
+        sessionStorage.setItem("evidences", JSON.stringify(normalized));
+        setEvidenceLoadState("loaded");
+      } else {
+        // 모의 토론 완료 직후라면 sessionStorage 값을 그대로 사용
+        setEvidenceLoadState("loaded");
+      }
       return;
     }
 

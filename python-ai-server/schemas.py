@@ -6,6 +6,8 @@
 from models.schemas import (  # noqa: F401
     AnalyzeRequest,
     AnalyzeResponse,
+    AnalyzeStepResponse,
+    ResumeAnalyzeRequest,
     AgentMessage,
     FinalDecision,
     RiskItem,

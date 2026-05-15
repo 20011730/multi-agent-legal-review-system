@@ -17,6 +17,12 @@ class AnalyzeRequest(BaseModel):
     participationMode: str
 
 
+class ResumeAnalyzeRequest(BaseModel):
+    sessionId: int
+    content: str = ""
+    isPass: bool = False
+
+
 class AgentMessage(BaseModel):
     agentId: str
     agentName: str
@@ -59,4 +65,12 @@ class FinalDecision(BaseModel):
 class AnalyzeResponse(BaseModel):
     messages: list[AgentMessage]
     finalDecision: FinalDecision
+    evidences: list[EvidenceItem] = []
+
+
+class AnalyzeStepResponse(BaseModel):
+    state: str  # WAITING_FOR_USER | COMPLETED
+    analysisPhase: Optional[str] = None
+    messages: list[AgentMessage] = []
+    finalDecision: Optional[FinalDecision] = None
     evidences: list[EvidenceItem] = []

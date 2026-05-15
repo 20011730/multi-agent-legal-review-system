@@ -1,5 +1,7 @@
 package com.legalreview.dto.response;
 
+import com.legalreview.domain.enums.AnalysisPhase;
+import com.legalreview.domain.enums.SessionStatus;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -12,8 +14,8 @@ import lombok.Getter;
 public class SessionStatusResponse {
 
     private Long sessionId;
-    private String status;            // ANALYZING | COMPLETED | FAILED
+    private SessionStatus status;
     private long messageCount;        // 현재까지 저장된 토론 메시지 수
     private boolean hasFinalDecision; // 최종 판정 존재 여부
-    private String analysisPhase;     // 세부 진행 단계: ROUND1_BIZ, ROUND1_LEGAL, ROUND2_BIZ, ROUND2_LEGAL, JUDGING, COLLECTING_EVIDENCE
+    private AnalysisPhase analysisPhase; // 사용자 개입 단계 포함: WAITING_FOR_USER_R1, WAITING_FOR_USER_R2
 }

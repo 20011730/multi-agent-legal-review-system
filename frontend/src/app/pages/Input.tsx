@@ -146,6 +146,7 @@ export function InputPage() {
       reviewType: scenarioCategory,
       situation: formData.situation,
       content: formData.content,
+      participationMode: "single",
     };
 
     sessionStorage.setItem(
@@ -167,7 +168,22 @@ export function InputPage() {
         headers,
         body: JSON.stringify(payloadForSession),
       });
+
+      if (!res.ok) {
+        let reason = `HTTP ${res.status}`;
+        try {
+          const err = await res.json();
+          if (err?.message) reason = String(err.message);
+        } catch {
+          // no-op
+        }
+        throw new Error(`세션 생성 실패: ${reason}`);
+      }
+
       const data = await res.json();
+      if (!data?.sessionId) {
+        throw new Error("세션 생성 응답에 sessionId가 없습니다.");
+      }
       sessionStorage.setItem("sessionId", String(data.sessionId));
       sessionStorage.removeItem("usingMockData");
     } catch (err) {

@@ -1,8 +1,10 @@
 package com.legalreview.controller;
 
 import com.legalreview.dto.request.SessionCreateRequest;
+import com.legalreview.dto.request.SessionFeedbackRequest;
 import com.legalreview.dto.response.DebateResultResponse;
 import com.legalreview.dto.response.SessionCreateResponse;
+import com.legalreview.dto.response.SessionFeedbackResponse;
 import com.legalreview.dto.response.SessionStatusResponse;
 import com.legalreview.service.OllamaClient;
 import com.legalreview.service.SessionService;
@@ -42,6 +44,18 @@ public class SessionController {
     public ResponseEntity<SessionStatusResponse> getSessionStatus(
             @PathVariable Long sessionId) {
         SessionStatusResponse response = sessionService.getSessionStatus(sessionId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 사용자 피드백 제출 API (Interrupt 이후 Resume 트리거).
+     * WAITING_FOR_USER_R1 / WAITING_FOR_USER_R2 상태에서만 허용.
+     */
+    @PostMapping("/{sessionId}/feedback")
+    public ResponseEntity<SessionFeedbackResponse> submitFeedback(
+            @PathVariable Long sessionId,
+            @Valid @RequestBody SessionFeedbackRequest request) {
+        SessionFeedbackResponse response = sessionService.submitFeedback(sessionId, request);
         return ResponseEntity.ok(response);
     }
 

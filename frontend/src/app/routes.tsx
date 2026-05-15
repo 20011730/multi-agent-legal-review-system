@@ -1,7 +1,7 @@
 import { createBrowserRouter } from "react-router";
 import { Home } from "./pages/Home";
 import { InputPage } from "./pages/Input";
-import { Result } from "./pages/Result";
+import { Debate } from "./pages/Debate";
 import { Verdict } from "./pages/Verdict";
 import { Login } from "./pages/Login";
 import { Signup } from "./pages/Signup";
@@ -81,7 +81,7 @@ export const router = createBrowserRouter([
     path: "/result",
     element: (
       <RequireAuth>
-        <Result />
+        <Debate />
       </RequireAuth>
     ),
   },

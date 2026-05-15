@@ -1,631 +1,482 @@
-import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  ListChecks,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
+import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
-import {
-  Activity,
-  ArrowRight,
-  CheckCircle2,
-  FileCheck,
-  Gavel,
-  Loader2,
-  Scale,
-  Shield,
-  Zap,
-  AlertCircle,
-} from "lucide-react";
+import { Separator } from "../components/ui/separator";
+import { exportElementToPdf } from "../utils/exportVerdictPdf";
+import { getMockReviewDetail } from "../utils/mockReviewData";
 
-/* ── 타입 ── */
-interface Message {
-  agentId: string;
-  agentName?: string;
+interface ReviewData {
+  companyName: string;
+  industry: string;
+  reviewType: string;
+  situation: string;
   content: string;
-  type: string;
-  round: number;
-  stance?: string;
-  evidenceSummary?: string;
 }
 
-/* ── 에이전트 맵 (judge 추가, ethics 호환) ── */
-type AgentKey = "legal" | "risk" | "ethics" | "judge";
-
-const agentMap: Record<
-  AgentKey,
-  { name: string; icon: typeof Scale; color: string; bg: string; border: string }
-> = {
-  legal: {
-    name: "법률 전문가",
-    icon: Scale,
-    color: "text-blue-700",
-    bg: "bg-blue-50",
-    border: "border-blue-200",
-  },
-  risk: {
-    name: "비즈니스 전략가",
-    icon: Shield,
-    color: "text-amber-700",
-    bg: "bg-amber-50",
-    border: "border-amber-200",
-  },
-  ethics: {
-    name: "최종 판정관",
-    icon: Gavel,
-    color: "text-violet-700",
-    bg: "bg-violet-50",
-    border: "border-violet-200",
-  },
-  judge: {
-    name: "최종 판정관",
-    icon: Gavel,
-    color: "text-violet-700",
-    bg: "bg-violet-50",
-    border: "border-violet-200",
-  },
-};
-
-/* ── 대시보드 펄스에 표시할 3가지 에이전트 (UI용) ── */
-const dashboardAgents: AgentKey[] = ["risk", "legal", "ethics"];
-
-/* ── 실제 분석 단계 → progress / 활성 에이전트 ── */
-interface PhaseInfo {
-  label: string;
+interface RiskItem {
+  category: string;
+  level: "high" | "medium" | "low";
   description: string;
-  progress: number;
-  activeAgent?: AgentKey;
-  humourLabel: string;
 }
 
-const phaseMap: Record<string, PhaseInfo> = {
-  ROUND1_BIZ: {
-    label: "라운드 1 — 비즈니스 전략가 분석 중",
-    description: "사업적 가치와 실행 가능성을 분석하고 있습니다.",
-    progress: 15,
-    activeAgent: "risk",
-    humourLabel: "법률 검토 비용 500만 원 절약 중...",
-  },
-  ROUND1_LEGAL: {
-    label: "라운드 1 — 법률 전문가 검토 중",
-    description: "법적 리스크와 규정 위반 가능성을 검토하고 있습니다.",
-    progress: 30,
-    activeAgent: "legal",
-    humourLabel: "법률 검토 비용 500만 원 절약 중...",
-  },
-  ROUND2_BIZ: {
-    label: "라운드 2 — 비즈니스 전략가 반박 중",
-    description: "법률 전문가의 지적에 대해 반박 자료를 준비하고 있습니다.",
-    progress: 40,
-    activeAgent: "risk",
-    humourLabel: "대표님의 멘탈 리스크 방어막 구축 중...",
-  },
-  ROUND2_LEGAL: {
-    label: "라운드 2 — 법률 전문가 재반박 중",
-    description: "비즈니스 전략가의 반박에 법적 근거로 재반박하고 있습니다.",
-    progress: 55,
-    activeAgent: "legal",
-    humourLabel: "대표님의 멘탈 리스크 방어막 구축 중...",
-  },
-  ROUND3_BIZ: {
-    label: "라운드 3 — 비즈니스 전략가 최종 입장 정리 중",
-    description: "지금까지의 논점을 종합하여 최선의 실행 방안을 도출하고 있습니다.",
-    progress: 68,
-    activeAgent: "risk",
-    humourLabel: "세 번의 논쟁 끝에 합의점에 가까워졌습니다!",
-  },
-  ROUND3_LEGAL: {
-    label: "라운드 3 — 법률 전문가 최종 권고 정리 중",
-    description: "법적 리스크를 최소화하는 최종 권고안을 준비하고 있습니다.",
-    progress: 80,
-    activeAgent: "legal",
-    humourLabel: "세 번의 논쟁 끝에 합의점에 가까워졌습니다!",
-  },
-  JUDGING: {
-    label: "최종 판정 생성 중",
-    description: "양측 토론을 종합하여 최종 판정문을 작성하고 있습니다.",
-    progress: 88,
-    activeAgent: "judge",
-    humourLabel: "세 명의 전문가를 설득하는 데 성공했습니다!",
-  },
-  COLLECTING_EVIDENCE: {
-    label: "법령·판례 근거 수집 중",
-    description: "법제처 공공 API에서 관련 법령과 판례를 검색하고 있습니다.",
-    progress: 95,
-    humourLabel: "세 명의 전문가를 설득하는 데 성공했습니다!",
-  },
-};
-
-const defaultPhase: PhaseInfo = {
-  label: "AI 에이전트 분석 준비 중",
-  description: "잠시만 기다려주세요...",
-  progress: 5,
-  humourLabel: "법률 검토 비용 500만 원 절약 중...",
-};
-
-/* ── 실시간 중계 텍스트 (flavor) ── */
-const liveTicker = [
-  { speaker: "risk" as AgentKey,   text: "에이전트들이 회의실에 입장하여 서류를 검토하기 시작합니다.",     conflict: false },
-  { speaker: "risk" as AgentKey,   text: "사업 에이전트가 법무 에이전트의 보수적 태도에 깊은 한숨을 내쉽니다.", conflict: true },
-  { speaker: "ethics" as AgentKey, text: "윤리 에이전트가 기업 평판 리스크를 근거로 제동을 겁니다.",          conflict: true },
-  { speaker: "legal" as AgentKey,  text: "법무 에이전트가 판례집을 뒤적거리며 커피를 리필합니다.",              conflict: false },
-  { speaker: "risk" as AgentKey,   text: "사업 에이전트가 숫자를 들이밀며 실행 가능성 반박 자료를 제출합니다.", conflict: true },
-  { speaker: "ethics" as AgentKey, text: "판정 에이전트가 세 에이전트 의견을 취합해 결론 문안을 정리 중입니다.", conflict: false },
-];
-
-const POLL_INTERVAL = 3000;
-
-/* ── JUDGE 메시지 렌더링 (JSON → 사람이 읽는 형식) ── */
-function renderJudgeContent(content: string) {
-  // 이미 마크다운 형식이면 그대로 렌더링
-  if (content.includes("## ")) {
-    return (
-      <div className="space-y-1">
-        {content.split("\n").map((line, i) => {
-          const trimmed = line.trim();
-          if (trimmed.startsWith("## ")) {
-            return <h4 key={i} className="font-semibold text-violet-800 mt-2 mb-1 text-sm">{trimmed.replace(/^##\s*/, "")}</h4>;
-          }
-          if (trimmed === "") return <div key={i} className="h-1" />;
-          return <p key={i} className="text-sm text-slate-700 leading-relaxed">{line}</p>;
-        })}
-      </div>
-    );
-  }
-  // JSON 문자열 파싱 시도 (이전 세션 호환)
-  try {
-    let json = content.trim();
-    if (json.includes("```json")) {
-      json = json.substring(json.indexOf("```json") + 7, json.indexOf("```", json.indexOf("```json") + 7)).trim();
-    }
-    if (json.startsWith("{")) {
-      const parsed = JSON.parse(json) as Record<string, unknown>;
-      const summary = typeof parsed.summary === "string" ? parsed.summary : "";
-      const recommendation = typeof parsed.recommendation === "string" ? parsed.recommendation : "";
-      const revisedContent = typeof parsed.revisedContent === "string" ? parsed.revisedContent : "";
-      return (
-        <div className="space-y-2 text-sm text-slate-700">
-          {summary && <p className="leading-relaxed">📋 {summary}</p>}
-          {recommendation && <p className="leading-relaxed mt-1">💡 {recommendation}</p>}
-          {revisedContent && (
-            <div className="mt-2 p-3 bg-violet-50 rounded-lg border border-violet-200">
-              <p className="text-xs font-semibold text-violet-700 mb-1">수정 문안 제안</p>
-              <p className="text-violet-800">{revisedContent}</p>
-            </div>
-          )}
-        </div>
-      );
-    }
-  } catch { /* fallback below */ }
-  // 일반 텍스트 렌더링
-  return <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{content}</p>;
+interface FinalDecision {
+  verdict?: "approved" | "conditional" | "rejected";
+  riskLevel?: string;
+  risks?: RiskItem[];
+  summary?: string;
+  recommendation?: string;
+  revisedContent?: string;
 }
 
-/* ── 일반 에이전트 메시지 렌더링 (## 헤더 지원) ── */
-function renderAgentContent(content: string) {
-  return content.split("\n").map((line, i) => {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("## ")) {
-      return <h4 key={i} className="font-semibold text-slate-800 mt-3 mb-1 text-sm">{trimmed.replace(/^##\s*/, "")}</h4>;
-    }
-    if (trimmed === "") return <div key={i} className="h-2" />;
-    return <p key={i} className="text-sm text-slate-700 leading-relaxed">{line}</p>;
-  });
+function normalizeRiskLevel(level?: string): "HIGH" | "MEDIUM" | "LOW" {
+  const u = (level || "MEDIUM").toUpperCase();
+  if (u === "HIGH" || u === "LOW") return u;
+  return "MEDIUM";
 }
 
-/* ══════════════════════════════════════════
-   Result 컴포넌트
-══════════════════════════════════════════ */
-export function Result() {
-  const navigate = useNavigate();
-
-  const [messages, setMessages]               = useState<Message[]>([]);
-  const [isComplete, setIsComplete]           = useState(false);
-  const [showDetailedLogs, setShowDetailedLogs] = useState(false);
-  const [error, setError]                     = useState("");
-  const [recheckRequest, setRecheckRequest]   = useState<{ target: string; question: string } | null>(null);
-  const [tickerIndex, setTickerIndex]         = useState(0);
-  const [currentPhase, setCurrentPhase]       = useState<PhaseInfo>(defaultPhase);
-  const [isAnalyzing, setIsAnalyzing]         = useState(true);
-  const [elapsedSeconds, setElapsedSeconds]   = useState(0);
-
-  const pollRef           = useRef<ReturnType<typeof setInterval> | null>(null);
-  const timerRef          = useRef<ReturnType<typeof setInterval> | null>(null);
-  const fetchedCountRef   = useRef(0);          // 마지막으로 가져온 메시지 수
-  const isCompleteRef     = useRef(false);
-
-  /* ── 정리 ── */
-  const cleanup = useCallback(() => {
-    if (pollRef.current)  { clearInterval(pollRef.current);  pollRef.current = null; }
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-  }, []);
-
-  /* ── debates/latest 호출 (부분 결과 포함) ── */
-  const fetchDebateResult = useCallback(async (sessionId: string, isFinal = false) => {
-    try {
-      const res = await fetch(`http://localhost:8080/api/sessions/${sessionId}/debates/latest`);
-      if (!res.ok) return;
-      const result = await res.json();
-
-      const mapped: Message[] = (result.messages || []).map((m: {
-        agentId?: string; agentName?: string; content?: string;
-        type?: string; round?: number; stance?: string; evidenceSummary?: string;
-      }) => ({
-        agentId:         m.agentId || "legal",
-        agentName:       m.agentName || "",
-        content:         m.content || "",
-        type:            m.type || "analysis",
-        round:           m.round || 1,
-        stance:          m.stance || "",
-        evidenceSummary: m.evidenceSummary || "",
-      }));
-
-      // 새 메시지만 누적
-      if (mapped.length > fetchedCountRef.current) {
-        fetchedCountRef.current = mapped.length;
-        setMessages(mapped);
-      }
-
-      if (result.finalDecision) {
-        sessionStorage.setItem("finalDecision", JSON.stringify(result.finalDecision));
-      }
-      sessionStorage.setItem("evidences", JSON.stringify(result.evidences || []));
-
-      if (isFinal) {
-        const hasError = mapped.some((m) => m.type === "error");
-        if (hasError) setError("AI 분석에 실패했습니다. 결과가 제한적일 수 있습니다.");
-        setIsComplete(true);
-        isCompleteRef.current = true;
-        setCurrentPhase({ label: "분석 완료", description: "모든 에이전트의 검토가 완료되었습니다.", progress: 100, humourLabel: "세 명의 전문가를 설득하는 데 성공했습니다!" });
-        setIsAnalyzing(false);
-      }
-    } catch (e) {
-      if (isFinal) {
-        console.error(e);
-        setError("토론 결과를 불러오는 중 문제가 발생했습니다.");
-        setIsAnalyzing(false);
-      }
-    }
-  }, []);
-
-  /* ── 상태 폴링 ── */
-  const pollSessionStatus = useCallback((sessionId: string) => {
-    const poll = async () => {
-      try {
-        const res = await fetch(`http://localhost:8080/api/sessions/${sessionId}/status`);
-        if (!res.ok) return;
-        const status = await res.json();
-
-        // 실제 단계 반영
-        if (status.analysisPhase && phaseMap[status.analysisPhase]) {
-          setCurrentPhase(phaseMap[status.analysisPhase]);
-        }
-
-        // 새 메시지가 생겼으면 부분 조회 (분석 중에도 실시간 갱신)
-        if (status.messageCount > fetchedCountRef.current && !isCompleteRef.current) {
-          await fetchDebateResult(sessionId, false);
-        }
-
-        if (status.status === "COMPLETED") {
-          cleanup();
-          await fetchDebateResult(sessionId, true);
-        } else if (status.status === "FAILED") {
-          cleanup();
-          setError("분석에 실패했습니다. 다시 시도해주세요.");
-          setIsAnalyzing(false);
-        }
-      } catch {
-        // 네트워크 오류 → 다음 폴링에서 재시도
-      }
+function trafficFromLevel(level: "HIGH" | "MEDIUM" | "LOW") {
+  if (level === "HIGH") {
+    return {
+      key: "red" as const,
+      icon: "🔴",
+      title: "위험",
+      hint: "즉각적인 법무·대외 대응이 필요할 수 있습니다.",
     };
-    poll();
-    pollRef.current = setInterval(poll, POLL_INTERVAL);
-  }, [cleanup, fetchDebateResult]);
+  }
+  if (level === "MEDIUM") {
+    return {
+      key: "yellow" as const,
+      icon: "🟡",
+      title: "주의",
+      hint: "조건부 승인 또는 완화 조치 후 재검토를 권장합니다.",
+    };
+  }
+  return {
+    key: "green" as const,
+    icon: "🟢",
+    title: "안전",
+    hint: "현재 제시된 범위에서는 상대적으로 통제 가능한 수준입니다.",
+  };
+}
 
-  /* ── 초기화 ── */
+function riskProbabilityPercent(level: "HIGH" | "MEDIUM" | "LOW"): number {
+  if (level === "HIGH") return 78;
+  if (level === "MEDIUM") return 48;
+  return 22;
+}
+
+function damageDescriptor(level: "HIGH" | "MEDIUM" | "LOW"): string {
+  if (level === "HIGH") {
+    return "과징금·형사 조사·사업 중단 등 중대한 외부 충격 가능성이 상대적으로 높습니다.";
+  }
+  if (level === "MEDIUM") {
+    return "일정 기간 내 시정명령·민사 분쟁·평판 훼손 등 중간 규모의 비용이 예상됩니다.";
+  }
+  return "통상적인 컴플라이언스 조치로 충분히 관리 가능한 수준의 파급으로 평가됩니다.";
+}
+
+function toExecutiveLines(summary: string): string[] {
+  const trimmed = summary.trim();
+  if (!trimmed) {
+    return [
+      "요약 텍스트가 아직 없습니다. 상세 리포트 탭에서 전체 판정문을 확인해 주세요.",
+      "",
+      "",
+    ];
+  }
+  const lines = trimmed
+    .split(/\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (lines.length >= 3) return lines.slice(0, 3);
+  const sentences = trimmed
+    .split(/(?<=[.!?。])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const out = [...lines];
+  for (const s of sentences) {
+    if (out.length >= 3) break;
+    if (!out.includes(s)) out.push(s);
+  }
+  while (out.length < 3) out.push("");
+  return out.slice(0, 3);
+}
+
+function splitRecommendationToTasks(text: string): string[] {
+  return text
+    .split(/\n+/)
+    .map((s) => s.replace(/^[-*•\d.)]+\s*/, "").trim())
+    .filter(Boolean);
+}
+
+function buildCategoryPlans(
+  final: FinalDecision | null,
+  risks: RiskItem[],
+): { category: string; items: string[] }[] {
+  const fromRisks = risks.map((r) => ({
+    category: r.category || "리스크",
+    items: [
+      r.description,
+      r.level === "high"
+        ? "우선 검토: 해당 카테고리 관련 내부 통제·계약 조항을 즉시 점검하세요."
+        : r.level === "medium"
+          ? "일정 내 시정: 완화 문안을 반영한 실행 계획을 수립하세요."
+          : "모니터링: 변경 사항 발생 시 재평가하세요.",
+    ],
+  }));
+
+  const rec = final?.recommendation?.trim();
+  if (rec) {
+    const bullets = splitRecommendationToTasks(rec);
+    if (bullets.length) {
+      fromRisks.push({
+        category: "종합 실행 과제",
+        items: bullets.slice(0, 8),
+      });
+    }
+  }
+
+  if (!fromRisks.length) {
+    return [
+      {
+        category: "기본 점검",
+        items: ["검토 데이터를 다시 불러오거나 새 세션으로 진단을 시작해 주세요."],
+      },
+    ];
+  }
+
+  return fromRisks;
+}
+
+/**
+ * COMPLETED 상태에서 보여주는 최종 판정 결과지(Top-Down).
+ */
+export function SessionResultReport() {
+  const navigate = useNavigate();
+  const printableRef = useRef<HTMLDivElement>(null);
+  const pdfRef = useRef<HTMLDivElement>(null);
+  const [reviewData, setReviewData] = useState<ReviewData | null>(null);
+  const [finalDecision, setFinalDecision] = useState<FinalDecision | null>(null);
+  const [isPdfExporting, setIsPdfExporting] = useState(false);
+
   useEffect(() => {
-    const reviewDataRaw = sessionStorage.getItem("reviewData");
-    if (!reviewDataRaw) { navigate("/input"); return; }
+    const raw = sessionStorage.getItem("reviewData");
+    if (!raw) {
+      navigate("/input");
+      return;
+    }
+    try {
+      setReviewData(JSON.parse(raw) as ReviewData);
+    } catch {
+      navigate("/input");
+    }
 
-    const recheckRaw = sessionStorage.getItem("recheckRequest");
-    if (recheckRaw) {
-      try { setRecheckRequest(JSON.parse(recheckRaw)); } catch { setRecheckRequest(null); }
+    const fdRaw = sessionStorage.getItem("finalDecision");
+    if (fdRaw) {
+      try {
+        setFinalDecision(JSON.parse(fdRaw) as FinalDecision);
+      } catch {
+        setFinalDecision(null);
+      }
     }
 
     const sessionId = sessionStorage.getItem("sessionId");
-    if (!sessionId) {
-      setError("세션 정보를 찾을 수 없습니다.");
-      setIsAnalyzing(false);
+    const usingMock = sessionStorage.getItem("usingMockData") === "true";
+    if (usingMock && sessionId) {
+      const detail = getMockReviewDetail(sessionId);
+      if (detail?.finalDecision) {
+        setFinalDecision(detail.finalDecision as FinalDecision);
+        sessionStorage.setItem("finalDecision", JSON.stringify(detail.finalDecision));
+      }
       return;
     }
 
-    setIsAnalyzing(true);
-    pollSessionStatus(sessionId);
-    return () => cleanup();
-  }, [navigate, cleanup, pollSessionStatus]);
+    if (!sessionId) return;
 
-  /* ── 경과 시간 타이머 ── */
-  useEffect(() => {
-    if (!isAnalyzing) return;
-    timerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [isAnalyzing]);
+    let cancelled = false;
+    fetch(`http://localhost:8080/api/sessions/${sessionId}/debates/latest`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((result) => {
+        if (cancelled || !result?.finalDecision) return;
+        setFinalDecision(result.finalDecision as FinalDecision);
+        sessionStorage.setItem("finalDecision", JSON.stringify(result.finalDecision));
+      })
+      .catch(() => {
+        /* sessionStorage 값 유지 */
+      });
 
-  /* ── 로딩 중 ticker 애니메이션 ── */
-  useEffect(() => {
-    if (!isAnalyzing) return;
-    const tickerTimer = window.setInterval(() => {
-      setTickerIndex((prev) => (prev + 1) % liveTicker.length);
-    }, 5600);
-    return () => window.clearInterval(tickerTimer);
-  }, [isAnalyzing]);
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
 
-  const ticker     = liveTicker[tickerIndex];
-  const groupedRounds = useMemo(() => {
-    const rounds: Record<number, Message[]> = {};
-    messages.forEach((msg) => {
-      if (!rounds[msg.round]) rounds[msg.round] = [];
-      rounds[msg.round].push(msg);
-    });
-    return rounds;
-  }, [messages]);
+  const level = useMemo(() => normalizeRiskLevel(finalDecision?.riskLevel), [finalDecision?.riskLevel]);
+  const traffic = useMemo(() => trafficFromLevel(level), [level]);
+  const execLines = useMemo(
+    () => toExecutiveLines(finalDecision?.summary || ""),
+    [finalDecision?.summary],
+  );
 
-  const formatElapsed = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return m > 0 ? `${m}분 ${sec}초` : `${sec}초`;
+  const risks: RiskItem[] = useMemo(
+    () =>
+      finalDecision?.risks?.length
+        ? finalDecision.risks
+        : [
+            { category: "Legal", level: "high", description: "근거·증빙이 불충분할 수 있습니다." },
+            { category: "Business", level: "medium", description: "대외 메시지 톤에 따른 신뢰도 변동이 있습니다." },
+          ],
+    [finalDecision?.risks],
+  );
+
+  const actionPlans = useMemo(() => buildCategoryPlans(finalDecision, risks), [finalDecision, risks]);
+
+  const prob = riskProbabilityPercent(level);
+
+  const handlePdf = async () => {
+    const el = pdfRef.current ?? printableRef.current;
+    if (!el) {
+      toast.error("PDF로 보낼 영역을 찾을 수 없습니다.");
+      return;
+    }
+    setIsPdfExporting(true);
+    try {
+      await exportElementToPdf(el, `LexRex_result_${new Date().toISOString().slice(0, 19)}.pdf`);
+      toast.success("결과지 PDF를 저장했습니다.");
+    } catch (e) {
+      console.error(e);
+      toast.error("PDF 저장에 실패했습니다.");
+    } finally {
+      setIsPdfExporting(false);
+    }
   };
 
-  /* ── 활성 에이전트: 실제 phase 우선, phase 없으면 ticker speaker ── */
-  const activeAgentId: AgentKey | undefined =
-    currentPhase.activeAgent ??
-    (isAnalyzing ? ticker.speaker : undefined);
+  if (!reviewData) return null;
 
-  // ── 렌더링 ──
   return (
-    <div className="min-h-screen bg-[#F2F2F2] text-slate-900">
-
-      {/* ── 헤더 ── */}
-      <header className="sticky top-0 z-50 border-b border-[#64748B]/20 bg-[#F2F2F2]/94 backdrop-blur-md shadow-sm">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <button onClick={() => navigate("/")} className="min-w-[220px] text-left py-1">
-            <h1 className="font-menu leading-[1.02] text-[25px] text-[#1E3A8A]">LexRex AI</h1>
-            <p className="text-[11px] leading-[1.3] tracking-[-0.01em] text-[#64748B] mt-[3px] max-h-5">
-              Multi-Agent Legal Compliance System
+    <div className="space-y-6">
+      <div ref={printableRef} className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-2xl font-semibold text-[#1E3A8A]">최종 판정 결과지</h2>
+            <p className="text-sm text-slate-600">
+              {reviewData.companyName} · {reviewData.industry}
             </p>
-          </button>
-          {isComplete && !error && (
-            <Button
-              onClick={() => navigate("/verdict")}
-              className="bg-[#1E3A8A] hover:bg-[#1E3A8A]/90 text-white rounded-full"
-            >
-              최종 판정 보기 <ArrowRight className="ml-2 w-4 h-4" />
-            </Button>
-          )}
+          </div>
+          <Button
+            type="button"
+            className="rounded-full bg-[#1E3A8A] hover:bg-[#1E3A8A]/90"
+            onClick={() => void handlePdf()}
+            disabled={isPdfExporting}
+          >
+            {isPdfExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            결과지 PDF
+          </Button>
         </div>
-      </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-10 space-y-6">
-
-        {/* ── 페이지 타이틀 ── */}
-        <div>
-          <h2 className="text-3xl font-semibold text-[#1E3A8A]">실시간 멀티 에이전트 토론장</h2>
-          <p className="text-slate-600 mt-2">
-            대기 시간은 백그라운드 연산의 공백이 아니라, 전문가 토론의 진행 상황을 확인하는 시간입니다.
-          </p>
-          {recheckRequest && (
-            <div className="mt-3 rounded-xl border border-[#1E3A8A]/20 bg-[#1E3A8A]/5 p-3 text-sm">
-              재검토 요청 반영: {recheckRequest.target} / {recheckRequest.question || "추가 질문 없음"}
+        <Card
+          className={
+            traffic.key === "red"
+              ? "border-rose-200 bg-rose-50/60"
+              : traffic.key === "yellow"
+                ? "border-amber-200 bg-amber-50/60"
+                : "border-emerald-200 bg-emerald-50/60"
+          }
+        >
+          <CardHeader>
+            <CardTitle className="flex flex-wrap items-center gap-3 text-xl">
+              <span className="text-3xl" aria-hidden>
+                {traffic.icon}
+              </span>
+              <span>최종 진단: {traffic.title}</span>
+              <Badge variant="outline" className="text-xs">
+                riskLevel {level}
+              </Badge>
+            </CardTitle>
+            <CardDescription>{traffic.hint}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+              <Sparkles className="h-4 w-4 text-[#1E3A8A]" />
+              Executive Summary (3줄)
             </div>
-          )}
-          {isAnalyzing && elapsedSeconds > 0 && (
-            <p className="text-sm text-slate-400 mt-2">
-              경과 시간: {formatElapsed(elapsedSeconds)}
-            </p>
-          )}
+            <Separator />
+            <ul className="list-inside list-decimal space-y-2 text-sm leading-relaxed text-slate-800">
+              {execLines.map((line, i) => (
+                <li key={i} className={line ? "" : "text-slate-400"}>
+                  {line || "—"}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>리스크 발생 확률 (모델 지표)</CardTitle>
+              <CardDescription>정성·정량 신호를 종합한 참고치입니다.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-3xl font-semibold text-[#1E3A8A]">{prob}%</span>
+                <span className="text-xs text-slate-500">0–100 스케일</span>
+              </div>
+              <Progress value={prob} className="h-3" />
+              <Alert>
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>해석 가이드</AlertTitle>
+                <AlertDescription className="text-xs leading-relaxed">
+                  수치는 법적 효력이 없는 참고용 지표이며, 실제 규제 대응은 내부 법무 검토를 전제로 해야 합니다.
+                </AlertDescription>
+              </Alert>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>예상 피해 규모</CardTitle>
+              <CardDescription>카테고리별 리스크 밀도를 바탕으로 한 서술형 평가입니다.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm leading-relaxed text-slate-700">{damageDescriptor(level)}</p>
+              <div className="flex flex-wrap gap-2">
+                {risks.slice(0, 4).map((r, idx) => (
+                  <Badge
+                    key={idx}
+                    variant="secondary"
+                    className={
+                      r.level === "high"
+                        ? "bg-rose-100 text-rose-800"
+                        : r.level === "medium"
+                          ? "bg-amber-100 text-amber-900"
+                          : "bg-emerald-100 text-emerald-900"
+                    }
+                  >
+                    {r.category}: {r.level.toUpperCase()}
+                  </Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        {/* ── 분석 진행 중 ── */}
-        {isAnalyzing && (
-          <>
-            {/* 실시간 중계 */}
-            <Card className="border-slate-200 bg-white">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-[#1E3A8A]" />
-                  실시간 중계
-                </CardTitle>
-                <CardDescription>{currentPhase.label}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-xl border border-[#1E3A8A]/20 bg-[#1E3A8A]/5 p-4">
-                  <p className="text-sm text-slate-700">{currentPhase.description}</p>
-                </div>
-                <p className="text-xs text-slate-400 mt-2 italic">{ticker.text}</p>
-              </CardContent>
-            </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ListChecks className="h-5 w-5 text-[#1E3A8A]" />
+              카테고리별 Action Plan
+            </CardTitle>
+            <CardDescription>실행 가능한 To-Do 형태로 정리했습니다.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {actionPlans.map((block, idx) => (
+              <div key={`${block.category}-${idx}`}>
+                {idx > 0 && <Separator className="mb-6" />}
+                <p className="mb-3 text-sm font-semibold text-slate-900">{block.category}</p>
+                <ul className="space-y-2">
+                  {block.items.map((item, j) => (
+                    <li key={j} className="flex gap-2 text-sm text-slate-700">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
 
-            {/* 대시보드 펄스 */}
-            <Card className="border-slate-200 bg-white">
-              <CardHeader>
-                <CardTitle>대시보드 펄스</CardTitle>
-                <CardDescription>현재 발언 중인 에이전트를 시각적으로 표시합니다.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-center gap-8 py-3">
-                  {dashboardAgents.map((agentId) => {
-                    const agent = agentMap[agentId];
-                    const Icon = agent.icon;
-                    const isActive = activeAgentId === agentId
-                      || (agentId === "ethics" && activeAgentId === "judge");
-                    return (
-                      <div key={agentId} className="relative text-center">
-                        {isActive && (
-                          <span className="absolute -inset-2 rounded-full border-2 border-[#1E3A8A]/35 animate-ping" />
-                        )}
-                        <div className={`relative w-16 h-16 rounded-full border flex items-center justify-center ${agent.bg} ${agent.border}`}>
-                          <Icon className={`w-6 h-6 ${agent.color}`} />
-                        </div>
-                        <p className="text-xs mt-2 text-slate-600">{agent.name}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-                {ticker.conflict && (
-                  <div className="mt-3 flex items-center justify-center gap-2 text-amber-700 text-sm">
-                    <Zap className="w-4 h-4" />
-                    에이전트 간 논쟁이 격화되고 있습니다.
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" className="rounded-full" onClick={() => navigate("/verdict")}>
+          법령·판례 근거 포함 상세 보기
+        </Button>
+      </div>
+
+      <div
+        aria-hidden
+        className="pointer-events-none fixed left-[-12000px] top-0"
+        style={{ width: 780, background: "#ffffff" }}
+      >
+        <div ref={pdfRef} className="verdict-pdf-root space-y-4 p-4 text-slate-900">
+          <div style={pdfHeaderBox}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#1E3A8A" }}>LexRex AI · 최종 판정 결과지</div>
+            <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+              {reviewData.companyName} / {reviewData.industry} / {new Date().toLocaleString("ko-KR")}
+            </div>
+          </div>
+          <div style={pdfCard}>
+            <div style={pdfTitle}>
+              {traffic.icon} 진단: {traffic.title} ({level})
+            </div>
+            {execLines.map((l, i) => (
+              <div key={i} style={{ ...pdfBody, marginTop: i === 0 ? 6 : 2 }}>
+                {i + 1}. {l || "—"}
+              </div>
+            ))}
+          </div>
+          <div style={pdfCard}>
+            <div style={pdfTitle}>리스크 확률 지표</div>
+            <div style={{ ...pdfBody, marginTop: 4 }}>
+              {prob}% — {damageDescriptor(level)}
+            </div>
+          </div>
+          <div style={pdfCard}>
+            <div style={pdfTitle}>Action Plan</div>
+            {actionPlans.map((b, i) => (
+              <div key={i} style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{b.category}</div>
+                {b.items.map((it, j) => (
+                  <div key={j} style={{ ...pdfBody, marginTop: 2 }}>
+                    - {it}
                   </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* 진행 게이지 — 실제 phase 기반 */}
-            <Card className="border-slate-200 bg-white">
-              <CardHeader>
-                <CardTitle>진행 게이지</CardTitle>
-                <CardDescription>{currentPhase.humourLabel}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between text-sm mb-2">
-                  <span>토론 진행률</span>
-                  <span className="font-medium">{currentPhase.progress}%</span>
-                </div>
-                <Progress value={currentPhase.progress} className="h-2" />
-                <div className="mt-3 text-sm text-slate-600 flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {currentPhase.description}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* 분석 중 부분 메시지 미리보기 (새 메시지 있으면 표시) */}
-            {messages.length > 0 && (
-              <Card className="border-slate-200 bg-white">
-                <CardHeader>
-                  <CardTitle>토론 진행 중 로그 ({messages.length}건)</CardTitle>
-                  <CardDescription>분석이 완료되면 전체 로그가 표시됩니다.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {messages.slice(-3).map((msg, idx) => {
-                    const agKey = (msg.agentId === "ethics" || msg.agentId === "judge") ? "judge" : msg.agentId as AgentKey;
-                    const agent = agentMap[agKey] ?? agentMap["legal"];
-                    const Icon = agent.icon;
-                    const isJudge = agKey === "judge";
-                    return (
-                      <div key={idx} className={`rounded-xl border p-3 ${agent.bg} ${agent.border}`}>
-                        <div className={`text-sm font-medium flex items-center gap-2 ${agent.color}`}>
-                          <Icon className="w-4 h-4" />
-                          {msg.agentName || agent.name}
-                          <Badge variant="outline" className="ml-1 text-xs">{msg.type}</Badge>
-                          <span className="text-xs text-slate-400 ml-auto">라운드 {msg.round}</span>
-                        </div>
-                        <div className="mt-2">
-                          {isJudge ? renderJudgeContent(msg.content) : renderAgentContent(msg.content)}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {messages.length > 3 && (
-                    <p className="text-xs text-slate-400 text-center">+{messages.length - 3}개 더 있음 — 완료 후 전체 보기</p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-          </>
-        )}
-
-        {/* ── 에러 (분석 실패) ── */}
-        {!isAnalyzing && error && !isComplete && (
-          <Card className="border-red-200 bg-red-50">
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-2 text-red-700 mb-2">
-                <AlertCircle className="w-5 h-5" />
-                <span className="font-medium">분석 실패</span>
+                ))}
               </div>
-              <p className="text-red-700 text-sm">{error}</p>
-              <div className="flex gap-3 mt-4">
-                <Button variant="outline" onClick={() => navigate("/")}>홈으로</Button>
-                <Button onClick={() => { sessionStorage.removeItem("sessionId"); navigate("/input"); }}>다시 시도</Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ── AI 분석 실패 경고 (결과는 있지만 에러 포함) ── */}
-        {isComplete && error && (
-          <Card className="border-amber-200 bg-amber-50">
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-2 text-amber-800 font-medium">
-                <AlertCircle className="w-5 h-5" /> {error}
-              </div>
-              <p className="text-sm text-amber-700 mt-1">판정 결과 페이지에서 상세 내용을 확인해 주세요.</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ── 분석 완료 ── */}
-        {!isAnalyzing && isComplete && !error && (
-          <Card className="border-emerald-200 bg-emerald-50">
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-2 text-emerald-800 font-medium">
-                <CheckCircle2 className="w-5 h-5" />
-                치열한 토론 끝에 결론이 도출되었습니다.
-              </div>
-              <p className="text-sm text-emerald-700 mt-2">
-                에이전트들이 나눈 {messages.filter((m) => m.type !== "error").length}개의 논쟁 로그가 준비되었습니다.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button variant="outline" className="rounded-full" onClick={() => navigate("/verdict")}>
-                  판정 결과 보기 <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
-                <Button
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => setShowDetailedLogs((prev) => !prev)}
-                >
-                  {showDetailedLogs ? "토론 로그 닫기" : "토론 로그 자세히 보기"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ── 토론 로그 상세 ── */}
-        {showDetailedLogs && !isAnalyzing && (
-          <Card className="border-slate-200 bg-white">
-            <CardHeader>
-              <CardTitle>토론 로그 상세 보기</CardTitle>
-              <CardDescription>전체 로그는 판정 결과 창에서도 확인 가능합니다.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              {Object.entries(groupedRounds).map(([round, roundMessages]) => (
-                <div key={round} className="space-y-3">
-                  <p className="text-sm font-semibold text-slate-700">라운드 {round}</p>
-                  {roundMessages.map((msg, idx) => {
-                    const agKey = (msg.agentId === "ethics" || msg.agentId === "judge") ? "judge" : msg.agentId as AgentKey;
-                    const agent = agentMap[agKey] ?? agentMap["legal"];
-                    const Icon = agent.icon;
-                    const isJudge = agKey === "judge";
-                    return (
-                      <div key={`${round}-${idx}`} className={`rounded-xl border p-3 ${agent.bg} ${agent.border}`}>
-                        <div className={`text-sm font-medium flex items-center gap-2 ${agent.color}`}>
-                          <Icon className="w-4 h-4" />
-                          {msg.agentName || agent.name}
-                          <Badge variant="outline" className="ml-1 text-xs">{msg.type}</Badge>
-                        </div>
-                        <div className="mt-2">
-                          {isJudge ? renderJudgeContent(msg.content) : renderAgentContent(msg.content)}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
-
-      </main>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
+
+const pdfHeaderBox: CSSProperties = {
+  borderBottom: "2px solid #1E3A8A",
+  paddingBottom: 8,
+  marginBottom: 8,
+};
+
+const pdfCard: CSSProperties = {
+  border: "1px solid #94a3b8",
+  borderRadius: 2,
+  padding: "12px 14px",
+  background: "#ffffff",
+};
+
+const pdfTitle: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#1E3A8A",
+};
+
+const pdfBody: CSSProperties = {
+  fontSize: 11,
+  color: "#0f172a",
+  lineHeight: 1.6,
+};

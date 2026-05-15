@@ -46,7 +46,8 @@ public class ReviewSession {
     private String status = "CREATED";
 
     /** 분석 진행 단계 (폴링 UI용):
-     *  ROUND1_BIZ, ROUND1_LEGAL, ROUND2_BIZ, ROUND2_LEGAL, ROUND3_BIZ, ROUND3_LEGAL,
+     *  ROUND1_BIZ, ROUND1_LEGAL, WAITING_FOR_USER_R1,
+     *  ROUND2_BIZ, ROUND2_LEGAL, WAITING_FOR_USER_R2, ROUND3_BIZ, ROUND3_LEGAL,
      *  JUDGING, COLLECTING_EVIDENCE
      *  완료 후 null로 초기화됨 */
     @Column(length = 30)

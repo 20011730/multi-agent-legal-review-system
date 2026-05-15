@@ -9,8 +9,9 @@ ai_hyejin_retry 브랜치의 LangGraph 토론 시스템을 FastAPI 서버에 통
 
 import logging
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, Future
-from typing import TypedDict
+from typing import TypedDict, Any
 
 from langgraph.graph import StateGraph, END
 
@@ -20,6 +21,8 @@ from agents.judge_agent import run_judge_agent, parse_judge_response
 from schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
+    AnalyzeStepResponse,
+    ResumeAnalyzeRequest,
     AgentMessage,
     FinalDecision,
     RiskItem,
@@ -29,7 +32,7 @@ from schemas import (
 logger = logging.getLogger(__name__)
 
 # 고정 토론 라운드 수 (BIZ→LEGAL 1세트 = 1라운드)
-MAX_ROUNDS = int(os.getenv("LANGGRAPH_MAX_ROUNDS", "2"))
+MAX_ROUNDS = int(os.getenv("LANGGRAPH_MAX_ROUNDS", "3"))
 
 
 # ── LangGraph State ──
@@ -40,6 +43,10 @@ class DebateState(TypedDict):
     situation: str      # 상황 설명
     messages: list      # AgentMessage 리스트 (결과 수집용)
     round_num: int      # 현재 라운드 번호
+
+
+_interactive_store: dict[int, dict[str, Any]] = {}
+_interactive_lock = threading.Lock()
 
 
 # ── 노드 함수 ──
@@ -180,6 +187,176 @@ def _get_graph():
     if _graph is None:
         _graph = _build_graph()
     return _graph
+
+
+def _run_round(state: DebateState, round_num: int) -> list[AgentMessage]:
+    state["round_num"] = round_num
+    biz_update = biz_node(state)
+    for k, v in biz_update.items():
+        state[k] = v
+
+    legal_update = legal_node(state)
+    for k, v in legal_update.items():
+        state[k] = v
+
+    return [state["messages"][-2], state["messages"][-1]]
+
+
+def _append_user_feedback_to_history(state: DebateState, content: str, is_pass: bool) -> None:
+    if is_pass:
+        state["history"] += "\n\n[사용자 피드백]: 이번 라운드는 사용자 Pass로 진행합니다."
+        return
+    cleaned = content.strip()
+    if cleaned:
+        state["history"] += f"\n\n[사용자 피드백]: {cleaned}"
+
+
+def _parse_final_decision_from_state(state: DebateState) -> tuple[FinalDecision, AgentMessage]:
+    judge_update = judge_node(state)
+    for k, v in judge_update.items():
+        state[k] = v
+
+    judge_msg = state["messages"][-1]
+    history_text = state.get("history", "")
+    judge_section = ""
+    if "[최종 판정]:" in history_text:
+        judge_section = history_text.split("[최종 판정]:")[-1].strip()
+    parsed = parse_judge_response(judge_section if judge_section else judge_msg.content)
+
+    risks = [
+        RiskItem(
+            category=r.get("category", "기타"),
+            level=r.get("level", "medium"),
+            description=r.get("description", ""),
+        )
+        for r in parsed.get("risks", [])
+    ]
+    final_decision = FinalDecision(
+        verdict=parsed["verdict"],
+        riskLevel=parsed["riskLevel"],
+        risks=risks if risks else [
+            RiskItem(category="종합 리스크", level="medium", description="AI 토론 기반 종합 평가")
+        ],
+        summary=parsed["summary"],
+        recommendation=parsed["recommendation"],
+        revisedContent=parsed.get("revisedContent", ""),
+    )
+    return final_decision, judge_msg
+
+
+def _collect_evidences_for_result(request: AnalyzeRequest) -> list[EvidenceItem]:
+    try:
+        from services.evidence_service import collect_evidences
+        evidences_raw = collect_evidences(
+            request.content, request.situation, request.reviewType, max_results=5
+        )
+        return [
+            EvidenceItem(
+                sourceType=ev.get("sourceType", "LAW"),
+                title=ev.get("title", ""),
+                referenceId=ev.get("referenceId", ""),
+                articleOrCourt=ev.get("articleOrCourt", ""),
+                summary=ev.get("summary", ""),
+                url=ev.get("url", ""),
+                relevanceReason=ev.get("relevanceReason", ""),
+                relevanceScore=ev.get("relevanceScore", 0),
+                quotedText=ev.get("quotedText", ""),
+                metadata=ev.get("metadata"),
+            )
+            for ev in evidences_raw
+        ]
+    except Exception as e:
+        logger.warning("근거 수집 실패(분석은 계속): %s", e)
+        return []
+
+
+def start_interactive_analysis(request: AnalyzeRequest) -> AnalyzeStepResponse:
+    """
+    1단계 분석 시작:
+    - Round1(BIZ, LEGAL) 실행
+    - WAITING_FOR_USER_R1 상태로 중단(Interrupt)
+    """
+    topic = (
+        f"[기업] {request.companyName} ({request.industry})\n"
+        f"[검토 유형] {request.reviewType}\n"
+        f"[상황] {request.situation}\n"
+        f"[검토 대상 원문] {request.content}"
+    )
+    state: DebateState = {
+        "history": f"[검토 안건]\n{topic}",
+        "turn_count": 0,
+        "topic": topic,
+        "situation": request.situation,
+        "messages": [],
+        "round_num": 1,
+    }
+
+    round1_messages = _run_round(state, 1)
+
+    with _interactive_lock:
+        _interactive_store[request.sessionId] = {
+            "state": state,
+            "request": request,
+            "next_round": 2,
+        }
+
+    logger.info("세션 %s Round1 완료 → 사용자 입력 대기", request.sessionId)
+    return AnalyzeStepResponse(
+        state="WAITING_FOR_USER",
+        analysisPhase="WAITING_FOR_USER_R1",
+        messages=round1_messages,
+        finalDecision=None,
+        evidences=[],
+    )
+
+
+def resume_interactive_analysis(request: ResumeAnalyzeRequest) -> AnalyzeStepResponse:
+    """
+    사용자 피드백 기반 재개:
+    - 첫 resume: Round2 실행 후 WAITING_FOR_USER_R2
+    - 두 번째 resume: Round3 + Judge 실행 후 COMPLETED
+    """
+    with _interactive_lock:
+        ctx = _interactive_store.get(request.sessionId)
+
+    if ctx is None:
+        raise RuntimeError(f"세션 {request.sessionId}의 인터랙티브 상태를 찾을 수 없습니다.")
+
+    state: DebateState = ctx["state"]
+    original_request: AnalyzeRequest = ctx["request"]
+    next_round: int = ctx["next_round"]
+
+    _append_user_feedback_to_history(state, request.content or "", request.isPass)
+
+    if next_round == 2:
+        round2_messages = _run_round(state, 2)
+        with _interactive_lock:
+            _interactive_store[request.sessionId]["next_round"] = 3
+        logger.info("세션 %s Round2 완료 → 사용자 입력 대기", request.sessionId)
+        return AnalyzeStepResponse(
+            state="WAITING_FOR_USER",
+            analysisPhase="WAITING_FOR_USER_R2",
+            messages=round2_messages,
+            finalDecision=None,
+            evidences=[],
+        )
+
+    if next_round == 3:
+        round3_messages = _run_round(state, 3)
+        final_decision, judge_msg = _parse_final_decision_from_state(state)
+        evidences = _collect_evidences_for_result(original_request)
+        with _interactive_lock:
+            _interactive_store.pop(request.sessionId, None)
+        logger.info("세션 %s 최종 완료 (Round3 + Judge)", request.sessionId)
+        return AnalyzeStepResponse(
+            state="COMPLETED",
+            analysisPhase="JUDGING",
+            messages=[*round3_messages, judge_msg],
+            finalDecision=final_decision,
+            evidences=evidences,
+        )
+
+    raise RuntimeError(f"세션 {request.sessionId}의 next_round 값이 유효하지 않습니다: {next_round}")
 
 
 # ── 메인 분석 함수 ──
