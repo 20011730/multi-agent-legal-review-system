@@ -53,17 +53,29 @@ app:
     enabled: ${APP_RAG_ENABLED:false}
     chroma:
       base-url: ${CHROMA_BASE_URL:http://localhost:8000}
-      laws-collection: ${CHROMA_LAWS_COLLECTION:laws}
-      cases-collection: ${CHROMA_CASES_COLLECTION:cases}
+      # 기본 검색 컬렉션은 E5 768차원 'laws_e5' (intfloat/multilingual-e5-base).
+      # 기존 'laws' (384차원, simple-hash) 컬렉션은 fallback/비교용으로 보존되어 있음 — 삭제 금지.
+      # 'laws_e5' 검색이 실제로 동작하려면 embedding provider/dimension/external URL 이
+      # 아래 embedding 섹션의 기본값(external/768/localhost:9100)과 정합되어야 한다.
+      # 즉 외부 E5 임베딩 서비스(`ai/generate_rag/embedding_server.py`)가 반드시 기동 중이어야 함.
+      laws-collection: ${CHROMA_LAWS_COLLECTION:laws_e5}
+      # 판례 컬렉션 기본값을 ``cases_e5`` (E5 768차원) 로 전환 — laws_e5 와 동일 임베딩 차원/모델.
+      # 기존 ``cases`` (384차원, 미사용 fallback) 컬렉션은 보존되며 ENV로 회귀 가능:
+      #   CHROMA_CASES_COLLECTION=cases
+      cases-collection: ${CHROMA_CASES_COLLECTION:cases_e5}
       timeout-seconds: ${CHROMA_TIMEOUT_SECONDS:15}
     top-k:
       law: ${RAG_TOPK_LAW:3}
       caze: ${RAG_TOPK_CASE:2}     # "case"는 Java 예약어 → 설정 키도 caze로 통일
     embedding:
-      # provider: simple(default) | external | e5(stub)
-      provider: ${APP_RAG_EMBEDDING_PROVIDER:simple}
-      model: ${RAG_EMBEDDING_MODEL:simple-hash-v1}
-      dimension: ${RAG_EMBEDDING_DIM:384}
+      # provider: simple | external (default — E5 외부 임베딩 서비스) | e5(stub)
+      # 기본 검색 경로를 laws_e5(768차원)에 맞추기 위해 external + dim=768 을 기본값으로 둔다.
+      # 외부 서비스 다운 시 ExternalEmbeddingService 는 SimpleHashEmbeddingService(384차원)로
+      # graceful-fallback 하지만, 그 결과 laws_e5(768)와 dim mismatch 가 발생해 검색은 실패한다.
+      # 따라서 RAG 활성 환경에서는 `embedding_server.py` 가 반드시 함께 떠 있어야 한다.
+      provider: ${APP_RAG_EMBEDDING_PROVIDER:external}
+      model: ${RAG_EMBEDDING_MODEL:intfloat/multilingual-e5-base}
+      dimension: ${RAG_EMBEDDING_DIM:768}
       external:
         base-url: ${RAG_EMBEDDING_EXTERNAL_URL:http://localhost:9100}
         embed-path: ${RAG_EMBEDDING_EXTERNAL_PATH:/embed}

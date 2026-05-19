@@ -46,12 +46,32 @@ DB_CONFIG = {
 }
 
 
-# ── ChromaDB (PersistentClient용 로컬 디렉터리 — Docker ChromaDB와 별개) ──
+# ── ChromaDB 접속 설정 ──
+# 두 모드를 지원:
+#   - "local" (기본): PersistentClient(path=CHROMA_DB_DIR) — 파일 기반, backend와 분리된 별도 저장소
+#   - "http"        : HttpClient(host=CHROMA_HOST, port=CHROMA_PORT) — Docker ChromaDB와 직접 통신
+# 안전 정책:
+#   * 명시적으로 CHROMA_CLIENT_MODE=http 를 설정하지 않는 한 Docker ChromaDB에 자동 연결되지 않음
+#   * CHROMA_COLLECTION 기본값 'laws_e5' — backend의 기존 'laws' (384차원, simple-hash) 컬렉션을
+#     건드리지 않도록 E5 전용 신규 컬렉션 이름을 권장
+CHROMA_CLIENT_MODE = os.getenv("CHROMA_CLIENT_MODE", "local").lower()
 CHROMA_DB_DIR = os.getenv("CHROMA_DB_DIR", "./chroma_data")
+CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
+CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
+CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "laws_e5")
 
 
 # ── E5 임베딩 모델 ──
 E5_MODEL_NAME = os.getenv("E5_MODEL_NAME", "intfloat/multilingual-e5-base")
+# E5 base는 768, large는 1024. 임베딩 함수와 차원 일치 필요.
+EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "768"))
+
+
+def describe_chroma_target() -> str:
+    """현재 설정된 Chroma 연결 대상을 사람이 읽기 좋은 문자열로 반환 (로그용)."""
+    if CHROMA_CLIENT_MODE == "http":
+        return f"http://{CHROMA_HOST}:{CHROMA_PORT} (collection={CHROMA_COLLECTION})"
+    return f"local file ({CHROMA_DB_DIR}, collection={CHROMA_COLLECTION})"
 
 
 def require_law_api_oc() -> str:

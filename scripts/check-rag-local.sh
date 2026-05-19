@@ -61,17 +61,76 @@ except Exception as e:
 "
 echo
 
-echo "── 6) retrieval 미니 테스트 (RAG 활성 시에만 의미있음)"
+echo "── 6) retrieval 미니 테스트 (실제 적재된 법령 기반 query)"
+echo "      query: reviewType=marketing, content=표시 광고 부당광고 사업자"
 curl -s -X POST "$BACKEND_URL/api/rag/retrieve" \
   -H "Content-Type: application/json" \
-  -d '{"companyName":"test","industry":"tech","reviewType":"marketing","situation":"광고 문구 검토","content":"업계 1위 표시광고"}' \
+  -d '{"companyName":"test","industry":"tech","reviewType":"marketing","situation":"표시광고 검토","content":"표시 광고 부당광고 사업자"}' \
   2>/dev/null | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
-    print('  count:', d.get('count'))
+    cnt = d.get('count', 0)
+    print('  count:', cnt)
+    if cnt == 0:
+        print('  ⚠️  결과 없음 — 가능 원인:')
+        print('     1) Chroma laws collection 비어있음 (POST /api/rag/ingest/chroma/laws)')
+        print('     2) embedding 미적재 (Chroma 0.5.x REST는 embeddings 필수 — chunked=true 24건 reset 후 재적재 필요)')
+        print('     3) query 텍스트와 적재 본문 어휘 겹침 X')
     for ev in (d.get('evidences') or [])[:3]:
-        print('   -', ev.get('sourceType'), ev.get('title')[:50] if ev.get('title') else '')
+        title = ev.get('title') or ''
+        print('   - [%s] %s ... [%s]' % (ev.get('sourceType','?'), title[:55], ev.get('relevanceReason','')))
+except Exception as e:
+    print('  (파싱 실패:', e, ')')
+"
+
+echo
+echo "── 7) Chroma cases_e5 컬렉션 직접 카운트 (backend retrieval 연결 여부와 무관)"
+#   backend의 casesCollection 설정과 별개로, Chroma 측의 cases_e5 컬렉션 자체에 데이터가
+#   있는지 read-only로 확인. 컬렉션이 없거나 read 실패 시에도 본 스크립트의 다른 단계
+#   결과에 영향 주지 않도록 안전하게 출력만.
+CASES_E5_UUID=$(curl -s "$CHROMA_URL/api/v1/collections" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    matches = [c['id'] for c in d if c.get('name') == 'cases_e5']
+    print(matches[0] if matches else '')
+except Exception:
+    print('')
+" 2>/dev/null)
+if [ -n "$CASES_E5_UUID" ]; then
+  CASES_E5_COUNT=$(curl -s "$CHROMA_URL/api/v1/collections/$CASES_E5_UUID/count" 2>/dev/null)
+  echo "  cases_e5 uuid=$CASES_E5_UUID count=$CASES_E5_COUNT"
+else
+  echo "  (cases_e5 컬렉션 없음 — ai/generate_rag/5-2.insert_cases_e5.py 로 적재 가능)"
+fi
+echo
+
+echo "── 8) retrieval 미니 테스트 [CASE]"
+echo "      query: 표시광고 부당광고 판례"
+echo "      ⚠ 본 단계는 backend의 casesCollection 설정이 'cases_e5' 일 때만 의미있음."
+echo "         현재 backend 설정에서 cases_e5 가 아니라면 결과는 빈 리스트로 출력됨."
+curl -s -X POST "$BACKEND_URL/api/rag/retrieve" \
+  -H "Content-Type: application/json" \
+  -d '{"companyName":"test","industry":"tech","reviewType":"marketing","situation":"판례 검토","content":"표시광고 부당광고 판례"}' \
+  2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    cases = [e for e in (d.get('evidences') or []) if (e.get('sourceType') == 'CASE')]
+    print('  [CASE] hits:', len(cases))
+    for ev in cases[:5]:
+        title = (ev.get('title') or '').strip() or '<no-title>'
+        # metadata 에서 추가 식별 정보 추출 (camelCase 또는 snake_case 모두 fallback)
+        m = ev.get('metadata') or {}
+        court = m.get('court') or ''
+        date = m.get('decision_date') or m.get('judgmentDate') or ''
+        case_no = m.get('case_number') or m.get('caseNumber') or ev.get('referenceId') or ''
+        text_type = m.get('text_type') or m.get('section') or ''
+        extras = ' | '.join(x for x in (court, date, case_no, text_type) if x)
+        print(f'   - {title[:60]}')
+        if extras:
+            print(f'       [{extras}]')
 except Exception as e:
     print('  (파싱 실패:', e, ')')
 "

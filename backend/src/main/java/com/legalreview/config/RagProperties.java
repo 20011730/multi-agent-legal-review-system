@@ -47,8 +47,12 @@ public class RagProperties {
     @Getter @Setter
     public static class Chroma {
         private String baseUrl = "http://localhost:8000";
-        private String lawsCollection = "laws";
-        private String casesCollection = "cases";
+        // application.yml의 기본값과 일치 (2026-05-15 갱신):
+        //   laws-collection  = laws_e5  (E5 768차원, 운영 검색)
+        //   cases-collection = cases_e5 (E5 768차원, 판례)
+        // 단순 @ConfigurationProperties 로딩 실패 시 fallback 값과도 일관성 유지.
+        private String lawsCollection = "laws_e5";
+        private String casesCollection = "cases_e5";
         /** 요청 timeout(초). */
         private int timeoutSeconds = 15;
     }

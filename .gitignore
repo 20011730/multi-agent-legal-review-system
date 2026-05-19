@@ -61,3 +61,9 @@ ai/generate_rag/legal-e5-finetuned/model.safetensors
 *.safetensors
 **/pytorch_model.bin
 **/model.safetensors
+
+# ai/generate_rag/ 판례 수집 산출물 (5-1/5-3 결과 JSONL + state — 재생성 가능, 평균 수 MB)
+ai/generate_rag/cases_data/
+**/cases_index.jsonl
+**/cases_bodies.jsonl
+**/cases_state.json

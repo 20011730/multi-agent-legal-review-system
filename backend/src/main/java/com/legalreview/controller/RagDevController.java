@@ -317,7 +317,13 @@ public class RagDevController {
         req.setCompanyName("debug");
         req.setIndustry(industry);
         req.setReviewType(reviewType);
-        req.setSituation("debug retrieval");
+        // situation 은 의도적으로 빈 문자열로 둠 (이전: "debug retrieval").
+        //   - "debug retrieval" 토큰이 buildQuery 의 situation slot 에 합쳐져
+        //     E5 임베딩을 의료/일반 도메인 모두에서 dilute 시키는 문제 확인 (예:
+        //     의료사고 query → "의료사고 debug retrieval" 로 임베딩되어 medi top-K 진입 차단).
+        //   - prod POST /api/sessions 는 사용자 실제 situation 사용 → 영향 없음.
+        //   - dev endpoint 한정 정리.
+        req.setSituation("");
         req.setContent(query == null ? "" : query);
         req.setParticipationMode("observe");
 

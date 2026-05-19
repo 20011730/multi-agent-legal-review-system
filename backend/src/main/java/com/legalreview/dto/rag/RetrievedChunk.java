@@ -45,4 +45,20 @@ public class RetrievedChunk {
         Object v = metadata != null ? metadata.get(key) : null;
         return v == null ? "" : v.toString();
     }
+
+    /**
+     * 여러 키 후보 중 처음 발견되는 non-empty 값을 반환.
+     * adapter별 케이싱 차이(예: ``case_name`` vs ``caseName``) 호환용.
+     */
+    public String metaFirstOf(String... keys) {
+        if (metadata == null) return "";
+        for (String k : keys) {
+            Object v = metadata.get(k);
+            if (v != null) {
+                String s = v.toString();
+                if (!s.isEmpty()) return s;
+            }
+        }
+        return "";
+    }
 }

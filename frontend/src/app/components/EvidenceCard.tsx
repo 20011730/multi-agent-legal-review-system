@@ -37,9 +37,12 @@ export interface EvidenceItem {
   metadata?: EvidenceMetadata;
 }
 
-/** RAG chunk metadata. 모든 키는 optional — 백엔드 변경/구버전 응답에서도 안전. */
+/** RAG chunk metadata. 모든 키는 optional — 백엔드 변경/구버전 응답에서도 안전.
+ *  CASE 의 경우 Python 어댑터(`ai/generate_rag/5-2.insert_cases_e5.py`)가 snake_case 로 적재하므로
+ *  snake_case alias 도 함께 노출됨. 사용 시 metaStrAny() 헬퍼로 두 표기법을 한 번에 처리. */
 export interface EvidenceMetadata {
   sourceType?: string;
+  source_type?: string;             // CASE adapter (snake_case)
   lawMst?: string | number;
   lawId?: string;
   lawNameKr?: string;
@@ -50,12 +53,23 @@ export interface EvidenceMetadata {
   promulgateDate?: string;
   articleNo?: string | number;
   articleTitle?: string;
+  // CASE: camelCase
   caseNumber?: string;
   court?: string;
   judgmentDate?: string;
   caseType?: string;
   section?: string;
+  // CASE: snake_case alias (Python adapter)
+  case_number?: string;
+  case_name?: string;
+  decision_date?: string;
+  text_type?: string;
+  referenced_laws?: string;
+  source_url?: string;
+  summary?: string;
+  // 공통
   chunkIndex?: number;
+  chunk_index?: number;
   chunkingStrategy?: string;
   embeddingProvider?: string;
   embeddingModel?: string;
@@ -76,10 +90,60 @@ function metaStr(meta: EvidenceMetadata | undefined, key: keyof EvidenceMetadata
   return String(v);
 }
 
+/* 여러 키 후보 중 처음 발견되는 non-empty 값 (CASE snake_case ↔ camelCase 호환). */
+function metaStrAny(meta: EvidenceMetadata | undefined, ...keys: string[]): string {
+  if (!meta) return "";
+  for (const k of keys) {
+    const v = (meta as Record<string, unknown>)[k];
+    if (v !== null && v !== undefined) {
+      const s = String(v);
+      if (s.length > 0) return s;
+    }
+  }
+  return "";
+}
+
 /* score(0~1) → 사람이 읽기 쉬운 라벨. */
 function formatScore(score: number | undefined): string {
   if (typeof score !== "number" || !isFinite(score)) return "";
   return `${(score * 100).toFixed(0)}%`;
+}
+
+/**
+ * CASE chunk 의 text_type (backend metadata) → 사용자 친화 한글 라벨.
+ * 본문/판결요지/판시사항/참조조문 등 — title 의 sectionLabel 과 별개로 카드 상단 작은 배지로 활용 가능.
+ */
+function humanizeTextType(textType: string): string {
+  if (!textType) return "";
+  switch (textType) {
+    case "body": return "판례 본문";
+    case "holding": case "summary": return "판결요지";
+    case "issue": case "issues": return "판시사항";
+    case "referenced_laws": return "참조조문";
+    case "referenced_cases": return "참조판례";
+    case "meta": return "메타정보";
+    default: return "";
+  }
+}
+
+/**
+ * body_status 원시값 (backend 진단 메타) → 사용자 친화 한글 문구.
+ * 빈 문자열 또는 "ok" 면 표시 안 함 (정상 case 이므로 라벨 불필요).
+ */
+function humanizeBodyStatus(bodyStatus: string): string {
+  if (!bodyStatus || bodyStatus === "ok") return "";
+  switch (bodyStatus) {
+    case "skip:external-data-source":
+      return "본문 미확보 · 외부 출처";
+    case "empty-root:Law":
+    case "all-empty":
+      return "본문 미확보";
+    case "xml-parse-error":
+      return "본문 파싱 실패";
+    default:
+      // 모르는 status — "본문 미확보" 로 보수적 표시 (원시값 노출 X)
+      return "본문 미확보";
+  }
 }
 
 /* ── 개별 Evidence 아이템 ── */
@@ -95,6 +159,19 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
   const deptName = metaStr(ev.metadata, "deptName") || ev.articleOrCourt || "";
   const enforceDate = metaStr(ev.metadata, "enforceDate");
   const scoreLabel = formatScore(ev.score);
+
+  // CASE 전용 상태 라벨 (카드 요약 행에 한눈에 보이도록 표시) — 닫힌 상태에서도 본문 vs 메타 구분
+  const caseTextType = !isLaw ? metaStrAny(ev.metadata, "text_type", "section") : "";
+  const caseBodyStatus = !isLaw ? metaStrAny(ev.metadata, "body_status") : "";
+  const caseDataSource = !isLaw ? metaStrAny(ev.metadata, "data_source") : "";
+  // "참고용 메타" 판정 — 데이터 출처가 빈값('') 이거나 '대법원' 같은 법제처 직영이면 정상 본문 case.
+  // 외부 시스템(예: 국세법령정보시스템) 또는 본문이 명시적으로 비어 있는 경우만 ref-only 로 표시.
+  // (data_source 가 채워졌다는 사실만으로 ref-only 판정하지 않음 — 직전 버그 수정)
+  const EXTERNAL_DATA_SOURCES = new Set<string>(["국세법령정보시스템"]);
+  const caseBodyMissing = caseBodyStatus !== "" && caseBodyStatus !== "ok";
+  const caseFromExternalSystem = caseDataSource !== "" && EXTERNAL_DATA_SOURCES.has(caseDataSource);
+  const caseIsReferenceOnly = !isLaw && (caseBodyMissing || caseFromExternalSystem);
+  const caseTextTypeLabel = !isLaw && !caseIsReferenceOnly ? humanizeTextType(caseTextType) : "";
 
   const articleLabel = articleNo
     ? `제${articleNo}조${articleTitle ? `(${articleTitle})` : ""}`
@@ -138,18 +215,57 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
                 관련도 {scoreLabel}
               </span>
             )}
+            {/* CASE: 본문 풍부 (text_type=body/holding/issue/...) 시 양성 라벨, 메타 only 시 amber 경고 */}
+            {caseTextTypeLabel && (
+              <span
+                className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100 shrink-0"
+                title="이 판례 카드의 본문 종류"
+              >
+                {caseTextTypeLabel}
+              </span>
+            )}
+            {caseIsReferenceOnly && (
+              <span
+                className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 shrink-0"
+                title="본문이 확보되지 않은 참고용 메타 카드"
+              >
+                참고용 메타
+              </span>
+            )}
           </div>
-          {(deptName || ev.referenceId || articleLabel) && (
-            <p className="text-xs text-gray-500 mt-0.5">
-              {isLaw && articleLabel
-                ? articleLabel
-                : isLaw
-                ? "소관: "
-                : "법원: "}
-              {!articleLabel && deptName ? deptName : ""}
-              {ev.referenceId && !articleLabel ? ` | ${ev.referenceId}` : ""}
-            </p>
-          )}
+          {/* 보조 텍스트 — 빈값 라벨이 노출되지 않도록 보호.
+              LAW: 조문 또는 "소관: 부처명"
+              CASE: 법원명 + 사건번호 (법원/사건번호 둘 다 빈값이면 행 자체 숨김) */}
+          {(() => {
+            // LAW 흐름: 조문 라벨 우선, 없으면 소관부처
+            if (isLaw) {
+              if (articleLabel) {
+                return (
+                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{articleLabel}</p>
+                );
+              }
+              if (deptName) {
+                return (
+                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
+                    소관: {deptName}
+                  </p>
+                );
+              }
+              return null;
+            }
+            // CASE 흐름: 법원 / 사건번호 둘 다 비어 있으면 행 숨김
+            const courtName = deptName; // CASE 의 articleOrCourt = court
+            const caseNumber = ev.referenceId;
+            if (!courtName && !caseNumber) return null;
+            const parts: string[] = [];
+            if (courtName) parts.push(courtName);
+            if (caseNumber) parts.push(String(caseNumber));
+            return (
+              <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
+                {parts.join(" | ")}
+              </p>
+            );
+          })()}
         </div>
 
         {/* 액션 버튼 */}
@@ -231,6 +347,71 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
               </div>
             </div>
           )}
+
+          {/* CASE 전용: 선고일 + 참조조문 (snake_case/camelCase 양쪽 fallback) */}
+          {!isLaw && (() => {
+            const decisionDate = metaStrAny(ev.metadata, "decision_date", "judgmentDate");
+            const referencedLaws = metaStrAny(ev.metadata, "referenced_laws");
+            const textType = metaStrAny(ev.metadata, "text_type", "section");
+            const bodyStatus = metaStrAny(ev.metadata, "body_status");
+            const dataSource = metaStrAny(ev.metadata, "data_source");
+            // "참고용 메타" 판정 — 카드 요약 행과 동일 정책 유지.
+            //   * body_status 가 비어있지 않고 "ok" 가 아닌 경우 → 본문 미확보
+            //   * data_source 가 명시적 외부 시스템(국세법령정보시스템)인 경우만
+            //   * data_source 가 "" 또는 "대법원" 등 법제처 직영이면 정상 — ref-only 아님
+            const EXTERNAL_DATA_SOURCES_INNER = new Set<string>(["국세법령정보시스템"]);
+            const bodyMissing = bodyStatus !== "" && bodyStatus !== "ok";
+            const fromExternal = dataSource !== "" && EXTERNAL_DATA_SOURCES_INNER.has(dataSource);
+            const isReferenceOnly = bodyMissing || fromExternal;
+            if (!decisionDate && !referencedLaws && !textType && !isReferenceOnly) return null;
+            return (
+              <div className="space-y-1">
+                {decisionDate && (
+                  <div className="flex items-start gap-2 text-xs">
+                    <FileText className="w-3.5 h-3.5 text-gray-400 mt-0.5" />
+                    <div>
+                      <span className="text-gray-500">선고일:</span>
+                      <span className="font-medium text-gray-900 ml-1">{decisionDate}</span>
+                    </div>
+                  </div>
+                )}
+                {textType && (
+                  <div className="flex items-start gap-2 text-xs">
+                    <Tag className="w-3.5 h-3.5 text-gray-400 mt-0.5" />
+                    <div>
+                      <span className="text-gray-500">구분:</span>
+                      <span className="font-medium text-gray-700 ml-1">
+                        {humanizeTextType(textType) || textType}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {referencedLaws && (
+                  <div className="flex items-start gap-2 text-xs">
+                    <BookOpen className="w-3.5 h-3.5 text-gray-400 mt-0.5" />
+                    <div>
+                      <span className="text-gray-500">참조조문:</span>
+                      <p className="text-gray-700 mt-0.5 leading-relaxed">{referencedLaws}</p>
+                    </div>
+                  </div>
+                )}
+                {isReferenceOnly && (
+                  <div className="flex items-start gap-2 text-xs">
+                    <Info className="w-3.5 h-3.5 text-amber-500 mt-0.5" />
+                    <div>
+                      <span className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">
+                        참고용 메타
+                      </span>
+                      <span className="text-gray-600 ml-1.5">
+                        {humanizeBodyStatus(bodyStatus) || "본문 미확보, 메타 기반 참고 결과"}
+                        {dataSource ? ` · 출처: ${dataSource}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 인용 본문 (RAG chunk) */}
           {ev.quotedText && (

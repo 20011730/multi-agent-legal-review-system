@@ -58,12 +58,30 @@ public class EvidenceAssembler {
                     : ("제" + articleNo + "조");
             articleOrCourt = c.metaString("department");
         } else {
-            String caseTitle = c.metaString("title");
-            String section = c.metaString("section");
+            // ── CASE 매핑 (snake_case 우선 / camelCase fallback — 어댑터 호환) ──
+            //   Python 적재(`ai/generate_rag/5-2.insert_cases_e5.py`) 는 snake_case 키를 쓴다:
+            //     case_name / case_number / court / decision_date / source_url / referenced_laws / text_type
+            //   향후 backend 측 ingestion이 camelCase로 적재할 경우도 함께 지원.
+            String caseTitle = c.metaFirstOf("case_name", "caseName", "title");
+            String section   = c.metaFirstOf("text_type", "section");
             String sectionLabel = sectionLabel(section);
+
+            // 1) title fallback chain: caseName → caseName+sectionLabel → caseNumber → "(판례)"
+            if (caseTitle == null || caseTitle.isBlank()) {
+                String caseNumber = c.metaFirstOf("case_number", "caseNumber");
+                String court = c.metaFirstOf("court");
+                String date = c.metaFirstOf("decision_date", "judgmentDate");
+                if (!caseNumber.isBlank()) {
+                    caseTitle = court.isBlank() ? caseNumber : (court + " " + caseNumber);
+                } else if (!court.isBlank() || !date.isBlank()) {
+                    caseTitle = (court + " " + date).trim();
+                } else {
+                    caseTitle = "(판례)";
+                }
+            }
             title = caseTitle + (sectionLabel.isEmpty() ? "" : " · " + sectionLabel);
-            referenceId = c.metaString("caseNumber");
-            articleOrCourt = c.metaString("court");
+            referenceId = c.metaFirstOf("case_number", "caseNumber");
+            articleOrCourt = c.metaFirstOf("court");
         }
 
         String chunkText = c.getChunkText() == null ? "" : c.getChunkText();
@@ -71,7 +89,9 @@ public class EvidenceAssembler {
                 ? chunkText.substring(0, SUMMARY_MAX_CHARS) + "..."
                 : chunkText;
 
-        String url = c.metaString("url");
+        // url fallback: camelCase 'url' → snake_case 'source_url'
+        // source_url 에 외부 API의 OC 값이 들어 있을 가능성을 차단하기 위해 마스킹.
+        String url = maskOcInUrl(c.metaFirstOf("url", "source_url"));
         String relevanceReason = formatRelevance(c.getDistance());
 
         EvidenceDto dto = new EvidenceDto(
@@ -106,18 +126,38 @@ public class EvidenceAssembler {
         if (src != null) {
             // 우선순위 키만 정렬해서 응답에 일관된 순서로 노출
             String[] orderedKeys = {
-                    "sourceType", "lawMst", "lawId", "lawNameKr", "lawTypeName",
+                    // 공용
+                    "sourceType", "source_type",
+                    // LAW (camelCase 위주)
+                    "lawMst", "lawId", "lawNameKr", "lawTypeName",
                     "deptName", "deptCode", "enforceDate", "promulgateDate",
                     "articleNo", "articleTitle",
-                    "section", "caseNumber", "court", "judgmentDate", "caseType",
-                    "chunkIndex", "chunkingStrategy",
+                    // CASE (camelCase + snake_case 둘 다 노출 — adapter 차이 대응)
+                    "section", "text_type",
+                    "caseNumber", "case_number",
+                    "caseName", "case_name",
+                    "court",
+                    "judgmentDate", "decision_date",
+                    "caseType",
+                    "referenced_laws", "summary",
+                    // 본문 부재 case 진단용 (5-1/5-3/5-2 흐름이 넣어주는 메타)
+                    "body_status", "detail_root", "data_source", "case_type_name",
+                    // 공통
+                    "chunkIndex", "chunk_index", "chunkingStrategy",
                     "embeddingProvider", "embeddingModel",
-                    "url", "shortName", "revisionType", "referenceId"
+                    "url",
+                    "shortName", "revisionType", "referenceId"
             };
             for (String k : orderedKeys) {
                 if (src.containsKey(k) && src.get(k) != null && !src.get(k).toString().isEmpty()) {
+                    // source_url 은 OC 마스킹 후 노출 (별도 처리)
                     out.put(k, src.get(k));
                 }
+            }
+            // source_url 별도 처리 — OC 마스킹
+            Object srcUrl = src.get("source_url");
+            if (srcUrl != null && !srcUrl.toString().isEmpty()) {
+                out.put("source_url", maskOcInUrl(srcUrl.toString()));
             }
         }
         out.put("chunkId", c.getChunkId());
@@ -127,11 +167,24 @@ public class EvidenceAssembler {
     private static String sectionLabel(String section) {
         if (section == null) return "";
         return switch (section) {
-            case "issues" -> "판시사항";
-            case "summary" -> "판결요지";
+            // backend (camelCase) 및 ai/generate_rag (snake_case) 양쪽 키 지원
+            case "issues", "issue" -> "판시사항";
+            case "summary", "holding" -> "판결요지";
             case "reasoning" -> "판단이유";
+            case "referenced_laws" -> "참조조문";
+            case "body" -> "판례본문";
+            case "meta" -> "메타정보";
             default -> "";
         };
+    }
+
+    /**
+     * URL에 ``OC=<값>`` 또는 ``oc=<값>`` 쿼리 파라미터가 포함되어 있으면 ``OC=<MASKED>`` 로 치환.
+     * 외부 API key가 화면/응답에 노출되는 것을 방지.
+     */
+    private static String maskOcInUrl(String url) {
+        if (url == null || url.isEmpty()) return url;
+        return url.replaceAll("([?&][Oo][Cc])=[^&#]*", "$1=<MASKED>");
     }
 
     /**

@@ -1,3 +1,4 @@
+import os
 import psycopg2
 import chromadb
 import re
@@ -8,7 +9,41 @@ from sentence_transformers import SentenceTransformer
 # 1. 설정 및 커스텀 임베딩 함수 (E5 로컬 모델)
 # ==========================================
 # DB / Chroma / E5 모델 이름은 환경변수로 분리 (config.py가 .env 자동 로드)
-from config import DB_CONFIG, CHROMA_DB_DIR, E5_MODEL_NAME  # noqa: F401
+from config import (  # noqa: F401
+    DB_CONFIG,
+    CHROMA_CLIENT_MODE,
+    CHROMA_DB_DIR,
+    CHROMA_HOST,
+    CHROMA_PORT,
+    CHROMA_COLLECTION,
+    E5_MODEL_NAME,
+    EMBEDDING_DIMENSION,
+    describe_chroma_target,
+)
+
+# ──────────────────────────────────────────────────────────────
+# ChromaDB chunk ID 생성 규칙 (duplicate ID 방지)
+#   포맷: law_{reference_id}_{article_no_normalized}_{occurrence:04d}
+#   - article_no_normalized: 공백/슬래시/특수문자 → '_' 치환, 비어있으면 'unknown'
+#   - occurrence: 같은 (reference_id, article_no) 조합 내 0-based 등장 순서
+#     (본칙/부칙에서 같은 "제1조"가 여러 번 등장해도 충돌 방지)
+# ──────────────────────────────────────────────────────────────
+_ARTICLE_NO_SAFE_RE = re.compile(r"[^0-9A-Za-z가-힣]+")
+
+
+def _normalize_article_no(article_no: str) -> str:
+    """ChromaDB id에 안전하게 쓸 수 있도록 article_no를 정규화.
+
+    - None 또는 공백 → 'unknown'
+    - 공백/슬래시/특수문자 → '_'
+    - 연속된 '_' 는 하나로 축약
+    - 양끝 '_' 제거
+    """
+    if not article_no:
+        return "unknown"
+    s = _ARTICLE_NO_SAFE_RE.sub("_", str(article_no))
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "unknown"
 
 class E5EmbeddingFunction(EmbeddingFunction):
     """ChromaDB용 커스텀 E5 임베딩 함수"""
@@ -22,25 +57,82 @@ class E5EmbeddingFunction(EmbeddingFunction):
         embeddings = self.model.encode(passages, normalize_embeddings=True)
         return embeddings.tolist()
 
+def _build_chroma_client():
+    """CHROMA_CLIENT_MODE 환경변수에 따라 local PersistentClient 또는 HttpClient 생성.
+
+    - "local" (기본): chromadb.PersistentClient(path=CHROMA_DB_DIR)
+                      ./chroma_data 파일 저장소 — backend가 사용하는 Docker ChromaDB와 분리
+    - "http"        : chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+                      Docker ChromaDB (보통 localhost:8000)에 직접 적재
+                      → 운영 데이터에 영향이 가는 모드이므로 반드시 명시적으로 설정해야 함
+
+    Returns:
+        chromadb client 인스턴스
+    """
+    mode = CHROMA_CLIENT_MODE
+    if mode == "http":
+        print(f"   🌐 Chroma 모드: HTTP (host={CHROMA_HOST}, port={CHROMA_PORT})")
+        return chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+    elif mode == "local":
+        print(f"   📁 Chroma 모드: LOCAL PersistentClient (path={CHROMA_DB_DIR})")
+        return chromadb.PersistentClient(path=CHROMA_DB_DIR)
+    else:
+        raise RuntimeError(
+            f"알 수 없는 CHROMA_CLIENT_MODE='{mode}'. 'local' 또는 'http'만 허용됩니다."
+        )
+
+
 def reset_and_setup_chroma():
-    """ChromaDB를 완전히 초기화하고 새 컬렉션을 생성합니다."""
-    print("🧹 [1/3] ChromaDB 로컬 스토리지를 초기화합니다...")
-    chroma_client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
-    
-    # 기존에 만들어둔 컬렉션이 있다면 싹 지웁니다.
-    try:
-        chroma_client.delete_collection(name="laws")
-        print("   🗑️ 기존 'laws' 컬렉션을 삭제했습니다.")
-    except Exception:
-        print("   ℹ️ 기존 컬렉션이 없어 새로 생성합니다.")
-        
-    # 새로운 빈 컬렉션 생성 및 로컬 E5 임베딩 함수 장착
+    """ChromaDB 컬렉션을 준비합니다.
+
+    안전 모드 (기본):
+        - client는 CHROMA_CLIENT_MODE 환경변수로 결정 ('local' 기본 / 'http' opt-in)
+        - collection 이름은 CHROMA_COLLECTION 환경변수 ('laws_e5' 기본)
+          ※ backend가 사용하는 기존 'laws' (384차원, simple-hash)와 차원/임베딩이 다르므로
+            반드시 다른 이름으로 적재해야 함. 기본값 'laws_e5'를 그대로 두는 것을 권장.
+        - get_or_create_collection — 기존 데이터 보존, upsert 동작
+
+    초기화 모드 (명시 opt-in):
+        CHROMA_RESET_ON_START=true 일 때만 delete_collection 수행.
+        ⚠️ HTTP 모드 + reset=true 조합은 Docker ChromaDB의 해당 collection을 실제로 삭제합니다.
+           기존 'laws' 컬렉션을 보호하기 위해 CHROMA_COLLECTION이 'laws'이면 reset을 거부합니다.
+    """
+    reset_flag = os.getenv("CHROMA_RESET_ON_START", "false").lower() == "true"
+    collection_name = CHROMA_COLLECTION
+
+    print(f"🧰 [1/3] ChromaDB 컬렉션 준비 중 (target={describe_chroma_target()}, reset={reset_flag})...")
+
+    # 안전 가드: backend가 운영 중인 'laws' 컬렉션을 실수로 reset하지 않도록 차단
+    if reset_flag and collection_name == "laws":
+        raise RuntimeError(
+            "안전 가드: CHROMA_COLLECTION='laws'는 backend 운영 컬렉션이므로 reset을 거부합니다. "
+            "E5 적재용 컬렉션은 CHROMA_COLLECTION=laws_e5 (또는 다른 이름)을 사용하세요."
+        )
+
+    chroma_client = _build_chroma_client()
     local_ef = E5EmbeddingFunction()
-    collection = chroma_client.create_collection(
-        name="laws",
-        embedding_function=local_ef,
-        metadata={"hnsw:space": "cosine"}
-    )
+
+    if reset_flag:
+        try:
+            chroma_client.delete_collection(name=collection_name)
+            print(f"   🗑️ 기존 '{collection_name}' 컬렉션을 삭제했습니다. (CHROMA_RESET_ON_START=true)")
+        except Exception:
+            print(f"   ℹ️ 삭제할 기존 '{collection_name}' 컬렉션이 없습니다.")
+        collection = chroma_client.create_collection(
+            name=collection_name,
+            embedding_function=local_ef,
+            metadata={"hnsw:space": "cosine"},
+        )
+    else:
+        # 기존 컬렉션 유지 — upsert로 중복 ID는 덮어쓰기, 새 ID만 추가
+        collection = chroma_client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=local_ef,
+            metadata={"hnsw:space": "cosine"},
+        )
+        print(f"   ♻️ 기존 '{collection_name}' 컬렉션을 그대로 사용합니다 (upsert 모드).")
+
+    print(f"   📐 임베딩 차원: {EMBEDDING_DIMENSION} (모델={E5_MODEL_NAME})")
     return collection
 
 def parse_articles(raw_content):
@@ -111,24 +203,56 @@ def run_full_embedding_pipeline():
                     continue
 
                 ids, documents, metadatas = [], [], []
-                
+
+                # ──────────────────────────────────────────────────────
+                # ChromaDB chunk ID는 한 row(법령) 내부에서도 본칙/부칙
+                # 등으로 같은 articleNo("제1조")가 반복될 수 있으므로
+                # (reference_id, article_no) 조합별 occurrence 카운터로
+                # 항상 유일성을 보장한다.
+                # ──────────────────────────────────────────────────────
+                occurrence_map: dict[tuple, int] = {}
+
                 # ChromaDB 스키마 구조에 완벽히 맞춤
                 for article in articles:
-                    ids.append(f"law_{reference_id}_{article['articleNo']}")
+                    raw_article_no = article.get("articleNo") or ""
+                    safe_article_no = _normalize_article_no(raw_article_no)
+                    key = (reference_id, safe_article_no)
+                    occ = occurrence_map.get(key, 0)
+                    occurrence_map[key] = occ + 1
+
+                    chunk_id = f"law_{reference_id}_{safe_article_no}_{occ:04d}"
+                    ids.append(chunk_id)
                     documents.append(article['text'])
                     metadatas.append({
                         "rowId": row_id,                    # 핵심 연결 고리 (PostgreSQL PK)
                         "sourceType": "LAW",
                         "title": title,
                         "shortName": short_name or "",
-                        "articleNo": article['articleNo'],
+                        "articleNo": raw_article_no,
+                        "articleNoNormalized": safe_article_no,
+                        "occurrence": occ,
                         "articleTitle": article['articleTitle'],
                         "department": department or "",
                         "enforceDate": enforce_date or "",
                         "revisionType": revision_type or "",
                         "url": url or ""
                     })
-                
+
+                # 안전 검사: 같은 batch(=row) 내 id 중복은 절대 없어야 함
+                # ChromaDB upsert에 중복 id가 섞이면 즉시 InvalidArgumentError 발생하므로
+                # 그 전에 어느 reference_id / article_no에서 충돌이 났는지 명확히 보고한다.
+                if len(ids) != len(set(ids)):
+                    seen, dups = set(), []
+                    for cid in ids:
+                        if cid in seen:
+                            dups.append(cid)
+                        seen.add(cid)
+                    raise RuntimeError(
+                        f"[BATCH DUP] reference_id={reference_id} 내 chunk ID 중복 발생. "
+                        f"총 {len(ids)}건 중 unique {len(set(ids))}건. "
+                        f"중복 샘플: {dups[:5]}"
+                    )
+
                 # 벡터로 변환하여 ChromaDB에 적재
                 chroma_collection.upsert(
                     ids=ids,
