@@ -8,6 +8,20 @@ import { Textarea } from "../components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { AlertCircle, ArrowLeft, ArrowRight, Building2, Eye, FileText, FolderOpen, MessageSquare, Sparkles, Upload } from "lucide-react";
+import { SuggestionChips, appendSuggestion } from "../components/SuggestionChips";
+
+// 정적 추천 문구 — 정/규칙 기반. 사용자가 빈 입력창에서 출발점을 잡도록 보조.
+// reviewType / participationMode 별로 micro-맞춤 가능하지만 1차 MVP 는 공통 set.
+const SITUATION_SUGGESTIONS = [
+  "투자 유치를 앞두고 IR 자료/공시 문구의 법적 리스크를 점검하려 합니다.",
+  "신규 출시 직전 마케팅 문구의 과장 광고/허위 광고 위험을 미리 진단하고자 합니다.",
+  "계약 갱신 협상 전 핵심 조항(해지/면책/배상 한도) 의 불리한 조건을 확인하고 싶습니다.",
+];
+const CONTENT_SUGGESTIONS = [
+  "본 서비스는 업계 최저가를 보장하며 어떠한 사용자에게도 동일한 혜택을 제공합니다.",
+  "제1조 (계약의 해지) — 당사는 사전 통지 없이 본 계약을 언제든지 해지할 수 있습니다.",
+  "결제는 자동 갱신되며, 환불은 어떠한 사유로도 제공되지 않습니다.",
+];
 
 const personaCategories = [
   {
@@ -378,6 +392,13 @@ export function InputPage() {
                       className="min-h-[120px]"
                       placeholder="현재 상황, 배경, 쟁점, 우려사항을 구체적으로 적어주세요."
                     />
+                    <SuggestionChips
+                      title="자주 입력하는 상황 예시"
+                      items={SITUATION_SUGGESTIONS}
+                      onApply={(t) =>
+                        setFormData((prev) => ({ ...prev, situation: appendSuggestion(prev.situation, t) }))
+                      }
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="content">검토 원문/문구 *</Label>
@@ -387,6 +408,13 @@ export function InputPage() {
                       onChange={(e) => setFormData({ ...formData, content: e.target.value })}
                       className="min-h-[180px]"
                       placeholder="계약 조항, 공지 문구, 대외 문서의 핵심 내용을 입력하세요."
+                    />
+                    <SuggestionChips
+                      title="검토 대상 문구 예시"
+                      items={CONTENT_SUGGESTIONS}
+                      onApply={(t) =>
+                        setFormData((prev) => ({ ...prev, content: appendSuggestion(prev.content, t) }))
+                      }
                     />
                   </div>
                 </CardContent>
