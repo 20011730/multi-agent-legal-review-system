@@ -9,7 +9,8 @@ interface MarketingLayoutProps {
   children: React.ReactNode;
 }
 
-const marketingMenus = [
+// Phase 9.9 — "지원사업" 메뉴 제거. 메인 페이지 진입 동선은 히어로 보조 CTA + 4번째 진입 카드로 일원화.
+const marketingMenus: Array<{ label: string; path: string; highlight?: boolean }> = [
   { label: "서비스 소개", path: "/about" },
   { label: "전문분야", path: "/domains" },
   { label: "핵심 기술", path: "/technology" },
@@ -82,6 +83,23 @@ export function MarketingLayout({ title, description, children }: MarketingLayou
           <nav className="font-menu hidden lg:flex items-center gap-7 text-[14px]">
             {marketingMenus.map((menu) => {
               const isActive = activePath === menu.path;
+              if (menu.highlight) {
+                // 신규 진입 동선 강조 — 라운드 배지 형태
+                return (
+                  <button
+                    key={menu.path}
+                    onClick={() => navigate(menu.path)}
+                    className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[13px] font-medium transition ${
+                      isActive
+                        ? "border-[#1E3A8A] bg-[#1E3A8A] text-white"
+                        : "border-[#1E3A8A]/40 bg-[#1E3A8A]/5 text-[#1E3A8A] hover:bg-[#1E3A8A] hover:text-white"
+                    }`}
+                    aria-label="스타트업 지원사업 큐레이션 페이지"
+                  >
+                    {menu.label}
+                  </button>
+                );
+              }
               return (
                 <button
                   key={menu.path}

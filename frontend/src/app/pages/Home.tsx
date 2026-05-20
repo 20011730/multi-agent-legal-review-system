@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
+import { HomeStartupSupportSection } from "../components/startup/HomeStartupSupportSection";
 import {
   Scale,
   FileCheck,
@@ -31,6 +32,7 @@ export function Home() {
   const [activeSection, setActiveSection] = useState("benefits");
   const [visibleSections, setVisibleSections] = useState<Record<string, boolean>>({
     benefits: false,
+    startup: false,
     specifications: false,
     technology: false,
     trust: false,
@@ -228,6 +230,13 @@ export function Home() {
               서비스 소개
             </button>
             <button
+              onClick={() => navigate("/startup-support")}
+              className="relative pb-1 transition-colors after:absolute after:left-0 after:-bottom-[2px] after:h-[1.5px] after:w-full after:origin-left after:rounded-full after:bg-[#1E3A8A] after:scale-x-0 after:transition-transform after:duration-300 after:ease-out text-[#1E293B] hover:text-[#1E3A8A] hover:after:scale-x-100"
+              aria-label="스타트업 지원사업 큐레이션 페이지로 이동"
+            >
+              지원사업
+            </button>
+            <button
               onClick={() => scrollToSection("specifications")}
               className={`relative pb-1 transition-colors after:absolute after:left-0 after:-bottom-[2px] after:h-[1.5px] after:w-full after:origin-left after:rounded-full after:bg-[#1E3A8A] after:transition-transform after:duration-300 after:ease-out ${
                 activeSection === "specifications"
@@ -360,7 +369,7 @@ export function Home() {
           </p>
 
           <div
-            className={`flex justify-center mb-12 transition-all duration-[1400ms] delay-250 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            className={`flex flex-wrap justify-center gap-3 mb-12 transition-all duration-[1400ms] delay-250 ease-[cubic-bezier(0.22,1,0.36,1)] ${
               isIntroVisible
                 ? "opacity-100 blur-0 translate-y-0"
                 : "opacity-0 blur-[5px] translate-y-2"
@@ -368,7 +377,7 @@ export function Home() {
           >
             <Button
               size="lg"
-              className="h-12 min-w-[250px] px-6 rounded-full inline-flex items-center justify-center gap-2 whitespace-nowrap border border-[#64748B]/45 bg-white text-[#64748B] hover:bg-[#1E3A8A] hover:border-[#1E3A8A] hover:text-white transition-all duration-300 shadow-sm hover:shadow-[0_10px_24px_rgba(30,58,138,0.22)]"
+              className="h-12 min-w-[240px] px-6 rounded-full inline-flex items-center justify-center gap-2 whitespace-nowrap border border-[#64748B]/45 bg-white text-[#64748B] hover:bg-[#1E3A8A] hover:border-[#1E3A8A] hover:text-white transition-all duration-300 shadow-sm hover:shadow-[0_10px_24px_rgba(30,58,138,0.22)]"
               onClick={() => {
                 if (currentUser) {
                   navigate("/input");
@@ -378,6 +387,15 @@ export function Home() {
               }}
             >
               법률 리스크 진단하기
+              <ArrowRight className="w-5 h-5 text-current transition-colors" />
+            </Button>
+            {/* 보조 CTA — 스타트업 지원사업 큐레이션 (Phase 9.7) */}
+            <Button
+              size="lg"
+              className="h-12 min-w-[240px] px-6 rounded-full inline-flex items-center justify-center gap-2 whitespace-nowrap bg-[#1E3A8A] text-white border border-[#1E3A8A] hover:bg-[#16306f] transition-all duration-300 shadow-sm hover:shadow-[0_10px_24px_rgba(30,58,138,0.32)]"
+              onClick={() => navigate("/startup-support")}
+            >
+              지원사업 찾아보기
               <ArrowRight className="w-5 h-5 text-current transition-colors" />
             </Button>
           </div>
@@ -435,6 +453,9 @@ export function Home() {
             </Card>
           </div>
         </section>
+
+        {/* 스타트업 지원사업 큐레이션 미리보기 (Phase 9.7 — reveal gate 제거, 항상 표시) */}
+        <HomeStartupSupportSection revealClass="" />
 
         <section id="specifications" className="scroll-mt-24 py-14 md:py-16">
           <p className={`text-sm uppercase tracking-[0.22em] text-slate-500 mb-4 ${getRevealClass("specifications")}`}>전문분야</p>

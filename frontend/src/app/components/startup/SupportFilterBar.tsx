@@ -21,7 +21,13 @@ interface SupportFilterBarProps {
   onReset?: () => void;
 }
 
-const STATUS_OPTIONS: Array<SupportStatus | "전체"> = ["전체", "마감임박", "모집중", "상시모집"];
+const STATUS_OPTIONS: Array<SupportStatus | "전체"> = [
+  "전체",
+  "모집중",
+  "마감임박",
+  "상시모집",
+  "모집마감",
+];
 
 function chipClass(active: boolean): string {
   return active

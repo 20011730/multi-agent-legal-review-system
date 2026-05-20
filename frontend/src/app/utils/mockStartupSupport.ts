@@ -23,13 +23,13 @@ export type SupportCategory =
   | "법률·세무·노무"
   | "투자/IR";
 
-export type SupportStatus = "마감임박" | "모집중" | "상시모집" | "마감";
+export type SupportStatus = "마감임박" | "모집중" | "상시모집" | "모집마감" | "확인 필요" | "마감";
 
 export interface SupportItem {
   id: string;
   title: string;
   organization: string;          // 주관기관
-  category: SupportCategory;
+  category: SupportCategory;     // ← inferred(추론) 카테고리 (필터 기준)
   region: string;                // 전국 / 서울 / 경기 / ...
   target: string;                // 지원대상 (예: 예비창업자, 7년 이내 창업기업 등)
   fieldSummary: string;          // 지원분야 요약
@@ -38,6 +38,12 @@ export interface SupportItem {
   deadline: string;              // YYYY.MM.DD 또는 "상시"
   applyUrl: string;              // 실제 신청 페이지 (mock URL OK)
   recommendReason: string;       // 추천 이유 — 비서/큐레이션 톤
+  /** provider 원본 카테고리 (Phase 9.6, 없을 수 있음) */
+  rawCategory?: string;
+  /** backend 가 제시한 추천/insight 힌트 카테고리 (Phase 9.6, 없을 수 있음) */
+  aiInsightHint?: string;
+  /** 항목별 출처 (Phase 9.8): "k-startup-news" / "k-startup-service" / "mock" */
+  itemSource?: string;
 }
 
 export const SUPPORT_CATEGORIES: SupportCategory[] = [

@@ -36,4 +36,12 @@ public interface StartupSupportProvider {
     default String sourceName() {
         return "unknown";
     }
+
+    /**
+     * upstream(공공데이터/API 원본) 총 건수. 알 수 없으면 0.
+     * KStartup provider 는 news API 의 totalCount 를 반환.
+     */
+    default int originTotal() {
+        return 0;
+    }
 }

@@ -85,14 +85,31 @@ app:
       enabled: ${RAG_EXPERIMENT_ENABLED:false}
       tag: ${RAG_EXPERIMENT_TAG:default}
 
-# ── 스타트업 지원사업 (Phase 7 provider 확장 준비) ───────────────────
-# provider: mock (기본) | k-startup (외부 OpenAPI, skeleton 상태)
-# Phase 7 단계는 mock 유지. k-startup 으로 절체 시 KStartupProvider 안의 HTTP 호출 구현 선행 필요.
+# ── 스타트업 지원사업 (Phase 9: K-Startup 2개 API 키 분리) ──────────────
+# provider: mock (기본) | k-startup (외부 OpenAPI)
+# 공공데이터포털에서 승인받은 API 2개를 각각 service/news 로 분리하여 관리.
+#   1) service: 창업진흥원_K-Startup(사업소개/사업공고/콘텐츠 등) 조회서비스
+#   2) news:    중소벤처기업부_K STARTUP 창업소식
+#
+# 환경변수 우선순위 (각 키마다):
+#   새 변수 → 구 변수 (STARTUP_API_KEY/STARTUP_BASE_URL) → 빈 문자열
+# 키가 비어있거나 외부 호출 실패 시 enable-mock-fallback=true 면 mock 데이터로 fallback.
 startup-support:
   provider: ${STARTUP_SUPPORT_PROVIDER:mock}
+  # mock fallback 활성화 (외부 API 미설정/실패 시 mock 15건 반환).
+  # envelope source 가 "mock(fallback)" 으로 변경되어 운영자가 인지 가능.
+  enable-mock-fallback: ${STARTUP_MOCK_FALLBACK:false}
   k-startup:
-    api-key: ${KSTARTUP_API_KEY:}
-    base-url: ${KSTARTUP_BASE_URL:https://www.k-startup.go.kr/openapi}
-    # 외부 API 미구현/실패 시 mock 데이터로 graceful fallback 할지 여부.
-    # 운영 시 true 권장. 단, 응답 envelope 의 source 가 "mock(fallback)" 으로 변경됨.
-    enable-mock-fallback: ${KSTARTUP_MOCK_FALLBACK:false}
+    service:
+      # 창업진흥원 K-Startup 조회서비스 (Phase 9.10 — service01 신규 게이트웨이로 교체).
+      # 기존 kisedKstartupService 는 게이트웨이 측 응답 비정상(500 Unexpected errors) — 신규 service01 게이트웨이 정상.
+      # 파라미터: page / perPage / returnType (pageNo/numOfRows/type 아님).
+      api-key: ${KSTARTUP_SERVICE_API_KEY:${STARTUP_API_KEY:}}
+      base-url: ${KSTARTUP_SERVICE_BASE_URL:${STARTUP_BASE_URL:https://apis.data.go.kr/B552735/kisedKstartupService01}}
+      operation-path: ${KSTARTUP_SERVICE_OPERATION_PATH:/getAnnouncementInformation01}
+    news:
+      # 중소벤처기업부_K STARTUP 창업소식 — odcloud(데이터파일) 형식.
+      # 동일 서비스 ID(15122759) 아래 여러 uddi(데이터셋 스냅샷) 존재. 정상 응답 확인된 uddi 를 기본값으로 둠.
+      api-key: ${KSTARTUP_NEWS_API_KEY:}
+      base-url: ${KSTARTUP_NEWS_BASE_URL:https://api.odcloud.kr/api}
+      operation-path: ${KSTARTUP_NEWS_OPERATION_PATH:/15122759/v1/uddi:4113b9df-32f4-4eaf-ba4b-ef50bd2b4bee}

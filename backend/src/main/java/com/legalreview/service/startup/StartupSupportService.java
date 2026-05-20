@@ -1,30 +1,33 @@
 package com.legalreview.service.startup;
 
 import com.legalreview.dto.startup.StartupSupportItem;
+import com.legalreview.dto.startup.StartupSupportItemView;
 import com.legalreview.dto.startup.StartupSupportListResponse;
 import com.legalreview.dto.startup.StartupSupportListResponse.AppliedFilters;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 /**
- * 스타트업 지원사업 정보 서비스 (Phase 3 — provider 분리).
+ * 스타트업 지원사업 정보 서비스 (Phase 9.6 — enrichment + pagination + sort).
  *
- * Phase 2 까지는 본 서비스가 직접 mock 데이터를 보유했으나, Phase 3 에서는
- * {@link StartupSupportProvider} 인터페이스에 위임한다.
- *
- * 현재 활성 provider: {@link StartupSupportMockProvider} (단일 Bean).
- * 추후 외부 API / DB provider 추가 시 본 서비스 코드는 그대로 두고 provider 만 교체.
- *
- * 향후 확장 포인트 (이번 turn 미구현, 설계만 명시):
- *   - findAll() 결과를 응답 메타 (source / count / lastUpdated) 와 함께 감싸는 ResponseEnvelope 도입 가능.
- *     단, 현재는 frontend StartupSupport.tsx 가 배열을 직접 받는 구조라 응답 형식은 유지.
- *   - 필터 query parameter (category/region/status) 지원 시 본 서비스에 filter(...) 메서드 추가.
- *   - 캐싱 (Caffeine 등) 도입 시 본 서비스 또는 provider 레이어에서 처리.
+ * <p>흐름:
+ * <ol>
+ *   <li>provider 에서 raw items 받음</li>
+ *   <li>각 item 에 대해 inferredCategory + autoStatus 계산 (rawCategory 보존)</li>
+ *   <li>필터 적용 (category 는 inferredCategory 기준)</li>
+ *   <li>sort 적용</li>
+ *   <li>pagination 적용</li>
+ *   <li>{@link StartupSupportItemView} 로 변환하여 envelope 반환</li>
+ * </ol>
  */
 @Service
 @RequiredArgsConstructor
@@ -36,34 +39,134 @@ public class StartupSupportService {
         return provider.findAll();
     }
 
+    /** 단건 조회 — id 검색은 provider 가 담당. */
+    public Optional<StartupSupportItem> findById(String id) {
+        return provider.findById(id);
+    }
+
+    /** 현재 데이터 출처 식별자. */
+    public String currentSource() {
+        return provider.sourceName();
+    }
+
+    public static final int DEFAULT_SIZE = 20;
+    public static final int MAX_SIZE = 100;
+
     /**
-     * 선택적 필터링 (Phase 3 — backend 필터 query parameter 지원).
-     *
-     * 모든 인자가 null/blank 면 {@link #findAll()} 과 동일 결과 (15건 전체).
-     *
-     * 필터 규칙:
-     *   - category: trim 후 정확 일치 (예: "R&D", "법률·세무·노무")
-     *   - status:   trim 후 정확 일치 (예: "마감임박", "모집중", "상시모집")
-     *   - region:   trim 후 정확 일치 또는 item.region 이 "전국" 이면 항상 통과
-     *               (전국 사업은 어느 지역 필터에도 노출되는 것이 자연스러움)
-     *   - keyword:  trim 후 case-insensitive contains 매칭. title/organization/target/
-     *               fieldSummary/recommendReason 중 어느 하나라도 매칭되면 통과
+     * 응답 envelope 생성 (page/size/sort 신규).
+     * @param sort  null/blank → "latest" (deadline 내림차순 + 마감 후순위)
      */
-    public List<StartupSupportItem> findAll(String category, String status, String region, String keyword) {
+    public StartupSupportListResponse findAllEnvelope(
+            String category, String status, String region, String keyword,
+            String sort, Integer pageReq, Integer sizeReq
+    ) {
+        int size = sizeReq == null ? DEFAULT_SIZE : Math.max(1, Math.min(MAX_SIZE, sizeReq));
+        int page = pageReq == null ? 1 : Math.max(1, pageReq);
+        // Phase 9.9 — 기본 정렬을 "activeFirst" (모집중 우선) 로 변경 + 신규 sort key 지원
+        String sortKey = (sort == null || sort.isBlank()) ? "activefirst" : sort.trim().toLowerCase(Locale.KOREA);
+
+        // 1. provider 호출 (전체 — 외부 API 페이지네이션은 provider 내부에서 처리)
+        List<StartupSupportItem> raw = provider.findAll();
+
+        // 2. enrichment (inferred category + auto status)
+        record Enriched(StartupSupportItem base, String inferred, String autoStatus) {}
+        List<Enriched> enriched = new ArrayList<>(raw.size());
+        for (StartupSupportItem it : raw) {
+            String inferred = StartupSupportEnricher.inferCategory(it);
+            String autoStat = StartupSupportEnricher.autoStatus(it);
+            enriched.add(new Enriched(it, inferred, autoStat));
+        }
+
+        // 3. filter
         String cat = normalize(category);
         String st  = normalize(status);
         String rg  = normalize(region);
         String kw  = normalize(keyword);
-        if (cat.isEmpty() && st.isEmpty() && rg.isEmpty() && kw.isEmpty()) {
-            return provider.findAll();
+        String kwLower = kw.toLowerCase(Locale.KOREA);
+        List<Enriched> filtered = new ArrayList<>(enriched.size());
+        for (Enriched e : enriched) {
+            if (!cat.isEmpty() && !cat.equals(e.inferred())) continue;
+            // Phase 9.13 — status=모집중 필터에서는 상시모집 항목도 포함 (상시는 모집중의 하위 성격)
+            if (!st.isEmpty()) {
+                String auto = e.autoStatus();
+                boolean ok = st.equals(auto)
+                        || ("모집중".equals(st) && "상시모집".equals(auto));
+                if (!ok) continue;
+            }
+            StartupSupportItem b = e.base();
+            if (!rg.isEmpty() && !rg.equals(b.region()) && !"전국".equals(b.region())) continue;
+            if (!kw.isEmpty() && !matchesKeyword(b, kwLower)) continue;
+            filtered.add(e);
         }
-        String kwLower = kw.toLowerCase();
-        return provider.findAll().stream()
-                .filter(item -> cat.isEmpty() || cat.equals(item.category()))
-                .filter(item -> st.isEmpty() || st.equals(item.status()))
-                .filter(item -> rg.isEmpty() || rg.equals(item.region()) || "전국".equals(item.region()))
-                .filter(item -> kw.isEmpty() || matchesKeyword(item, kwLower))
-                .collect(Collectors.toList());
+
+        // 4. sort (Phase 9.9 신규 옵션 — activefirst / recentclosed)
+        Comparator<Enriched> byDeadlineAsc = Comparator.comparing(
+                (Enriched e) -> parseDateForSort(e.base().deadline()),
+                Comparator.nullsLast(Comparator.naturalOrder()));
+        Comparator<Enriched> byDeadlineDesc = Comparator.comparing(
+                (Enriched e) -> parseDateForSort(e.base().deadline()),
+                Comparator.nullsLast(Comparator.reverseOrder()));
+        Comparator<Enriched> byStatusGroup = Comparator.comparingInt(
+                (Enriched e) -> StartupSupportEnricher.statusGroupOrder(e.autoStatus()));
+        Comparator<Enriched> comparator = switch (sortKey) {
+            case "deadline" -> // 마감 임박순 — 모집중인 항목의 deadline 오름차순, 마감은 뒤로
+                    byStatusGroup.thenComparing(byDeadlineAsc);
+            case "title" -> Comparator.comparing(
+                    (Enriched e) -> e.base().title() == null ? "" : e.base().title());
+            case "recommend" -> Comparator.comparingInt(
+                    (Enriched e) -> -StartupSupportEnricher.recommendScore(e.base()));
+            case "latest" -> byDeadlineDesc; // 등록일자 desc (현 데이터 deadline=등록일자)
+            case "recentclosed" -> // 최근 마감순 — 모집마감 항목 중 deadline desc
+                    byStatusGroup.thenComparing(byDeadlineDesc);
+            case "activefirst" ->
+                    byStatusGroup.thenComparing(byDeadlineDesc);
+            default -> byStatusGroup.thenComparing(byDeadlineDesc);
+        };
+        filtered.sort(comparator);
+
+        // 5. paginate
+        int totalCount = filtered.size();
+        int totalPages = Math.max(1, (int) Math.ceil((double) totalCount / size));
+        int safePage = Math.min(page, totalPages);
+        int from = (safePage - 1) * size;
+        int to = Math.min(from + size, totalCount);
+        List<Enriched> pageSlice = from >= to ? List.of() : filtered.subList(from, to);
+
+        // 6. convert to view
+        List<StartupSupportItemView> views = new ArrayList<>(pageSlice.size());
+        for (Enriched e : pageSlice) {
+            StartupSupportItem b = e.base();
+            views.add(StartupSupportItemView.of(
+                    b,
+                    e.inferred(),
+                    e.autoStatus(),
+                    b.category(),                                       // rawCategory = provider 원본
+                    StartupSupportEnricher.aiInsightHint(b),            // 백엔드 힌트
+                    inferItemSource(b)                                  // 항목별 출처
+            ));
+        }
+
+        return new StartupSupportListResponse(
+                views,
+                currentSource(),
+                views.size(),                       // 현 페이지 건수 (backward compat)
+                Instant.now(),
+                AppliedFilters.of(category, status, region, keyword),
+                totalCount,
+                safePage,
+                size,
+                totalPages,
+                sortKey,
+                provider.originTotal(),             // upstream 원본 총 건수
+                raw.size()                          // backend 가 메모리에 로드한 건수
+        );
+    }
+
+    /** 기존 4-인자 호출 backward compat. */
+    public StartupSupportListResponse findAllEnvelope(
+            String category, String status, String region, String keyword
+    ) {
+        return findAllEnvelope(category, status, region, keyword, "latest", 1, MAX_SIZE);
     }
 
     private static boolean matchesKeyword(StartupSupportItem item, String kwLower) {
@@ -75,36 +178,30 @@ public class StartupSupportService {
     }
 
     private static boolean containsLower(String haystack, String needleLower) {
-        return haystack != null && haystack.toLowerCase().contains(needleLower);
+        return haystack != null && haystack.toLowerCase(Locale.KOREA).contains(needleLower);
     }
 
     private static String normalize(String v) {
         return v == null ? "" : v.trim();
     }
 
-    public Optional<StartupSupportItem> findById(String id) {
-        return provider.findById(id);
+    /** 항목별 출처 분류 — id prefix 기반. */
+    private static String inferItemSource(StartupSupportItem b) {
+        String id = b.id() == null ? "" : b.id();
+        if (id.startsWith("news-")) return "k-startup-news";
+        if (id.startsWith("supt-")) return "k-startup-service";   // service01 신규 (Phase 9.10)
+        if (id.startsWith("supp-")) return "mock";
+        return "k-startup-service";
     }
 
-    /** 현재 데이터 출처 식별자 (로깅·디버그 + envelope 응답 source 필드용). */
-    public String currentSource() {
-        return provider.sourceName();
-    }
-
-    /**
-     * 응답 envelope 생성 (Phase 5).
-     * items 는 {@link #findAll(String, String, String, String)} 결과 그대로,
-     * source 는 provider 가 알려준 식별자, lastUpdated 는 호출 시점 now(),
-     * filters 는 입력값 그대로 echo (blank → null).
-     */
-    public StartupSupportListResponse findAllEnvelope(String category, String status, String region, String keyword) {
-        List<StartupSupportItem> items = findAll(category, status, region, keyword);
-        return new StartupSupportListResponse(
-                items,
-                currentSource(),
-                items.size(),
-                Instant.now(),
-                AppliedFilters.of(category, status, region, keyword)
-        );
+    private static LocalDate parseDateForSort(String s) {
+        if (s == null || s.isBlank()) return null;
+        String[] formats = {"yyyy.MM.dd", "yyyy-MM-dd", "yyyy/MM/dd", "yyyy.M.d", "yyyy-M-d"};
+        for (String f : formats) {
+            try {
+                return LocalDate.parse(s.trim(), DateTimeFormatter.ofPattern(f, Locale.KOREA));
+            } catch (Exception ignored) { /* next */ }
+        }
+        return null;
     }
 }

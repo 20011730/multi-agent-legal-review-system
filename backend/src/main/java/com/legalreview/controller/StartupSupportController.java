@@ -44,9 +44,16 @@ public class StartupSupportController {
             @RequestParam(value = "status", required = false) String status,
             @Parameter(description = "지역 정확 일치 또는 '전국' 자동 통과 (예: 서울, 경기)")
             @RequestParam(value = "region", required = false) String region,
-            @Parameter(description = "키워드 — title/organization/target/fieldSummary/recommendReason contains 매칭")
-            @RequestParam(value = "keyword", required = false) String keyword) {
-        return ResponseEntity.ok(startupSupportService.findAllEnvelope(category, status, region, keyword));
+            @Parameter(description = "키워드 contains 매칭")
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @Parameter(description = "정렬: latest / deadline / recommend / title")
+            @RequestParam(value = "sort", required = false) String sort,
+            @Parameter(description = "페이지(1-base), default 1")
+            @RequestParam(value = "page", required = false) Integer page,
+            @Parameter(description = "페이지 크기, default 20, max 100")
+            @RequestParam(value = "size", required = false) Integer size) {
+        return ResponseEntity.ok(
+                startupSupportService.findAllEnvelope(category, status, region, keyword, sort, page, size));
     }
 
     @Operation(summary = "지원사업 단건 조회", description = "id 에 해당하는 지원사업 1건을 반환. 없으면 404.")

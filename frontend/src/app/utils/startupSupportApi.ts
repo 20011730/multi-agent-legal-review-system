@@ -26,6 +26,12 @@ export interface StartupSupportFilters {
   region?: string;
   /** 키워드 — title/organization/target/fieldSummary/recommendReason contains */
   keyword?: string;
+  /** 정렬 옵션 (Phase 9.9 — activeFirst/recentClosed 추가, title 제거) */
+  sort?: "recommend" | "activeFirst" | "deadline" | "latest" | "recentClosed";
+  /** 페이지 (1-base, default 1) */
+  page?: number;
+  /** 페이지 크기 (default 20, max 100) */
+  size?: number;
 }
 
 /**
@@ -45,10 +51,24 @@ export interface AppliedFilters {
  */
 export interface StartupSupportListResponse {
   items: SupportItem[];
-  source: string;         // "mock" / "k-startup" / "db" 등
-  count: number;          // items.length 와 동일 (편의 메타)
+  source: string;         // "mock" / "k-startup" / "k-startup-news" / "k-startup-mixed" 등
+  count: number;          // items.length 와 동일 (편의 메타) — 현재 페이지 건수
   lastUpdated: string;    // ISO-8601 Instant
   filters: AppliedFilters;
+  /** 필터 적용 후 전체 건수 (Phase 9.6) */
+  totalCount: number;
+  /** 현재 페이지 (1-base) */
+  page: number;
+  /** 페이지 크기 */
+  size: number;
+  /** 전체 페이지 수 */
+  totalPages: number;
+  /** 적용된 정렬 옵션 */
+  sort: string;
+  /** upstream(공공데이터) 원본 총 건수 (알 수 없으면 0) (Phase 9.7) */
+  originTotal?: number;
+  /** backend 메모리에 로드한 건수 (필터 전, originTotal 의 일부) (Phase 9.7) */
+  loadedCount?: number;
 }
 
 function buildQueryString(filters?: StartupSupportFilters): string {
@@ -58,6 +78,9 @@ function buildQueryString(filters?: StartupSupportFilters): string {
   if (filters.status && filters.status.trim()) params.set("status", filters.status.trim());
   if (filters.region && filters.region.trim()) params.set("region", filters.region.trim());
   if (filters.keyword && filters.keyword.trim()) params.set("keyword", filters.keyword.trim());
+  if (filters.sort) params.set("sort", filters.sort);
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  if (filters.size && filters.size !== 20) params.set("size", String(filters.size));
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }

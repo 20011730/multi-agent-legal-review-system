@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Activity, ArrowRight, Landmark, Scale, ShieldCheck } from "lucide-react";
+import { Activity, ArrowRight, Landmark, Scale, ShieldCheck, Sparkles } from "lucide-react";
 import { MarketingLayout } from "../components/MarketingLayout";
 import { Button } from "../components/ui/button";
+import { HomeStartupSupportSection } from "../components/startup/HomeStartupSupportSection";
+import { fetchStartupSupportListResponse } from "../utils/startupSupportApi";
 
 const trustHighlights = [
   "법령 데이터 동기화 상태: 정상",
@@ -16,6 +18,23 @@ export function HomeLanding() {
   const isLoggedIn = Boolean(userStr);
   const [isIntroVisible, setIsIntroVisible] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
+  // Phase 9.12 — 히어로에 짧은 힌트 (모집중/마감임박 건수). 실패해도 메인 영향 없도록 fail-silent.
+  const [supportHint, setSupportHint] = useState<{ open: number; urgent: number } | null>(null);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    Promise.all([
+      fetchStartupSupportListResponse({ status: "모집중", size: 1 }, ctrl.signal),
+      fetchStartupSupportListResponse({ status: "마감임박", size: 1 }, ctrl.signal),
+    ])
+      .then(([open, urgent]) => {
+        setSupportHint({ open: open.totalCount, urgent: urgent.totalCount });
+      })
+      .catch(() => {
+        /* fail-silent */
+      });
+    return () => ctrl.abort();
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -33,7 +52,8 @@ export function HomeLanding() {
 
   return (
     <MarketingLayout>
-      <section className="relative min-h-[72vh] flex items-center justify-center overflow-hidden">
+      {/* Phase 9.13 — 히어로를 약간 줄여서 큐레이션 섹션이 첫 화면 하단에 살짝 보이게 (스크롤 유도) */}
+      <section className="relative min-h-[62vh] flex items-center justify-center overflow-hidden pt-8 pb-2">
         <div className="relative text-center max-w-5xl mx-auto">
           <p
             className={`text-center text-[22px] md:text-[26px] leading-[1.2] font-semibold tracking-[-0.015em] text-slate-600 mb-8 whitespace-nowrap transition-all duration-[900ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
@@ -76,18 +96,45 @@ export function HomeLanding() {
           </div>
 
           <div
-            className={`flex items-center justify-center transition-all duration-[1300ms] delay-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            className={`flex flex-wrap items-center justify-center gap-3 transition-all duration-[1300ms] delay-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${
               isIntroVisible ? "opacity-100 blur-0 translate-y-0" : "opacity-0 blur-[5px] translate-y-2"
             }`}
           >
-            <Button size="lg" className="h-12 min-w-[248px] rounded-full px-7 text-[15px] tracking-[-0.01em]" onClick={() => navigate(isLoggedIn ? "/input" : "/login")}>
+            <Button size="lg" className="h-12 min-w-[240px] rounded-full px-7 text-[15px] tracking-[-0.01em]" onClick={() => navigate(isLoggedIn ? "/input" : "/login")}>
               법률 리스크 진단하기
+              <ArrowRight className="w-5 h-5 ml-2 text-current" />
+            </Button>
+            {/* 보조 CTA — 스타트업 지원사업 (Phase 9.8) */}
+            <Button
+              size="lg"
+              variant="outline"
+              className="h-12 min-w-[240px] rounded-full px-7 text-[15px] tracking-[-0.01em] border-[#1E3A8A] text-[#1E3A8A] hover:bg-[#1E3A8A] hover:text-white"
+              onClick={() => navigate("/startup-support")}
+            >
+              <Sparkles className="w-4 h-4 mr-2 text-current" />
+              지원사업 찾아보기
               <ArrowRight className="w-5 h-5 ml-2 text-current" />
             </Button>
           </div>
 
+          {/* Phase 9.12 — 히어로 CTA 아래 짧은 힌트 (API 응답이 있을 때만 표시) */}
+          {supportHint && (supportHint.open > 0 || supportHint.urgent > 0) && (
+            <p
+              className={`mt-4 text-center text-[12px] text-slate-500 transition-all duration-[1300ms] delay-[400ms] ${
+                isIntroVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+              }`}
+              aria-live="polite"
+            >
+              현재 모집중{" "}
+              <strong className="text-[#1E3A8A]">{supportHint.open.toLocaleString("ko-KR")}건</strong>
+              {" · "}마감 임박{" "}
+              <strong className="text-rose-600">{supportHint.urgent.toLocaleString("ko-KR")}건</strong>
+              {" "}확인 가능
+            </p>
+          )}
+
           <div
-            className={`mt-9 grid grid-cols-1 md:grid-cols-3 gap-3 transition-all duration-[1300ms] delay-250 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            className={`mt-7 grid grid-cols-1 md:grid-cols-3 gap-3 transition-all duration-[1300ms] delay-250 ease-[cubic-bezier(0.22,1,0.36,1)] ${
               isIntroVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3"
             }`}
           >
@@ -113,8 +160,13 @@ export function HomeLanding() {
               <p className="text-[12px] text-slate-600">데이터 보호 원칙과 출처 추적으로 투명성 확보</p>
             </div>
           </div>
+
+          {/* Phase 9.11 — 중복 CTA 제거. 진입 동선은 (1) 히어로 보조 CTA + (2) 하단 큐레이션 섹션 "지원사업 전체 보기" 두 가지로 일원화. */}
         </div>
       </section>
+
+      {/* 메인 큐레이션 미리보기 섹션 (실제 API 데이터 3건) */}
+      <HomeStartupSupportSection revealClass="" />
     </MarketingLayout>
   );
 }
