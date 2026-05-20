@@ -84,3 +84,15 @@ app:
     experiment:
       enabled: ${RAG_EXPERIMENT_ENABLED:false}
       tag: ${RAG_EXPERIMENT_TAG:default}
+
+# ── 스타트업 지원사업 (Phase 7 provider 확장 준비) ───────────────────
+# provider: mock (기본) | k-startup (외부 OpenAPI, skeleton 상태)
+# Phase 7 단계는 mock 유지. k-startup 으로 절체 시 KStartupProvider 안의 HTTP 호출 구현 선행 필요.
+startup-support:
+  provider: ${STARTUP_SUPPORT_PROVIDER:mock}
+  k-startup:
+    api-key: ${KSTARTUP_API_KEY:}
+    base-url: ${KSTARTUP_BASE_URL:https://www.k-startup.go.kr/openapi}
+    # 외부 API 미구현/실패 시 mock 데이터로 graceful fallback 할지 여부.
+    # 운영 시 true 권장. 단, 응답 envelope 의 source 가 "mock(fallback)" 으로 변경됨.
+    enable-mock-fallback: ${KSTARTUP_MOCK_FALLBACK:false}

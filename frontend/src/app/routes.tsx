@@ -14,6 +14,7 @@ import { ServiceTechnology } from "./pages/ServiceTechnology";
 import { ServiceTrust } from "./pages/ServiceTrust";
 import { ServiceHowTo } from "./pages/ServiceHowTo";
 import { ServiceContact } from "./pages/ServiceContact";
+import { StartupSupport } from "./pages/StartupSupport";
 import { RequireAuth, RedirectIfAuth } from "./components/AuthGuard";
 
 export const router = createBrowserRouter([
@@ -44,6 +45,11 @@ export const router = createBrowserRouter([
   {
     path: "/contact",
     element: <ServiceContact />,
+  },
+  {
+    // 스타트업 지원사업 큐레이션 페이지 (Phase 1: 비인증 접근 가능, mock-only)
+    path: "/startup-support",
+    element: <StartupSupport />,
   },
   {
     path: "/login",

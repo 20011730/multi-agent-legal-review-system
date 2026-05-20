@@ -1,0 +1,120 @@
+/**
+ * startupSupportApi.ts — Phase 2 backend mock API client.
+ *
+ * Phase 1 (mock-only frontend import) → Phase 2 (fetch backend) 전환.
+ * 응답 타입은 `mockStartupSupport.ts` 의 SupportItem 과 동일.
+ * 추후 백엔드가 K-Startup OpenAPI 로 전환되어도 본 client 는 변경 불필요.
+ */
+import type { SupportItem } from "./mockStartupSupport";
+
+// 동일 host 의 backend (Vite dev / 빌드 후 reverse proxy 가능)
+// 다른 컴포넌트 (Result.tsx 등) 도 동일하게 절대경로 사용 — 일관성 유지.
+const API_BASE = "http://localhost:8080/api";
+
+/**
+ * backend 필터 쿼리 파라미터 (Phase 3.5 — controller 에 추가됨, frontend 는 선택 사용).
+ *
+ * 현재 frontend StartupSupport.tsx 는 in-memory 필터를 사용하므로 본 인터페이스 미사용.
+ * 추후 backend 필터로 전환 시 `fetchStartupSupportList({ category: ... })` 형태로 호출.
+ */
+export interface StartupSupportFilters {
+  /** 카테고리 정확 일치 (예: "R&D", "법률·세무·노무") */
+  category?: string;
+  /** 모집 상태 정확 일치 (예: "마감임박", "모집중", "상시모집") */
+  status?: string;
+  /** 지역 정확 일치 또는 "전국" 자동 통과 */
+  region?: string;
+  /** 키워드 — title/organization/target/fieldSummary/recommendReason contains */
+  keyword?: string;
+}
+
+/**
+ * 적용된 필터 echo (backend 가 응답에 반영).
+ * 입력 안 한 필드는 null.
+ */
+export interface AppliedFilters {
+  category: string | null;
+  status: string | null;
+  region: string | null;
+  keyword: string | null;
+}
+
+/**
+ * Phase 5 응답 envelope.
+ * Backend `StartupSupportListResponse` record 직렬화 결과와 1:1 매칭.
+ */
+export interface StartupSupportListResponse {
+  items: SupportItem[];
+  source: string;         // "mock" / "k-startup" / "db" 등
+  count: number;          // items.length 와 동일 (편의 메타)
+  lastUpdated: string;    // ISO-8601 Instant
+  filters: AppliedFilters;
+}
+
+function buildQueryString(filters?: StartupSupportFilters): string {
+  if (!filters) return "";
+  const params = new URLSearchParams();
+  if (filters.category && filters.category.trim()) params.set("category", filters.category.trim());
+  if (filters.status && filters.status.trim()) params.set("status", filters.status.trim());
+  if (filters.region && filters.region.trim()) params.set("region", filters.region.trim());
+  if (filters.keyword && filters.keyword.trim()) params.set("keyword", filters.keyword.trim());
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+/**
+ * 전체 지원사업 envelope 응답 (Phase 5 신규).
+ * items + source + lastUpdated + filters echo 메타 포함.
+ */
+export async function fetchStartupSupportListResponse(
+  filters?: StartupSupportFilters,
+  signal?: AbortSignal,
+): Promise<StartupSupportListResponse> {
+  const qs = buildQueryString(filters);
+  const res = await fetch(`${API_BASE}/startup-support${qs}`, { signal });
+  if (!res.ok) {
+    throw new Error(`startup-support list HTTP ${res.status}`);
+  }
+  return (await res.json()) as StartupSupportListResponse;
+}
+
+/**
+ * 전체 지원사업 목록 (items 만 반환 — backward compatible).
+ *
+ * Phase 5 부터 backend 가 envelope 응답을 보내지만, 본 함수는 `.items` 만 추출해서
+ * Phase 2~4 호출 코드 (`fetchStartupSupportList(signal)` / `(filters, signal)`) 가 그대로 동작.
+ *
+ * 시그니처 호환:
+ *   - `fetchStartupSupportList(signal)` — Phase 2 형태
+ *   - `fetchStartupSupportList(filters, signal)` — Phase 3.5 형태
+ *
+ * 메타 (source/lastUpdated/filters) 가 필요하면 `fetchStartupSupportListResponse` 직접 호출 권장.
+ */
+export async function fetchStartupSupportList(
+  filtersOrSignal?: StartupSupportFilters | AbortSignal,
+  maybeSignal?: AbortSignal,
+): Promise<SupportItem[]> {
+  let filters: StartupSupportFilters | undefined;
+  let signal: AbortSignal | undefined;
+  if (filtersOrSignal instanceof AbortSignal) {
+    signal = filtersOrSignal;
+  } else {
+    filters = filtersOrSignal;
+    signal = maybeSignal;
+  }
+  const envelope = await fetchStartupSupportListResponse(filters, signal);
+  return envelope.items;
+}
+
+/** 단건 조회 (선택). 404 시 null 반환. */
+export async function fetchStartupSupportItem(
+  id: string,
+  signal?: AbortSignal,
+): Promise<SupportItem | null> {
+  const res = await fetch(`${API_BASE}/startup-support/${encodeURIComponent(id)}`, { signal });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`startup-support ${id} HTTP ${res.status}`);
+  }
+  return (await res.json()) as SupportItem;
+}
