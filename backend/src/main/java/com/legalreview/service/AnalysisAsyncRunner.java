@@ -38,6 +38,8 @@ public class AnalysisAsyncRunner {
     private final LawSearchService lawSearchService;
     private final com.legalreview.service.rag.LegalRetrievalService legalRetrievalService;
     private final com.legalreview.config.RagProperties ragProperties;
+    // Phase 10.23 — SSE 브로드캐스터 (이벤트 발행만 담당, polling 흐름은 그대로 유지)
+    private final SessionStreamService streamService;
 
     @Value("${app.ai.engine:python}")
     private String aiEngine;
@@ -78,11 +80,26 @@ public class AnalysisAsyncRunner {
             }
             sessionRepository.saveAndFlush(session);
 
+            // Phase 10.23 — SSE 로 분석 시작 알림
+            streamService.publishStatus(sessionId, "ANALYZING", 15,
+                    "Python AI 서버에 분석 요청을 전송했습니다.");
+
             // phase 업데이트 콜백 — 각 LLM 호출 전에 DB에 현재 단계를 저장
             java.util.function.Consumer<String> phaseCallback = (phase) -> {
                 session.setAnalysisPhase(phase);
                 sessionRepository.saveAndFlush(session);
                 log.debug("분석 단계 변경: {} (sessionId={})", phase, sessionId);
+                // Phase 10.23 — SSE 로 phase 변경도 push
+                String label = switch (phase == null ? "" : phase) {
+                    case "ROUND1_BIZ" -> "비즈니스 전략가가 사업 관점 리스크를 분석 중입니다.";
+                    case "ROUND1_LEGAL" -> "법률 전문가가 관련 법령·판례 근거를 확인하고 있습니다.";
+                    case "ROUND2_BIZ" -> "비즈니스 측이 법률 측 지적에 대응 중입니다.";
+                    case "ROUND2_LEGAL" -> "법률 측이 비즈니스 측 대응을 재검토 중입니다.";
+                    case "JUDGING" -> "최종 판정관이 합의된 권고안을 정리하고 있습니다.";
+                    case "COLLECTING_EVIDENCE" -> "관련 법령·판례 근거를 확인하고 있습니다.";
+                    default -> phase;
+                };
+                streamService.publishStatus(sessionId, "ANALYZING", null, label);
             };
 
             // ── ★ RAG retrieval (Chroma) — 토론 시작 직전 1회 ★ ──
@@ -167,8 +184,22 @@ public class AnalysisAsyncRunner {
             log.info("비동기 AI 분석 완료 (sessionId={}, durationMs={})",
                     sessionId, session.getAnalysisDurationMs());
 
+            // Phase 10.23 — SSE 완료 이벤트 발행 (frontend 가 final fetch 트리거)
+            try {
+                long msgCount = messageRepository.countBySessionId(sessionId);
+                streamService.publishCompleted(sessionId, (int) msgCount);
+            } catch (Exception sseErr) {
+                log.debug("[SSE] completed publish 실패 (무시): {}", sseErr.getMessage());
+            }
+
         } catch (Exception e) {
             log.error("AI 분석 실패 (sessionId={}): {}", sessionId, e.getMessage(), e);
+            // Phase 10.23 — SSE error 발행 (실제 stack trace/url 은 마스킹된 짧은 메시지만)
+            try {
+                String safeMsg = e.getMessage() == null ? "분석 중 오류" : e.getMessage();
+                if (safeMsg.length() > 200) safeMsg = safeMsg.substring(0, 200) + "...";
+                streamService.publishError(sessionId, "분석 실패 — fallback 결과 표시 중: " + safeMsg);
+            } catch (Exception ignored) { /* */ }
             log.info("더미 데이터로 대체합니다.");
 
             try {
@@ -301,6 +332,14 @@ public class AnalysisAsyncRunner {
             msg.setStance((String) m.get("stance"));
             msg.setEvidenceSummary((String) m.get("evidenceSummary"));
             messageRepository.saveAndFlush(msg); // 즉시 flush → 폴링 시 messageCount 실시간 반영
+            // Phase 10.23 — SSE 로 새 메시지 push (저장된 id 포함)
+            try {
+                streamService.publishMessage(session.getId(),
+                        com.legalreview.controller.SessionStreamController.toMessagePayload(msg));
+            } catch (Exception sseErr) {
+                // SSE 실패는 분석 흐름에 영향 X — debug 만
+                log.debug("[SSE] message publish 실패 (무시): {}", sseErr.getMessage());
+            }
         }
     }
 

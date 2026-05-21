@@ -54,6 +54,22 @@ export function Verdict() {
   // evidence fetch 진행 상태 — empty-state 카드를 fetch 완료 후에만 보여주기 위함
   const [evidenceLoadState, setEvidenceLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // Phase 10.12 — startupContext + followUpQuestions 표시용
+  const [startupContext, setStartupContext] = useState<{
+    title?: string;
+    organization?: string;
+    deadline?: string;
+    category?: string;
+    source?: string;
+    applyUrl?: string;
+    target?: string;
+    fieldSummary?: string;
+  } | null>(null);
+  const [followUpQuestions, setFollowUpQuestions] = useState<Array<{
+    targetAgent?: string;
+    message?: string;
+    createdAt?: string;
+  }>>([]);
 
   useEffect(() => {
     const data = sessionStorage.getItem("reviewData");
@@ -108,6 +124,19 @@ export function Verdict() {
           setFinalDecision(result.finalDecision);
           sessionStorage.setItem("finalDecision", JSON.stringify(result.finalDecision));
         }
+        // Phase 10.12 — startupContext + followUpQuestions
+        if (result?.startupContext) {
+          setStartupContext(result.startupContext);
+        } else {
+          // fallback: sessionStorage 또는 reviewData
+          try {
+            const cached = sessionStorage.getItem("lexrex.startupContext");
+            if (cached) setStartupContext(JSON.parse(cached));
+          } catch { /* ignore */ }
+        }
+        if (Array.isArray(result?.followUpQuestions)) {
+          setFollowUpQuestions(result.followUpQuestions);
+        }
 
         // top-level evidences를 1순위로, finalDecision.evidences fallback 포함
         const freshEvidences = normalizeEvidences(result);
@@ -133,8 +162,23 @@ export function Verdict() {
       { category: "Ethics", level: "medium", description: "Consumer autonomy can be undermined." },
     ];
 
-  const riskScore =
-    finalDecision?.riskLevel === "HIGH" ? 82 : finalDecision?.riskLevel === "LOW" ? 31 : 58;
+  // Phase 10.11 — finalDecision 이 없으면 AI 분석 실패 상태로 간주. 임시 mock 점수 표시 명확화.
+  const aiFailed = !finalDecision;
+  // Phase 10.22 — riskLevel + risks 리스트 조합으로 점수 산출 정교화.
+  // 기준: 0~39 낮음 / 40~69 보통·주의 / 70~100 높음·위험.
+  const riskScore = (() => {
+    const lvl = finalDecision?.riskLevel?.toUpperCase();
+    const riskList = Array.isArray(finalDecision?.risks) ? finalDecision!.risks : [];
+    const highCount = riskList.filter((r) => String((r as { level?: string }).level).toLowerCase() === "high").length;
+    const medCount = riskList.filter((r) => String((r as { level?: string }).level).toLowerCase() === "medium").length;
+    let base = 58;
+    if (lvl === "HIGH") base = 80;
+    else if (lvl === "LOW") base = 28;
+    else if (lvl === "MEDIUM") base = 55;
+    // 항목 가중치: high 1건당 +4, medium 1건당 +2 (최대 +20)
+    const adj = Math.min(20, highCount * 4 + medCount * 2);
+    return Math.min(100, Math.max(0, base + adj));
+  })();
 
   const handlePdfDownload = async () => {
     // PDF 전용 hidden 마크업을 캡처 (재검토/공유/유의사항 등 UI 제외, 콤팩트 레이아웃)
@@ -180,6 +224,10 @@ export function Verdict() {
             </p>
           </button>
           <div className="flex gap-2">
+            {/* Phase 10.22 — /result 로 돌아가 전체 토론 로그를 다시 볼 수 있게 */}
+            <Button variant="outline" onClick={() => navigate("/result")}>
+              <FileText className="w-4 h-4 mr-2" />토론 로그 다시 보기
+            </Button>
             <Button variant="outline" onClick={() => void handlePdfDownload()} disabled={isPdfExporting}>
               {isPdfExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}PDF
             </Button>
@@ -203,16 +251,74 @@ export function Verdict() {
             <p className="text-sm text-slate-600 mt-1">토론 결과를 구조화한 최종 보고서입니다.</p>
           </div>
 
+          {/* Phase 10.11 — AI 분석 실패 시 명확한 실패 배너 (mock 결과처럼 보이지 않도록) */}
+          {aiFailed && (
+            <div
+              role="alert"
+              aria-live="polite"
+              className="rounded-lg border-2 border-rose-300 bg-rose-50 px-4 py-3"
+            >
+              <div className="flex items-start gap-2">
+                <span className="text-lg" aria-hidden>⚠️</span>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-rose-900">AI 분석 결과를 받지 못했습니다</p>
+                  <p className="mt-1 text-xs leading-relaxed text-rose-800">
+                    분석 서버(Ollama / Python AI) 연결에 실패했거나 결과 생성이 완료되지 않았습니다.
+                    아래에 표시되는 점수와 항목은 <strong>임시 fallback 값</strong>이며 실제 진단 결과가 아닙니다.
+                    Ollama 서버 실행 상태와 모델명을 확인한 뒤 다시 시도해 주세요.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/input")}
+                    className="mt-2 inline-flex items-center gap-1 rounded-md border border-rose-400 bg-white px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100"
+                  >
+                    다시 시도
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 리스크 스코어 */}
-          <Card className="border-[#1E3A8A]/20 bg-[#1E3A8A]/5">
+          <Card className={`border-[#1E3A8A]/20 ${aiFailed ? "bg-slate-50 opacity-80" : "bg-[#1E3A8A]/5"}`}>
             <CardHeader>
-              <CardTitle>리스크 스코어</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                리스크 스코어
+                {aiFailed && (
+                  <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-normal text-slate-500">
+                    임시 점수 / AI 분석 미완료
+                  </span>
+                )}
+              </CardTitle>
               <CardDescription>0~100 종합 지표</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-center justify-between gap-6">
-                <p className="text-4xl font-semibold text-[#1E3A8A]">{riskScore}</p>
-                <div className="w-full max-w-[360px]">
+                <div className="flex items-baseline gap-3">
+                  <p className="text-4xl font-semibold text-[#1E3A8A]">{riskScore}</p>
+                  {/* Phase 10.6 — 신호등 색 + 텍스트 라벨 (색만으로 의미 전달 X, 접근성 보강) */}
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                      riskScore >= 70
+                        ? "border-red-300 bg-red-50 text-red-700"
+                        : riskScore >= 40
+                          ? "border-amber-300 bg-amber-50 text-amber-700"
+                          : "border-emerald-300 bg-emerald-50 text-emerald-700"
+                    }`}
+                    aria-label={`종합 리스크 ${riskScore >= 70 ? "높음(위험)" : riskScore >= 40 ? "보통(주의)" : "낮음(안전)"}`}
+                  >
+                    <span aria-hidden>●</span>
+                    {riskScore >= 70 ? "높음 · 위험" : riskScore >= 40 ? "보통 · 주의" : "낮음 · 안전"}
+                  </span>
+                </div>
+                <div
+                  className="w-full max-w-[360px]"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={riskScore}
+                  aria-label={`종합 리스크 점수 ${riskScore} 점`}
+                >
                   <div className="h-3 rounded-full border border-slate-300 overflow-hidden">
                     <div
                       className={`h-full ${riskScore >= 70 ? "bg-red-500" : riskScore >= 40 ? "bg-amber-500" : "bg-emerald-500"}`}
@@ -220,6 +326,21 @@ export function Verdict() {
                     />
                   </div>
                 </div>
+              </div>
+              {/* Phase 10.22 — 점수 기준 범례 (신호등 정의를 명확히) */}
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                  ● 0~39 낮음·안전
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
+                  ● 40~69 보통·주의
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-red-700">
+                  ● 70~100 높음·위험
+                </span>
+                <span className="ml-1 text-slate-500">
+                  점수는 AI 판정의 riskLevel 과 토론에서 도출된 개별 리스크 가중치를 결합해 산출됩니다.
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -319,6 +440,193 @@ export function Verdict() {
                 </CardContent>
               </Card>
             </div>
+          )}
+
+          {/* Phase 10.12 — 지원사업 컨텍스트 기반 구조화 섹션 */}
+          {startupContext && (
+            <Card className="border-[#1E3A8A]/20 bg-[#1E3A8A]/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <FileText className="w-5 h-5 text-[#1E3A8A]" />
+                  지원사업 기반 검토 항목
+                </CardTitle>
+                <CardDescription>
+                  공고 정보를 바탕으로 검토가 필요한 영역을 정리했습니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="rounded-md border border-[#1E3A8A]/15 bg-white px-3 py-2 text-xs">
+                  <div className="font-semibold text-slate-900">{startupContext.title}</div>
+                  <div className="mt-0.5 text-slate-500">
+                    {startupContext.organization}
+                    {startupContext.organization && startupContext.deadline && " · "}
+                    {startupContext.deadline && `마감 ${startupContext.deadline}`}
+                    {startupContext.category && ` · ${startupContext.category}`}
+                  </div>
+                </div>
+                {/* Phase 10.13 — 항목별 신호등 리스크 (낮음·주의·높음) */}
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {[
+                    { title: "협약 체결", body: "협약서 효력·해제·해지·위약 조항 점검. 사용 목적·제한 조건 확인.", level: "주의" as const },
+                    { title: "사업비 정산", body: "지출 증빙 요건·집행 한도·외주 단가 기준 확인. 목적 외 사용 시 환수 가능성.", level: "높음" as const },
+                    { title: "성과물·IP 귀속", body: "단독·공동 귀속, 사용권 범위, 정부지원 과제 산출물 명시 여부 확인.", level: "주의" as const },
+                    { title: "개인정보·데이터", body: "수집 항목·동의 문구·제3자 제공·국외 이전·보관 기간 검토.", level: "주의" as const },
+                    { title: "고용·외주", body: "근로계약 vs 도급 구분, 청년채용 의무, 4대 보험·세금 처리 점검.", level: "주의" as const },
+                    { title: "중복 수혜·자격", body: "동일 비목 타 지원사업 병행 가능 여부, 결격사유, 업종·연차 자격 확인.", level: "낮음" as const },
+                  ].map((sec, i) => {
+                    const dotClass =
+                      sec.level === "높음"
+                        ? "bg-red-500"
+                        : sec.level === "주의"
+                          ? "bg-amber-500"
+                          : "bg-emerald-500";
+                    const chipClass =
+                      sec.level === "높음"
+                        ? "border-red-300 bg-red-50 text-red-700"
+                        : sec.level === "주의"
+                          ? "border-amber-300 bg-amber-50 text-amber-800"
+                          : "border-emerald-300 bg-emerald-50 text-emerald-700";
+                    return (
+                      <div key={i} className="rounded border border-slate-200 bg-white px-3 py-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs font-semibold text-slate-800">{sec.title}</div>
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${chipClass}`}
+                            aria-label={`${sec.title} 리스크 ${sec.level}`}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} aria-hidden />
+                            {sec.level}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-[11px] leading-relaxed text-slate-600">{sec.body}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {startupContext.applyUrl && (
+                  <a
+                    href={startupContext.applyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-[#1E3A8A] hover:underline"
+                    aria-label="원문 공고 페이지 새 탭에서 열기"
+                  >
+                    원문 공고 보기 →
+                  </a>
+                )}
+                <p className="text-[10.5px] text-slate-500">
+                  ※ 위 항목은 지원사업 카테고리 기반 체크리스트입니다. 실제 결정은 공고문/협약서 원문과 함께 검토하세요.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Phase 10.20 — 첨부자료 분석 반영 요약 */}
+          {(() => {
+            const attachmentsRaw = (reviewData as unknown as { attachments?: unknown }).attachments;
+            const list: Array<Record<string, unknown>> = Array.isArray(attachmentsRaw)
+              ? (attachmentsRaw as Array<Record<string, unknown>>)
+              : [];
+            if (list.length === 0) return null;
+            let withBody = 0;
+            let metaOnly = 0;
+            let masked = 0;
+            for (const a of list) {
+              const ok = a?.bodyText || a?.extractionStatus === "ok";
+              if (ok) withBody += 1;
+              else metaOnly += 1;
+              const flags = a?.sensitivityFlags;
+              if (Array.isArray(flags) && flags.length > 0) masked += 1;
+            }
+            return (
+              <Card className="border-sky-200 bg-sky-50/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <FileText className="w-5 h-5 text-sky-700" />
+                    첨부자료 분석 반영 ({list.length}건)
+                  </CardTitle>
+                  <CardDescription>
+                    텍스트 본문이 추출된 자료는 에이전트 발언에 직접 인용 가능합니다. PDF/DOCX 는 파일명·유형만 참고됩니다.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div className="flex flex-wrap gap-2 text-[12px]">
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-800">본문 추출 {withBody}건</span>
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-slate-700">메타데이터만 {metaOnly}건</span>
+                    {masked > 0 && (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">민감정보 마스킹 {masked}건</span>
+                    )}
+                  </div>
+                  <ul className="space-y-1 text-[12px] text-slate-700">
+                    {list.slice(0, 8).map((a, i) => {
+                      const name = String(a?.name ?? "(이름 없음)");
+                      const status = String(a?.extractionStatus ?? "unknown");
+                      const sizeKb = typeof a?.size === "number" ? `${(a.size / 1024).toFixed(1)} KB` : "";
+                      const flags = Array.isArray(a?.sensitivityFlags) ? (a.sensitivityFlags as string[]) : [];
+                      return (
+                        <li key={i} className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{name}</span>
+                          {sizeKb && <span className="text-slate-500">{sizeKb}</span>}
+                          <span
+                            className={`rounded border px-1.5 py-0 text-[10px] ${
+                              status === "ok"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 bg-white text-slate-600"
+                            }`}
+                          >
+                            {status}
+                          </span>
+                          {flags.length > 0 && (
+                            <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0 text-[10px] text-amber-800">
+                              ⚠ {flags.join(", ")}
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="text-[10.5px] text-slate-500">
+                    ※ 데모 단계 — 본문 추출은 텍스트 파일에 한정됩니다. 운영 단계에서는 PDF/DOCX parser 도입 예정입니다.
+                  </p>
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {/* Phase 10.12 — 사용자 추가 질문 반영 항목 */}
+          {followUpQuestions.length > 0 && (
+            <Card className="border-amber-200 bg-amber-50/30">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <FileText className="w-5 h-5 text-amber-700" />
+                  사용자 추가 질문 반영 항목 ({followUpQuestions.length}건)
+                </CardTitle>
+                <CardDescription>
+                  토론 중 추가로 입력한 질문 — 다음 재검토 또는 후속 분석 시 우선 반영 대상입니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {followUpQuestions.map((q, i) => (
+                  <div key={i} className="rounded border border-amber-200 bg-white px-3 py-2">
+                    <div className="mb-0.5 flex flex-wrap items-center gap-2 text-[10.5px] text-slate-500">
+                      <span className="rounded-full border border-slate-300 bg-slate-50 px-1.5 py-0">
+                        대상: {q.targetAgent || "전체"}
+                      </span>
+                      {q.createdAt && (
+                        <span>{new Date(q.createdAt).toLocaleString("ko-KR")}</span>
+                      )}
+                      <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0 text-amber-800">
+                        저장됨 · 다음 재분석 시 반영
+                      </span>
+                    </div>
+                    <p className="break-keep text-sm text-slate-700">{q.message}</p>
+                  </div>
+                ))}
+                <p className="mt-1 text-[10.5px] text-slate-500">
+                  ※ 실제 AI 재호출은 다음 단계 작업에서 자동 트리거 됩니다. 현재는 질문이 안전하게 저장되어 결과 검토 시 참고됩니다.
+                </p>
+              </CardContent>
+            </Card>
           )}
 
           {/* 최종 권고사항 */}

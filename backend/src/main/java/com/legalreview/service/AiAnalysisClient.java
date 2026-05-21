@@ -1,6 +1,7 @@
 package com.legalreview.service;
 
 import com.legalreview.dto.request.SessionCreateRequest;
+import com.legalreview.dto.request.StartupContextDto;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,15 +54,53 @@ public class AiAnalysisClient {
     public AiAnalysisResponse analyze(Long sessionId, SessionCreateRequest request) {
         String url = aiBaseUrl + "/analyze";
 
-        Map<String, Object> body = Map.of(
-                "sessionId", sessionId,
-                "companyName", request.getCompanyName(),
-                "industry", request.getIndustry(),
-                "reviewType", request.getReviewType(),
-                "situation", request.getSituation(),
-                "content", request.getContent(),
-                "participationMode", request.getParticipationMode()
-        );
+        // Phase 10.5 — Map.of() 는 null 비허용 + 사이즈 한정. startupContext 동봉 위해 LinkedHashMap 사용.
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("sessionId", sessionId);
+        body.put("companyName", request.getCompanyName());
+        body.put("industry", request.getIndustry());
+        body.put("reviewType", request.getReviewType());
+        body.put("situation", request.getSituation());
+        body.put("content", request.getContent());
+        body.put("participationMode", request.getParticipationMode());
+        // 지원사업 컨텍스트가 있으면 구조화된 맵으로 전달 (Python AI 가 구조 활용 가능, 모르면 무시)
+        StartupContextDto sc = request.getStartupContext();
+        if (sc != null) {
+            Map<String, Object> startupContextMap = new java.util.LinkedHashMap<>();
+            if (sc.getId() != null) startupContextMap.put("id", sc.getId());
+            if (sc.getTitle() != null) startupContextMap.put("title", sc.getTitle());
+            if (sc.getOrganization() != null) startupContextMap.put("organization", sc.getOrganization());
+            if (sc.getCategory() != null) startupContextMap.put("category", sc.getCategory());
+            if (sc.getTarget() != null) startupContextMap.put("target", sc.getTarget());
+            if (sc.getFieldSummary() != null) startupContextMap.put("fieldSummary", sc.getFieldSummary());
+            if (sc.getDeadline() != null) startupContextMap.put("deadline", sc.getDeadline());
+            if (sc.getApplyUrl() != null) startupContextMap.put("applyUrl", sc.getApplyUrl());
+            if (sc.getSource() != null) startupContextMap.put("source", sc.getSource());
+            if (sc.getAiInsightHint() != null) startupContextMap.put("aiInsightHint", sc.getAiInsightHint());
+            if (sc.getLegalReviewHint() != null) startupContextMap.put("legalReviewHint", sc.getLegalReviewHint());
+            body.put("startupContext", startupContextMap);
+        }
+        // Phase 10.16 — startupExtras / attachments 동봉 (Python AI 가 활용 가능, 미사용 시 무시)
+        if (request.getStartupExtras() != null && !request.getStartupExtras().isEmpty()) {
+            body.put("startupExtras", request.getStartupExtras());
+        }
+        if (request.getAttachments() != null && !request.getAttachments().isEmpty()) {
+            body.put("attachments", request.getAttachments());
+        }
+        // Phase 10.16 — followUpQuestions 는 reanalyze 호출 시 request 에 setter 로 주입 가능하도록 확장
+        // (현재 createSession 직후 호출 시점에는 비어있음. 후속 reanalyze 흐름에서 활용)
+        // — 일반 분석 흐름에는 영향 없음.
+        try {
+            java.lang.reflect.Method m = request.getClass().getMethod("getFollowUpQuestions");
+            Object fq = m.invoke(request);
+            if (fq instanceof java.util.List<?> list && !list.isEmpty()) {
+                body.put("followUpQuestions", list);
+            }
+        } catch (NoSuchMethodException ignored) {
+            /* DTO 에 해당 setter 없음 → 무시. 추후 SessionCreateRequest 에 추가 시 자동 활성. */
+        } catch (Exception ex) {
+            log.debug("[ai] followUpQuestions reflect 실패 (무시): {}", ex.getMessage());
+        }
 
         long t0 = System.currentTimeMillis();
         log.info("AI 서버 호출 시작: {} (sessionId={}, readTimeout={}s)",

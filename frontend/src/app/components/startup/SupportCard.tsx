@@ -4,12 +4,13 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Building2, Calendar, ExternalLink, MapPin, Sparkles, Target, Brain, Scale } from "lucide-react";
+import { Building2, Calendar, ExternalLink, MapPin, Sparkles, Target, Brain, Scale, Info } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import type { SupportItem, SupportStatus } from "../../utils/mockStartupSupport";
 import { buildStartupSupportInsight, type InsightLevel } from "../../utils/startupSupportInsight";
+import { StartupSupportDetailModal } from "./StartupSupportDetailModal";
 
 interface SupportCardProps {
   item: SupportItem;
@@ -35,6 +36,17 @@ function statusBadgeClass(status: SupportStatus | string): string {
 
 function isClosed(status: SupportStatus | string): boolean {
   return status === "모집마감" || status === "마감";
+}
+
+function isAlwaysOpen(status: SupportStatus | string): boolean {
+  return status === "상시모집";
+}
+
+/** 상태별 primary action 라벨. */
+function primaryActionLabel(status: SupportStatus | string): string {
+  if (isClosed(status)) return "공고문 확인";
+  if (isAlwaysOpen(status)) return "상시 지원 확인";
+  return "신청 페이지 열기";
 }
 
 /** "공고문 참고"/"확인 필요" 같은 placeholder 값 — 액션처럼 보이지 않게 약하게 렌더. */
@@ -159,7 +171,7 @@ export function SupportCard({ item }: SupportCardProps) {
               </div>
             )}
             <p className="mt-2 text-[10px] text-slate-400">
-              ※ rule-기반 deterministic 분석 (LLM 미사용)
+              ※ 공고 키워드 기반 사전 분석 (실제 진단은 다음 단계에서 이루어집니다)
             </p>
           </div>,
           document.body,
@@ -167,6 +179,7 @@ export function SupportCard({ item }: SupportCardProps) {
       : null;
 
   const closed = isClosed(item.status);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   return (
     <Card
@@ -260,50 +273,40 @@ export function SupportCard({ item }: SupportCardProps) {
           {item.recommendReason}
         </p>
 
-        {/* rawCategory + itemSource (Phase 9.8) */}
-        {(item.rawCategory || item.itemSource) && (
-          <p className="text-[10px] text-slate-400">
-            {item.rawCategory && item.rawCategory !== item.category && (
-              <>원문 분류: <span className="text-slate-500">{item.rawCategory}</span></>
-            )}
-            {item.rawCategory && item.rawCategory !== item.category && item.itemSource && " · "}
-            {item.itemSource && (
-              <>
-                출처:{" "}
-                <span className="text-slate-500">
-                  {item.itemSource === "k-startup-news"
-                    ? "창업소식"
-                    : item.itemSource === "k-startup-service"
-                      ? "사업공고 조회서비스"
-                      : item.itemSource === "mock"
-                        ? "샘플"
-                        : item.itemSource}
-                </span>
-              </>
-            )}
-          </p>
-        )}
+        {/* Phase 10.1 — 원본 분류/출처는 카드에서 제거하고 상세 모달로 이전. 카드 밀도 ↓ */}
 
-        {/* action — 모집마감 항목은 약한 회색 톤 + "공고문 확인" 라벨 */}
-        <div className="mt-auto">
+        {/* action — Phase 10: 자세히 보기(내부 상세 모달) + primary 외부 링크 */}
+        <div className="mt-auto grid grid-cols-2 gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setDetailOpen(true)}
+            aria-label={`${item.title} 자세히 보기`}
+            className="border-slate-300 text-slate-700 hover:border-[#1E3A8A]/40 hover:bg-[#1E3A8A]/5 hover:text-[#1E3A8A]"
+          >
+            <Info className="mr-1.5 h-3.5 w-3.5" />
+            자세히 보기
+          </Button>
           <Button
             asChild
             variant="outline"
             size="sm"
             className={
               closed
-                ? "w-full border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
-                : "w-full border-[#1E3A8A]/30 text-[#1E3A8A] hover:bg-[#1E3A8A]/5"
+                ? "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                : "border-[#1E3A8A]/30 text-[#1E3A8A] hover:bg-[#1E3A8A]/5"
             }
           >
-            <a href={item.applyUrl} target="_blank" rel="noopener noreferrer">
-              {closed ? "공고문 확인" : "신청 페이지 열기"}
+            <a href={item.applyUrl} target="_blank" rel="noopener noreferrer" aria-label={primaryActionLabel(item.status)}>
+              {primaryActionLabel(item.status)}
               <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
             </a>
           </Button>
         </div>
       </CardContent>
       {popover}
+      <StartupSupportDetailModal item={item} open={detailOpen} onClose={() => setDetailOpen(false)} />
     </Card>
   );
 }

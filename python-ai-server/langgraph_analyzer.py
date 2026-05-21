@@ -32,6 +32,152 @@ logger = logging.getLogger(__name__)
 MAX_ROUNDS = int(os.getenv("LANGGRAPH_MAX_ROUNDS", "2"))
 
 
+# ────────────────────────────────────────────────────────────
+# Phase 10.18 — startupContext / startupExtras / attachments /
+# followUpQuestions 를 LLM 프롬프트에 명시적으로 주입하기 위한
+# 보조 컨텍스트 블록 빌더.
+# ────────────────────────────────────────────────────────────
+def _build_supplementary_context(request: "AnalyzeRequest") -> str:
+    """
+    선택 필드(지원사업/Step2 추가정보/첨부 메타/후속질문) 를 사람이 읽을 수 있는
+    마크다운 블록으로 직렬화한다. 모든 필드가 비어 있으면 빈 문자열.
+
+    이 블록은 다음 위치에 주입된다:
+      - topic 끝부분에 부착 → 모든 에이전트가 검토 안건과 함께 참조
+      - 초기 history 에도 부착 → 라운드 1 부터 시야에 들어감
+      - JUDGE 단계에서도 history 누적되어 자연스럽게 반영됨
+
+    파일 본문 추출은 미구현 (TODO) — 메타데이터(파일명/타입/크기/요약)만 안내성으로 전달함을
+    명시해 LLM 이 “파일 내용을 안다”는 환각을 방지한다.
+    """
+    blocks: list[str] = []
+
+    sc = getattr(request, "startupContext", None)
+    if isinstance(sc, dict) and sc:
+        lines = ["[지원사업 기반 검토 컨텍스트]"]
+        for key, label in (
+            ("title", "사업명"),
+            ("organization", "주관기관"),
+            ("category", "유형"),
+            ("target", "지원대상"),
+            ("fieldSummary", "분야 요약"),
+            ("deadline", "마감"),
+            ("applyUrl", "신청 URL"),
+            ("source", "출처"),
+            ("aiInsightHint", "AI 분석 힌트"),
+            ("legalReviewHint", "법적 검토 힌트"),
+        ):
+            v = sc.get(key)
+            if v:
+                lines.append(f"- {label}: {v}")
+        if len(lines) > 1:
+            lines.append(
+                "※ 위 컨텍스트가 있는 경우 — 협약/사업비/지식재산권/환수/개인정보 등 "
+                "지원사업 특유 쟁점을 검토 대상에 우선 반영하세요."
+            )
+            blocks.append("\n".join(lines))
+
+    se = getattr(request, "startupExtras", None)
+    if isinstance(se, dict) and se:
+        label_map = {
+            "applicantType": "신청자 유형",
+            "executionMode": "수행 방식",
+            "privacyHandling": "개인정보 처리",
+            "ipOutput": "지식재산 산출물",
+            "workforce": "인력 운영",
+            "priorSupport": "기존 정부지원 이력",
+        }
+        lines = ["[Step 2 — 신청자 기본 정보]"]
+        for k, label in label_map.items():
+            v = se.get(k)
+            if v:
+                lines.append(f"- {label}: {v}")
+        # Phase 10.19 — 추천 첨부자료 목록 (Input UI helper 가 동봉)
+        rec = se.get("recommendedAttachments")
+        if isinstance(rec, list) and rec:
+            lines.append("- 비서 추천 첨부자료:")
+            for r in rec[:10]:
+                if not isinstance(r, dict):
+                    continue
+                label = r.get("label") or r.get("name") or ""
+                reason = r.get("reason") or ""
+                sens = r.get("sensitivity") or "low"
+                opt = r.get("optional")
+                tag = "권장" if opt is False else "옵션"
+                if label:
+                    lines.append(f"  · [{tag}/민감도 {sens}] {label} — {reason}")
+        if len(lines) > 1:
+            blocks.append("\n".join(lines))
+
+    atts = getattr(request, "attachments", None)
+    if isinstance(atts, list) and atts:
+        # Phase 10.19 — 텍스트 파일은 bodyText 가 동봉됨 (민감정보 마스킹 완료 상태).
+        # PDF/DOCX 등은 여전히 메타데이터만 — extractionStatus 로 구분.
+        lines = ["[사용자 첨부 자료]"]
+        any_body = False
+        for i, a in enumerate(atts[:8], start=1):
+            if not isinstance(a, dict):
+                continue
+            name = a.get("name") or "(이름 없음)"
+            size = a.get("size")
+            mime = a.get("mimeType") or a.get("type") or ""
+            summary = a.get("summary") or a.get("description") or ""
+            status = a.get("extractionStatus") or "unknown"
+            sensitivity = a.get("sensitivityFlags") or []
+            body = a.get("bodyText") or ""
+            truncated = bool(a.get("bodyTruncated"))
+
+            size_str = f", {size}B" if isinstance(size, int) else ""
+            mime_str = f", {mime}" if mime else ""
+            head = f"{i}. {name}{size_str}{mime_str}  [추출상태: {status}]"
+            if sensitivity:
+                head += f"  (민감정보 자동 마스킹: {', '.join(sensitivity)})"
+            lines.append(head)
+            if summary:
+                lines.append(f"   요약/설명: {summary[:160]}")
+            if body:
+                any_body = True
+                excerpt = body[:1500].replace("\n", " ")
+                tail = " …(일부만 전달됨)" if truncated or len(body) > 1500 else ""
+                lines.append(f"   본문 발췌: {excerpt}{tail}")
+
+        if any_body:
+            lines.append(
+                "※ 위 ‘본문 발췌’ 는 사용자가 업로드한 텍스트 파일에서 발췌된 내용입니다. "
+                "각 에이전트는 자신의 라운드 발언 안에 ‘첨부 자료 기준으로 확인한 사실’ 을 최소 1줄 포함하세요. "
+                "본문이 일부만 전달된 경우 추가 확인이 필요한 부분을 권고에 명시하세요."
+            )
+        else:
+            lines.append(
+                "※ 본문 추출 결과가 없는 항목(PDF/DOCX 등) 은 파일명·유형만 토대로 ‘어떤 자료를 추가 확인하면 좋은지’를 권고하세요. "
+                "파일 내용을 안다고 단정하지 마세요."
+            )
+        blocks.append("\n".join(lines))
+
+    fq = getattr(request, "followUpQuestions", None)
+    if isinstance(fq, list) and fq:
+        lines = ["[사용자 후속 질문 — 재검토 요청 (반드시 본문에 직접 답변)]"]
+        for i, q in enumerate(fq[:10], start=1):
+            if not isinstance(q, dict):
+                continue
+            target = q.get("targetAgent") or q.get("target") or "all"
+            msg = (q.get("message") or "").strip()
+            if not msg:
+                continue
+            lines.append(f"{i}. [대상: {target}] {msg}")
+        if len(lines) > 1:
+            lines.append(
+                "※ 위 질문은 사용자가 이전 토론 결과를 본 뒤 추가로 요청한 사항입니다. "
+                "각 에이전트는 자신의 라운드 발언 안에서 해당 질문에 1줄 이상 직접 응답하세요. "
+                "최종 판정관(JUDGE) 은 recommendation 안에 “사용자 추가 질문에 대한 답변” 단락을 별도로 포함하세요."
+            )
+            blocks.append("\n".join(lines))
+
+    if not blocks:
+        return ""
+    return "\n\n".join(blocks)
+
+
 # ── LangGraph State ──
 class DebateState(TypedDict):
     history: str        # 누적 토론 텍스트
@@ -320,12 +466,26 @@ def analyze_with_langgraph(request: AnalyzeRequest) -> AnalyzeResponse:
     logger.info("✓ LLM provider 검증 통과: %s", reason)
 
     # 안건 텍스트 구성
-    topic = (
+    base_topic = (
         f"[기업] {request.companyName} ({request.industry})\n"
         f"[검토 유형] {request.reviewType}\n"
         f"[상황] {request.situation}\n"
         f"[검토 대상 원문] {request.content}"
     )
+
+    # Phase 10.18 — 보조 컨텍스트 (지원사업/추가정보/첨부/후속질문) 주입
+    supplementary = _build_supplementary_context(request)
+    if supplementary:
+        topic = base_topic + "\n\n" + supplementary
+        logger.info(
+            "LangGraph 보조 컨텍스트 주입 — sc=%s, se=%s, attachments=%s, followUp=%s",
+            bool(getattr(request, "startupContext", None)),
+            bool(getattr(request, "startupExtras", None)),
+            len(getattr(request, "attachments", None) or []),
+            len(getattr(request, "followUpQuestions", None) or []),
+        )
+    else:
+        topic = base_topic
 
     initial_state: DebateState = {
         "history": f"[검토 안건]\n{topic}",

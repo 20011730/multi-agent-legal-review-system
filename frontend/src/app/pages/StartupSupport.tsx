@@ -637,7 +637,7 @@ export function StartupSupport() {
         <p className="mt-1">
           본 큐레이션은 K-Startup · 중소벤처기업부 등 공공데이터 OpenAPI 와 mock 데이터를 결합한 결과입니다.
           실제 신청 자격·금액·마감일은 각 기관 공식 페이지에서 반드시 확인해 주세요.
-          AI 추천 분석은 LLM 미사용 deterministic 규칙으로 산출되며, 추후 실제 AI 모델로 교체될 예정입니다.
+          카드의 추천도/요약은 공고 키워드 기반 사전 분석이며, 실제 법률 진단은 "법률 리스크 진단" 단계에서 멀티 에이전트 토론으로 진행됩니다.
         </p>
       </div>
     </MarketingLayout>

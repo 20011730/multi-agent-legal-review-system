@@ -81,6 +81,34 @@ public class ReviewSession {
     @Column
     private Long analysisDurationMs;
 
+    /**
+     * Phase 10.4 — 지원사업 큐레이션 진입 시 전달된 컨텍스트 JSON.
+     * 일반 진단 요청은 null. Hibernate ddl-auto:update 가 자동 컬럼 추가.
+     */
+    @Column(columnDefinition = "TEXT")
+    private String startupContextJson;
+
+    /**
+     * Phase 10.9 — 라운드 사이 사용자 추가 질문 누적 JSON.
+     * 예: [{round, targetAgent, message, createdAt}, ...]
+     */
+    @Column(columnDefinition = "TEXT")
+    private String followUpQuestionsJson;
+
+    /**
+     * Phase 10.16 — 지원사업 추가 정보 (Step 2 startupExtras) JSON.
+     * applicantType / executionMode / privacyHandling / ipOutput / workforce / priorSupport
+     */
+    @Column(columnDefinition = "TEXT")
+    private String startupExtrasJson;
+
+    /**
+     * Phase 10.16 — 첨부 파일 메타데이터 JSON.
+     * 일반 진단은 null. 데모 단계 — 본문 추출 없이 metadata 만.
+     */
+    @Column(columnDefinition = "TEXT")
+    private String attachmentsJson;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
