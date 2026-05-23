@@ -100,12 +100,25 @@ interface StartupContext {
 /**
  * Phase 10.9 — Step 3 라벨/placeholder 카테고리(reviewType) + 진단 목적 기반 동적 매핑.
  */
-function step3Labels(scenarioCategory: string, purpose: string): {
+function step3Labels(scenarioCategory: string, purpose: string, hasStartupContext: boolean = false): {
   situationLabel: string;
   situationPlaceholder: string;
   contentLabel: string;
   contentPlaceholder: string;
 } {
+  // Phase 10.36 — startupContext 존재 시 강제로 지원사업 라벨 사용.
+  // 라이브 QA 에서 자동 입력 후 scenarioCategory 가 "data" 로 잘못 매핑되어
+  // "개인정보 처리방침" 라벨이 노출되던 버그 수정.
+  if (hasStartupContext) {
+    return {
+      situationLabel: "신청·수행 예정 상황 *",
+      situationPlaceholder:
+        "신청 예정인 지원사업, 우리 팀의 진행 단계, 협약 체결 여부, 우려되는 점을 구체적으로 적어주세요.",
+      contentLabel: "공고문/협약서/사업계획 핵심 내용 *",
+      contentPlaceholder:
+        "공고문, 협약서, 사업비 집행 기준, 성과물 귀속 조항 등을 붙여 넣으세요.",
+    };
+  }
   // 우선순위: 진단 목적 → 카테고리 → 기본
   if (purpose === "startup-support" || scenarioCategory === "contract") {
     return {
@@ -165,6 +178,142 @@ function step3Labels(scenarioCategory: string, purpose: string): {
     contentLabel: "검토할 문서/문구/조항 *",
     contentPlaceholder: "계약 조항, 공지 문구, 대외 문서, 광고 문구 등의 핵심 내용을 입력하세요.",
   };
+}
+
+/**
+ * Phase 10.28 — Step 3 의 SuggestionChips 예시를 카테고리/맥락별로 다르게 제공.
+ * SITUATION_SUGGESTIONS / CONTENT_SUGGESTIONS 가 광고/계약 중심이라 다른 카테고리에선 부자연스럽던 문제 해결.
+ * startupContext 가 있으면 지원사업 시나리오 우선.
+ */
+function categoryChips(scenarioCategory: string, hasStartupContext: boolean): {
+  situationChips: string[];
+  contentChips: string[];
+} {
+  if (hasStartupContext) {
+    return {
+      situationChips: [
+        "지원사업 신청 전 협약 체결 조건과 사업비 집행 기준을 미리 검토하고 싶습니다.",
+        "선정 후 협약서·사업계획서·예산 산출내역서 작성 시 유의사항을 확인하고 싶습니다.",
+        "성과물/IP 귀속과 외주·용역·청년채용 의무 등 수행 단계 리스크를 점검하고 싶습니다.",
+      ],
+      contentChips: [
+        "공고문 핵심 조건 — 지원 자격·제외 기준·신청 절차·접수 마감일.",
+        "협약서 초안 핵심 — 사업비 정산·환수 사유·해지·성과물 귀속 조항.",
+        "사업계획서 초안 핵심 — 사업비 사용 계획·성과 목표·외주 비중.",
+      ],
+    };
+  }
+  switch (scenarioCategory) {
+    case "data":
+      return {
+        situationChips: [
+          "서비스 운영 중 수집되는 개인정보 항목과 이용 목적, 보관 기간을 검토하고 싶습니다.",
+          "위탁/제3자 제공 계약과 동의 문구의 적정성을 확인하고 싶습니다.",
+          "해외 이전·민감정보·자동화 처리 관련 컴플라이언스를 점검하고 싶습니다.",
+        ],
+        contentChips: [
+          "개인정보 처리방침 — 수집 항목·이용 목적·보관 기간·제3자 제공.",
+          "동의 문구 — 필수/선택 구분, 명시성, 철회 방법.",
+          "처리위탁 계약 — 위탁 업무 범위·수탁자·재위탁 여부.",
+        ],
+      };
+    case "ip":
+      return {
+        situationChips: [
+          "공동연구·외주 개발 결과물의 권리 귀속과 사용권 범위를 검토하고 싶습니다.",
+          "상표·특허·저작권 확보와 침해 리스크를 점검하고 싶습니다.",
+          "오픈소스 사용 컴플라이언스와 라이선스 충돌을 확인하고 싶습니다.",
+        ],
+        contentChips: [
+          "공동연구·협약서 — 성과물 귀속·사용권·실시료 조항.",
+          "외주·용역 계약 — 결과물 권리·납품·수정요청권.",
+          "오픈소스 사용 내역 — 라이선스 종류·재배포 조건.",
+        ],
+      };
+    case "labor":
+      return {
+        situationChips: [
+          "프리랜서/외주 인력이 실제 근무 형태상 근로자성에 가까운지 검토하고 싶습니다.",
+          "보수·세금·4대보험 처리와 비밀유지·경업금지 조항을 점검하고 싶습니다.",
+          "산출물 권리 귀속과 계약 해지 시 분쟁 가능성을 확인하고 싶습니다.",
+        ],
+        contentChips: [
+          "근로계약서 — 업무 범위·근무 장소/시간·보수·해지.",
+          "외주·용역 계약 — 도급/위탁 구분·성과물 귀속·검수.",
+          "사내 규정 — 비밀유지·경업금지·스톡옵션·해지 사유.",
+        ],
+      };
+    case "funding":
+      return {
+        situationChips: [
+          "Term Sheet 또는 투자계약서의 우선주·상환권·전환권 조건을 검토하고 싶습니다.",
+          "주주간계약상 동의권·태그/드래그·우선매수 등 창업자 제한을 점검하고 싶습니다.",
+          "후속 투자·M&A 시 발생할 수 있는 동의 요건과 희석 효과를 확인하고 싶습니다.",
+        ],
+        contentChips: [
+          "Term Sheet — 투자금액·밸류·우선주·전환·청산우선권.",
+          "주주간계약 — 동의권·우선매수·태그/드래그·이사회 구성.",
+          "정관 — 종류주식·전환조건·이사회 권한.",
+        ],
+      };
+    case "regulation":
+      return {
+        situationChips: [
+          "신사업 모델이 필요한 인허가/신고 요건을 충족하는지 검토하고 싶습니다.",
+          "관련 고시·가이드라인·자율규제 준수 여부를 점검하고 싶습니다.",
+          "표시광고·전자상거래·소비자보호 규제 적용 가능성을 확인하고 싶습니다.",
+        ],
+        contentChips: [
+          "사업 개요 / 서비스 흐름도 — 인허가 범위 매핑용.",
+          "관련 법령·고시 — 적용 조항 발췌.",
+          "기존 인·허가 사본 또는 변경 신청 내용.",
+        ],
+      };
+    default:
+      // 광고/계약 등 — 기존 SITUATION_SUGGESTIONS / CONTENT_SUGGESTIONS 와 유사한 기본 set
+      return {
+        situationChips: [
+          "신규 출시 직전 마케팅 문구의 과장 광고/허위 광고 위험을 미리 진단하고자 합니다.",
+          "계약 갱신 협상 전 핵심 조항(해지/면책/배상 한도)의 불리한 조건을 확인하고 싶습니다.",
+          "투자 유치를 앞두고 IR 자료/공시 문구의 법적 리스크를 점검하려 합니다.",
+        ],
+        contentChips: [
+          "본 서비스는 업계 최저가를 보장하며 어떠한 사용자에게도 동일한 혜택을 제공합니다.",
+          "제1조 (계약의 해지) — 당사는 사전 통지 없이 본 계약을 언제든지 해지할 수 있습니다.",
+          "결제는 자동 갱신되며, 환불은 어떠한 사유로도 제공되지 않습니다.",
+        ],
+      };
+  }
+}
+
+/**
+ * Phase 10.28 — Step 2 카테고리별 helper text. 진단 목적 상세 입력란 아래에 안내.
+ * 사용자가 어떤 정보를 채우면 좋은지 카테고리 맥락에서 짧게 안내.
+ */
+function step2HelperByCategory(scenarioCategory: string, hasStartupContext: boolean): string {
+  if (hasStartupContext) {
+    return "📌 지원사업 신청·수행 관점: 협약 체결 조건, 사업비 집행/정산, 성과물·IP 귀속, 외주·고용, 개인정보 처리, 중복 수혜·환수 가능성을 함께 적어 주시면 더 정확한 검토가 가능합니다.";
+  }
+  switch (scenarioCategory) {
+    case "contract":
+      return "📌 계약 검토: 계약 목적, 상대방 유형, 대금/지급 일정, 해지·환불·위약금, 손해배상·책임 제한, 자동 갱신 여부를 함께 입력하면 좋습니다.";
+    case "ip":
+      return "📌 지식재산·브랜드: 대상 권리(상표/특허/저작권/영업비밀), 권리 보유자, 공동개발/외주 여부, 성과물 귀속, 라이선스 범위를 함께 입력하면 좋습니다.";
+    case "data":
+      return "📌 개인정보·데이터: 수집 항목, 이용 목적, 동의 방식, 보관 기간, 제3자 제공/처리위탁/국외 이전 여부를 함께 입력하면 좋습니다.";
+    case "regulation":
+      return "📌 규제·인허가: 사업 분야, 필요한 인허가, 판매·제공 지역, 대상 고객, 관련 고시/가이드라인을 함께 입력하면 좋습니다.";
+    case "labor":
+      return "📌 인사·노무: 근로자/프리랜서/외주 구분, 업무 지시 방식, 근무 장소·시간, 보수 지급 방식, 4대보험 여부, 산출물 권리를 함께 입력하면 좋습니다.";
+    case "funding":
+      return "📌 투자·자금조달: 투자 형태, 투자자 유형, 지분/전환/상환 조건, 주요 주주 권리, 우선주/SAFE/CB 여부, 동반매도·우선매수권을 함께 입력하면 좋습니다.";
+    case "operation":
+      return "📌 기업운영·법무: 정관/주주간계약, 이사회/주총, 내부 승인 절차, 대표 권한, 이해상충 가능성을 함께 입력하면 좋습니다.";
+    case "exit":
+      return "📌 사업정리·재도전: 폐업/청산/회생 여부, 미지급 채무, 임직원 정리, 고객 계약 종료, 데이터 파기, 지원금 정산/환수를 함께 입력하면 좋습니다.";
+    default:
+      return "📌 진단 목적과 함께 상황·우려 사항을 구체적으로 적어 주시면 에이전트들이 핵심 리스크를 더 정확히 식별할 수 있습니다.";
+  }
 }
 
 /** Phase 10.7 — 진단 목적별 상세 입력 placeholder 동적 매핑. */
@@ -751,7 +900,7 @@ export function InputPage() {
               onRevertDraft={handleRevertStartupDraft}
               onClearContext={handleClearStartupContext}
               onClearAll={handleClearAllStartupData}
-              canFillDraft={formData.situation.trim() === "" || formData.content.trim() === ""}
+              canFillDraft={true /* Phase 10.26 — 항상 활성화. 3-way 모달이 기존 입력 처리. 되돌리기 후에도 비활성화 X */}
               draftApplied={draftApplied}
               canRevert={draftBackup !== null}
             />
@@ -952,6 +1101,10 @@ export function InputPage() {
                     {purposeHelper(formData.diagnosticPurpose)}
                   </p>
                 </div>
+                {/* Phase 10.28 — Step 2 카테고리별 helper panel */}
+                <div className="mt-2 rounded-md border border-[#1E3A8A]/15 bg-[#1E3A8A]/5 px-3 py-2 text-[11.5px] leading-relaxed text-[#1E3A8A]/90">
+                  {step2HelperByCategory(scenarioCategory, Boolean(startupContext))}
+                </div>
               </CardContent>
             </Card>
           )}
@@ -1097,12 +1250,12 @@ export function InputPage() {
                 <CardContent className="space-y-4">
                   {/* Phase 10.9 — 카테고리 + 진단 목적 기반 동적 라벨/placeholder */}
                   {(() => {
-                    const labels = step3Labels(scenarioCategory, formData.diagnosticPurpose);
+                    const labels = step3Labels(scenarioCategory, formData.diagnosticPurpose, Boolean(startupContext));
                     return null; /* labels 는 아래에서 사용 */
                   })()}
                   <div className="space-y-2">
                     <Label htmlFor="situation">
-                      {step3Labels(scenarioCategory, formData.diagnosticPurpose).situationLabel}
+                      {step3Labels(scenarioCategory, formData.diagnosticPurpose, Boolean(startupContext)).situationLabel}
                     </Label>
                     <Textarea
                       id="situation"
@@ -1112,13 +1265,14 @@ export function InputPage() {
                       placeholder={
                         startupContext
                           ? "위의 '지원사업 정보로 입력 초안 만들기' 버튼으로 자동 채우거나, 직접 작성하세요. " +
-                            step3Labels(scenarioCategory, formData.diagnosticPurpose).situationPlaceholder
-                          : step3Labels(scenarioCategory, formData.diagnosticPurpose).situationPlaceholder
+                            step3Labels(scenarioCategory, formData.diagnosticPurpose, Boolean(startupContext)).situationPlaceholder
+                          : step3Labels(scenarioCategory, formData.diagnosticPurpose, Boolean(startupContext)).situationPlaceholder
                       }
                     />
+                    {/* Phase 10.28 — 카테고리/맥락별 chip */}
                     <SuggestionChips
                       title="자주 입력하는 상황 예시"
-                      items={SITUATION_SUGGESTIONS}
+                      items={categoryChips(scenarioCategory, Boolean(startupContext)).situationChips}
                       onApply={(t) =>
                         setFormData((prev) => ({ ...prev, situation: appendSuggestion(prev.situation, t) }))
                       }
@@ -1126,18 +1280,19 @@ export function InputPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="content">
-                      {step3Labels(scenarioCategory, formData.diagnosticPurpose).contentLabel}
+                      {step3Labels(scenarioCategory, formData.diagnosticPurpose, Boolean(startupContext)).contentLabel}
                     </Label>
                     <Textarea
                       id="content"
                       value={formData.content}
                       onChange={(e) => setFormData({ ...formData, content: e.target.value })}
                       className="min-h-[180px]"
-                      placeholder={step3Labels(scenarioCategory, formData.diagnosticPurpose).contentPlaceholder}
+                      placeholder={step3Labels(scenarioCategory, formData.diagnosticPurpose, Boolean(startupContext)).contentPlaceholder}
                     />
+                    {/* Phase 10.28 — 카테고리/맥락별 chip */}
                     <SuggestionChips
-                      title="검토 대상 문구 예시"
-                      items={CONTENT_SUGGESTIONS}
+                      title={startupContext ? "공고/협약 핵심 내용 예시" : "검토 대상 문구 예시"}
+                      items={categoryChips(scenarioCategory, Boolean(startupContext)).contentChips}
                       onApply={(t) =>
                         setFormData((prev) => ({ ...prev, content: appendSuggestion(prev.content, t) }))
                       }

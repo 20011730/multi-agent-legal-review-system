@@ -240,18 +240,17 @@ public class SessionService {
         req.setAttachments(attachments);
         req.setFollowUpQuestions(followUps);
 
-        // 4) 이전 분석 산출물 정리 — 재분석 후 결과가 깔끔하게 보이도록 토론 메시지/근거/최종판정 제거
-        // (Phase 10.18) 이전엔 append 되어 round 1,2가 중복 표시되던 문제 해결
-        try {
-            messageRepository.deleteBySessionId(sessionId);
-            evidenceRepository.deleteBySessionId(sessionId);
-            finalDecisionRepository.findBySessionId(sessionId).ifPresent(fd -> {
-                session.setFinalDecision(null); // orphanRemoval=true → DELETE
-            });
-            log.info("[reanalyze] 이전 분석 산출물 정리 완료 (sessionId={})", sessionId);
-        } catch (Exception ex) {
-            log.warn("[reanalyze] 이전 산출물 정리 부분 실패 (계속 진행): {}", ex.getMessage());
-        }
+        // Phase 10.26 — 이전 토론 기록 **보존**. 재검토 결과는 기존 라운드 아래에 append.
+        // 이전(10.18)에는 messages/evidences/finalDecision 을 삭제했지만, 사용자 QA 결과
+        // "기존 토론 + 새 결과 모두 보존" 요구로 변경.
+        //
+        // - 토론 메시지: 삭제하지 않음. AnalysisAsyncRunner.saveDebateMessages 가 round 값을
+        //   그대로 저장하므로 기존 라운드 1·2 와 새 라운드 1·2 가 함께 존재. frontend 에서는
+        //   "추가 질문 반영 재검토" system 메시지(SSE publishMessage 가 발행)로 경계 표시.
+        // - 최종 판정: 새 분석이 만든 FinalDecision 으로 교체됨 (AnalysisAsyncRunner.saveFinalDecision
+        //   안의 orphanRemoval 동작). 이전 finalDecision row 만 삭제되고 토론 메시지는 살아있음.
+        // - 근거(evidences): 토론과 함께 누적 보관.
+        log.info("[reanalyze] 이전 토론 기록 보존 — 새 분석 결과는 기존 아래에 append (sessionId={})", sessionId);
 
         // 5) status 변경 + 트랜잭션 커밋 후 비동기 분석
         session.setStatus("REANALYZING");

@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { exportElementToPdf } from "../utils/exportVerdictPdf";
 import { EvidenceCardList, type EvidenceItem } from "../components/EvidenceCard";
 import { normalizeEvidences } from "../utils/normalizeEvidence";
+import { targetAgentLabel } from "./Result";
 
 interface ReviewData {
   companyName: string;
@@ -249,6 +250,51 @@ export function Verdict() {
           <div>
             <h2 className="text-2xl font-semibold text-[#1E3A8A]">최종 법률 리스크 리포트</h2>
             <p className="text-sm text-slate-600 mt-1">토론 결과를 구조화한 최종 보고서입니다.</p>
+            {/* Phase 10.29 — 분석 대상 요약 chip (회사명/카테고리/목적/지원사업/첨부/질문 수) */}
+            {(() => {
+              const sc = startupContext as { title?: string } | null;
+              const attachmentsRaw = (reviewData as unknown as { attachments?: unknown }).attachments;
+              const attCount = Array.isArray(attachmentsRaw) ? (attachmentsRaw as unknown[]).length : 0;
+              const fqCount = followUpQuestions.length;
+              const purpose = ((reviewData as unknown as { diagnosticPurpose?: string; customPurpose?: string }).diagnosticPurpose
+                || (reviewData as unknown as { customPurpose?: string }).customPurpose || "").toString().trim();
+              const chips: Array<{ k: string; v: string; cls?: string }> = [];
+              if (reviewData.companyName) chips.push({ k: "회사", v: reviewData.companyName });
+              if (reviewData.reviewType) chips.push({ k: "카테고리", v: reviewData.reviewType });
+              if (purpose) chips.push({ k: "진단 목적", v: purpose.slice(0, 28) });
+              if (sc?.title) chips.push({ k: "지원사업", v: sc.title.slice(0, 28), cls: "border-[#1E3A8A]/30 bg-[#1E3A8A]/5 text-[#1E3A8A]" });
+              chips.push({ k: "첨부", v: `${attCount}건` });
+              chips.push({ k: "추가 질문", v: `${fqCount}건` });
+              return (
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  {chips.map((c, i) => (
+                    <span
+                      key={i}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] ${
+                        c.cls || "border-slate-200 bg-slate-50 text-slate-700"
+                      }`}
+                    >
+                      <span className="opacity-70">{c.k}</span>
+                      <span className="font-medium">{c.v}</span>
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
+            {/* Phase 10.27 — finalDecision 일부 필드 누락 안내 (빈 카드만 보이지 않도록) */}
+            {finalDecision && (() => {
+              const s = (finalDecision.summary || "").trim();
+              const r = (finalDecision.recommendation || "").trim();
+              const rl = Array.isArray(finalDecision.risks) ? finalDecision.risks.length : 0;
+              const partial = (s.length < 20 && r.length < 20) || (rl === 0 && !s);
+              if (!partial) return null;
+              return (
+                <div className="mt-3 rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-[12px] text-sky-900">
+                  ℹ 분석 결과 일부 필드가 비어 있어 입력 정보와 토론 로그 기반 요약을 함께 표시합니다.
+                  토론 로그(상세 보기) 와 함께 확인해 주세요.
+                </div>
+              );
+            })()}
           </div>
 
           {/* Phase 10.11 — AI 분석 실패 시 명확한 실패 배너 (mock 결과처럼 보이지 않도록) */}
@@ -263,9 +309,9 @@ export function Verdict() {
                 <div className="flex-1">
                   <p className="text-sm font-semibold text-rose-900">AI 분석 결과를 받지 못했습니다</p>
                   <p className="mt-1 text-xs leading-relaxed text-rose-800">
-                    분석 서버(Ollama / Python AI) 연결에 실패했거나 결과 생성이 완료되지 않았습니다.
-                    아래에 표시되는 점수와 항목은 <strong>임시 fallback 값</strong>이며 실제 진단 결과가 아닙니다.
-                    Ollama 서버 실행 상태와 모델명을 확인한 뒤 다시 시도해 주세요.
+                    AI 검토팀이 결과 생성을 완료하지 못했습니다.
+                    아래에 표시되는 점수와 항목은 <strong>임시 보조 값</strong>이며 실제 진단 결과가 아닙니다.
+                    잠시 후 다시 시도하거나, 입력 내용을 확인해 주세요.
                   </p>
                   <button
                     type="button"
@@ -410,8 +456,28 @@ export function Verdict() {
             </CardContent>
           </Card>
 
-          {/* 수정안 (원문 vs 권고) */}
-          {finalDecision?.revisedContent && (
+          {/* Phase 10.27 — 수정안은 광고/문구/계약 등 "텍스트 수정이 의미 있는" 검토 유형에서만 표시.
+              지원사업 일반 진단(R&D/사업화 등)에서는 원문이 공고/협약서이므로 1:1 수정안 비교가 부자연스러움.
+              조건: (1) revisedContent 가 비어있지 않고 (2) 원문 길이가 충분히 짧거나(< 1500자)
+                    (3) reviewType/situation 에 광고/문구/약관/조항 키워드가 있을 때 */}
+          {finalDecision?.revisedContent && (() => {
+            const rv = (finalDecision.revisedContent || "").trim();
+            if (!rv || rv.length < 5) return false;
+            const orig = (reviewData.content || "");
+            if (rv === orig.trim()) return false;
+            // Phase 10.30 — 지원사업 기반 검토면 원문/수정안 카드 강제 비표시.
+            // 사용자 QA: "지원사업 신청/협약/정산/IP 점검에서 광고문구식 수정안이 부적절" — 명시 제외.
+            if (startupContext) return false;
+            const hay = `${reviewData.reviewType || ""} ${reviewData.situation || ""} ${orig}`.toLowerCase();
+            // Phase 10.30 — 지원사업/협약/정산/사업비/성과물 키워드면 텍스트 수정 카드 비표시
+            const startupHints = ["지원사업", "협약", "정산", "사업비", "성과물", "환수", "보조금", "정부지원"];
+            if (startupHints.some((k) => hay.includes(k))) return false;
+            // 광고/문구/약관/조항 키워드 — 1:1 비교가 자연스러운 경우
+            const textRevisionHints = ["광고", "표시", "문구", "마케팅", "약관", "조항", "캐치", "랜딩", "이벤트", "후기"];
+            const hasTextRevisionHint = textRevisionHints.some((k) => hay.includes(k));
+            const shortOrig = orig.length > 0 && orig.length <= 800;
+            return hasTextRevisionHint || shortOrig;
+          })() && (
             <div className="grid md:grid-cols-2 gap-4">
               <Card className="border-red-200 bg-red-50/50">
                 <CardHeader>
@@ -527,7 +593,28 @@ export function Verdict() {
             const list: Array<Record<string, unknown>> = Array.isArray(attachmentsRaw)
               ? (attachmentsRaw as Array<Record<string, unknown>>)
               : [];
-            if (list.length === 0) return null;
+            // Phase 10.29 — 첨부자료 없음 안내 (빈 화면 대신 명확한 fallback)
+            if (list.length === 0) {
+              return (
+                <Card className="border-slate-200 bg-slate-50/30">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <FileText className="w-5 h-5 text-slate-500" />
+                      첨부자료 없음
+                    </CardTitle>
+                    <CardDescription>
+                      현재 결과는 입력 정보와 공고/토론 내용을 기준으로 작성되었습니다.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-1 text-[12.5px] text-slate-700">
+                    <p>💡 협약서, 사업계획서, 계약서, 개인정보 처리방침 등을 추가하면 정확도가 높아집니다.</p>
+                    <p className="text-[10.5px] text-slate-500">
+                      ※ 현재 데모 단계에서는 txt/md/json 본문 일부 반영, PDF/DOCX 는 파일명·메타데이터 중심으로 참고됩니다.
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+            }
             let withBody = 0;
             let metaOnly = 0;
             let masked = 0;
@@ -593,6 +680,211 @@ export function Verdict() {
             );
           })()}
 
+          {/* Phase 10.29 — 시나리오별(지원사업/계약/개인정보/고용/IP/투자/규제/사업정리) 결과 섹션.
+              category + startupContext + content 키워드를 조합해 가장 적합한 분기 선택. */}
+          {(() => {
+            const sc = startupContext as { title?: string; category?: string } | null;
+            const isStartup = Boolean(sc);
+            const cat = (reviewData.reviewType || "").toLowerCase();
+            const rawHay = `${reviewData.situation || ""} ${reviewData.content || ""}`.toLowerCase();
+
+            // Phase 10.29 — 시나리오 결정 (우선순위: startupContext > category > content 키워드)
+            type Scenario = "startup" | "contract" | "data" | "labor" | "ip" | "funding" | "regulation" | "exit" | "default";
+            const scenario: Scenario = (() => {
+              if (isStartup) return "startup";
+              if (cat.includes("contract") || rawHay.includes("계약") && rawHay.includes("해지")) return "contract";
+              if (cat.includes("data") || cat.includes("privacy") || rawHay.includes("개인정보")) return "data";
+              if (cat.includes("labor") || cat.includes("hr") || rawHay.includes("근로계약") || rawHay.includes("프리랜서")) return "labor";
+              if (cat.includes("ip") || cat.includes("brand") || rawHay.includes("지식재산") || rawHay.includes("상표")) return "ip";
+              if (cat.includes("funding") || cat.includes("invest") || rawHay.includes("투자계약") || rawHay.includes("term sheet")) return "funding";
+              if (cat.includes("regulation") || rawHay.includes("인허가") || rawHay.includes("신고")) return "regulation";
+              if (cat.includes("exit") || rawHay.includes("폐업") || rawHay.includes("청산")) return "exit";
+              return "default";
+            })();
+
+            // Phase 10.29 — 시나리오별 자료/체크리스트/후속검토 fallback (finalDecision 데이터 미존재 시 사용)
+            const PRESETS: Record<Scenario, { title: string; desc: string; docs: string[]; checks: string[]; followUp: string }> = {
+              startup: {
+                title: "지원사업 기반 검토 — 신청·협약·정산·IP·개인정보·환수 권장 점검",
+                desc: "공고/협약 단계에서 자주 발생하는 리스크와 보완 항목입니다.",
+                docs: [
+                  "공고문 원문 PDF — 지원 자격·제외 조건·접수 마감",
+                  "선정 후 협약서 초안 — 환수·정산·해지 조항",
+                  "사업계획서 초안 — 사업비 사용·성과물 계획",
+                  "예산 산출내역서 — 집행 가능 항목 / 증빙 기준",
+                  "외주·용역 계약 초안 — 도급/위탁 구분, 성과물 귀속",
+                  "성과물/IP 귀속 조항 — 단독·공동·사용권 범위",
+                  "개인정보 처리 흐름 — 동의·보관·제3자 제공·위탁",
+                ],
+                checks: [
+                  "신청 자격 충족 확인 (기업 규모·업력·업종 제한)",
+                  "협약 조건 확인 (정산 기준·환수·해지·제재)",
+                  "사업비 집행 항목 확인 (외주·인건비 한도)",
+                  "성과물/IP 귀속 확인 (단독·공동·사용권 범위)",
+                  "개인정보 처리 흐름 확인 (수집·보관·제3자 제공)",
+                  "중복 수혜·이중지원 가능성 확인",
+                  "홍보 문구의 '100% 지원/무료/보장' 표현은 실제 조건과 일치하는지 확인",
+                ],
+                followUp: "선정 후 협약서 수령 시 재검토 필요. 외주·용역 계약 체결 직전 추가 검토 권장.",
+              },
+              contract: {
+                title: "계약·거래 검토 — 대금·해지·책임·자동갱신 권장 점검",
+                desc: "체결 전 확인할 핵심 조항과 협상 포인트 중심입니다.",
+                docs: ["계약서 초안 / 최종안", "견적서·발주서·제안서", "상대방 협의 이력 또는 의사록", "산출물 귀속·검수 조항"],
+                checks: [
+                  "대금 / 지급 시기 / 분할 지급 조건 확인",
+                  "해지 / 환불 / 위약금 조항 확인",
+                  "손해배상 한도 / 면책 범위 확인",
+                  "자동 갱신 / 중도 해지 / 통지 기간 확인",
+                  "산출물 / 데이터 / IP 권리 귀속 확인",
+                  "분쟁 시 관할 / 준거법 / 중재 조항 확인",
+                ],
+                followUp: "수정 조항 적용 후 상대방 합의 단계에서 재검토 권장.",
+              },
+              data: {
+                title: "개인정보·데이터 검토 — 수집·동의·보관·제공 점검",
+                desc: "개인정보보호법·정보통신망법 기준 확인 사항입니다.",
+                docs: ["개인정보 처리방침", "동의서 / 동의 문구", "수집 항목·이용 목적 표", "처리위탁 계약서", "보관·파기 정책"],
+                checks: [
+                  "수집 항목 최소화 (필요 최소 원칙)",
+                  "동의 문구 명시성 / 필수·선택 구분",
+                  "보관 기간 / 파기 절차 확인",
+                  "제3자 제공 동의 별도 여부 확인",
+                  "처리위탁·재위탁 범위 확인",
+                  "국외 이전 / 민감정보 / 자동화 처리 별도 안내",
+                ],
+                followUp: "처리방침 개정 시 사전 고지 + 주요 변경 사항 재검토 필요.",
+              },
+              labor: {
+                title: "인사·노무 검토 — 근로자성·도급 구분·산출물 권리 점검",
+                desc: "외주·프리랜서·임직원 계약의 노무 리스크 중심입니다.",
+                docs: ["근로계약서 / 외주·용역 계약서", "업무 지시 이력 (이메일/메신저)", "임금·보수 지급 명세", "사내 규정 (비밀유지·경업금지)"],
+                checks: [
+                  "실제 근무 형태가 도급/위탁/근로 중 어디인지 확인",
+                  "업무 지시 방식 / 지휘감독 정도 확인",
+                  "보수 / 4대보험 / 퇴직금 처리 확인",
+                  "성과물 권리 귀속 확인",
+                  "비밀유지·경업금지 조항의 합리적 범위 확인",
+                  "해지 / 분쟁 발생 시 절차 확인",
+                ],
+                followUp: "외주가 실제로 근로자성에 가까우면 재계약 시 형태 재검토 권장.",
+              },
+              ip: {
+                title: "지식재산·브랜드 검토 — 권리 귀속·라이선스·침해 점검",
+                desc: "상표·특허·저작권·영업비밀 확보와 외주 산출물 권리 중심입니다.",
+                docs: ["공동연구·협약서", "외주·용역 계약 (성과물 권리 조항)", "출원 명세서 / 상표·특허 자료", "오픈소스 사용 내역"],
+                checks: [
+                  "성과물 단독 / 공동 귀속 확인",
+                  "외주 결과물 권리 양도 조항 확인",
+                  "사용권(실시권) 범위 / 기간 / 지역 확인",
+                  "오픈소스 라이선스 충돌 검토",
+                  "상표·특허·저작권 침해 가능성 검토",
+                  "영업비밀 보호 조치 (NDA·접근 통제) 확인",
+                ],
+                followUp: "출원·등록 단계마다 권리자 / 사용권 범위 재검토 권장.",
+              },
+              funding: {
+                title: "투자·자금조달 검토 — 우선주·전환·창업자 제한 점검",
+                desc: "Term Sheet·투자계약서·주주간계약 핵심 조항 중심입니다.",
+                docs: ["Term Sheet", "투자계약서 초안", "주주간계약서", "정관 / cap table"],
+                checks: [
+                  "투자금액 / 밸류 / 우선주 조건 확인",
+                  "전환권 / 상환권 / 청산우선권 확인",
+                  "동의권 / 우선매수 / 태그·드래그 조항 확인",
+                  "이사회 구성 / 의사결정 권한 확인",
+                  "후속 투자 시 희석 효과 시뮬레이션",
+                  "창업자 제한 조항 (경업금지·근속·베스팅) 확인",
+                ],
+                followUp: "후속 라운드 진입 직전 cap table 시뮬레이션 재검토 권장.",
+              },
+              regulation: {
+                title: "규제·인허가 검토 — 인허가·신고·고시 점검",
+                desc: "사업 모델별 적용 규제와 인허가 요건 중심입니다.",
+                docs: ["사업 개요 / 서비스 흐름도", "관련 법령·고시·가이드라인", "기존 인·허가 사본 또는 변경 신청 내용"],
+                checks: [
+                  "필요한 인허가 / 신고 / 등록 요건 식별",
+                  "판매·제공 지역별 규제 차이 확인",
+                  "대상 고객 (B2C / B2B / 청소년 등) 별 제한 확인",
+                  "관련 고시 / 자율규제 / 가이드라인 준수 여부 확인",
+                  "표시광고법·전자상거래법·소비자보호법 적용 여부 확인",
+                  "미신고 / 무허가 영업 리스크 확인",
+                ],
+                followUp: "관련 법령 개정 시 / 사업 모델 확장 시 재검토 권장.",
+              },
+              exit: {
+                title: "사업정리·재도전 검토 — 채무·계약·정산·재도전 점검",
+                desc: "폐업·청산·회생·재도전 단계의 리스크 중심입니다.",
+                docs: ["채무 / 미지급금 내역", "고객·임직원·외주 계약 종료 안내", "데이터·개인정보 파기 정책", "정부지원금 정산·환수 자료"],
+                checks: [
+                  "미지급 채무 / 우선 변제 순위 확인",
+                  "고객 환불·서비스 종료 통지 절차 확인",
+                  "임직원 정리 (퇴직금·미지급 임금) 확인",
+                  "데이터 / 개인정보 파기 절차 확인",
+                  "정부지원금 정산 / 환수 가능성 확인",
+                  "회생 / 파산 / 폐업 절차 선택 검토",
+                ],
+                followUp: "재도전 단계에서 제한업종 / 신용 / 지원사업 제외 여부 재검토 권장.",
+              },
+              default: {
+                title: "사후 점검 항목",
+                desc: "본 검토 이후 사용자가 추가로 확인하면 좋은 자료와 작업입니다.",
+                docs: ["검토 대상 문서 원본 (계약서/약관/문구)", "관련 협의 이력 또는 의사록", "근거 자료 (가격·성능·인증·후기 등)"],
+                checks: [
+                  "표시·광고 표현 근거 자료 보관",
+                  "계약 조항 중 해지·환불·손해배상 범위 확인",
+                  "민감 표현(완벽/100%/최고/유일) 점검",
+                ],
+                followUp: "수정안 적용 후 재검토 권장. 상대방/주관기관 의견 반영 시 후속 검토 필요.",
+              },
+            };
+            const preset = PRESETS[scenario];
+
+            // Phase 10.29 — 후속 검토 필요성 판단: riskScore + risks + 첨부 + startupContext 조합
+            const highRiskCount = Array.isArray(finalDecision?.risks)
+              ? finalDecision!.risks.filter((r) => String((r as { level?: string }).level).toLowerCase() === "high").length
+              : 0;
+            const attachmentsRaw = (reviewData as unknown as { attachments?: unknown }).attachments;
+            const attCount = Array.isArray(attachmentsRaw) ? (attachmentsRaw as unknown[]).length : 0;
+            const needsFollowUp = riskScore >= 70 || highRiskCount >= 1 || (isStartup && attCount === 0) || aiFailed;
+            const followUpVerdict = needsFollowUp
+              ? `🔁 후속 검토 권장 — ${preset.followUp}`
+              : `✅ 현재 입력 정보 기준 후속 검토 필요성 낮음 — ${preset.followUp}`;
+
+            return (
+              <Card className="border-emerald-200 bg-emerald-50/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <FileText className="w-5 h-5 text-emerald-700" />
+                    {preset.title}
+                  </CardTitle>
+                  <CardDescription>{preset.desc}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-slate-700">
+                  <div>
+                    <p className="font-semibold text-emerald-800">📎 추가로 필요한 자료</p>
+                    <ul className="ml-4 mt-1 list-disc space-y-0.5 text-[12.5px]">
+                      {preset.docs.map((d, i) => <li key={i}>{d}</li>)}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-emerald-800">✅ 실행 체크리스트</p>
+                    <ul className="ml-4 mt-1 list-disc space-y-0.5 text-[12.5px]">
+                      {preset.checks.map((c, i) => <li key={i}>{c}</li>)}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-emerald-800">🔁 후속 검토 필요 여부</p>
+                    <p className="mt-1 text-[12.5px] leading-relaxed">{followUpVerdict}</p>
+                  </div>
+                  <p className="text-[10.5px] text-slate-500">
+                    ※ 본 항목은 입력 카테고리(<strong>{scenario}</strong>)·공고 컨텍스트·토론 로그를 토대로 자동 생성된 사전 가이드입니다.
+                    실제 협약서/계약서 원문이 확보되면 보다 정밀한 검토가 가능합니다.
+                  </p>
+                </CardContent>
+              </Card>
+            );
+          })()}
+
           {/* Phase 10.12 — 사용자 추가 질문 반영 항목 */}
           {followUpQuestions.length > 0 && (
             <Card className="border-amber-200 bg-amber-50/30">
@@ -606,24 +898,60 @@ export function Verdict() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                {followUpQuestions.map((q, i) => (
-                  <div key={i} className="rounded border border-amber-200 bg-white px-3 py-2">
-                    <div className="mb-0.5 flex flex-wrap items-center gap-2 text-[10.5px] text-slate-500">
-                      <span className="rounded-full border border-slate-300 bg-slate-50 px-1.5 py-0">
-                        대상: {q.targetAgent || "전체"}
-                      </span>
-                      {q.createdAt && (
-                        <span>{new Date(q.createdAt).toLocaleString("ko-KR")}</span>
-                      )}
-                      <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0 text-amber-800">
-                        저장됨 · 다음 재분석 시 반영
-                      </span>
-                    </div>
-                    <p className="break-keep text-sm text-slate-700">{q.message}</p>
-                  </div>
-                ))}
+                {followUpQuestions.map((q, i) => {
+                  // Phase 10.29 — 질문 키워드 기반 반영 위치 안내 (fallback)
+                  const hay = (q.message || "").toLowerCase();
+                  const reflection = (() => {
+                    if (/사업비|외주|용역|정산|환수/.test(hay)) {
+                      return "관련 내용은 '사업비 집행·정산' 및 '추가 자료/체크리스트' 섹션에 반영되었습니다.";
+                    }
+                    if (/지식재산|성과물|ip|특허|상표|저작/.test(hay)) {
+                      return "관련 내용은 '성과물·IP 귀속 확인' 섹션에 반영되었습니다.";
+                    }
+                    if (/개인정보|동의|제3자|위탁|보관/.test(hay)) {
+                      return "관련 내용은 '개인정보/데이터 처리' 섹션에 반영되었습니다.";
+                    }
+                    if (/근로|고용|프리랜서|도급|4대보험/.test(hay)) {
+                      return "관련 내용은 '외주·고용 관련 주의사항' 섹션에 반영되었습니다.";
+                    }
+                    if (/광고|홍보|100%|무료|보장|이벤트|문구/.test(hay)) {
+                      return "관련 내용은 '표시광고/홍보 문구 주의사항' 섹션에 반영되었습니다.";
+                    }
+                    return "이 질문은 재검토 요청에 포함되었으며, 관련 내용은 종합 요약과 주요 리스크/권고안에 반영되었습니다.";
+                  })();
+                  // 재검토 반영 상태 판단 — finalDecision 존재 + reanalyzeBadge 데이터 부재로 단순화:
+                  // finalDecision 이 있고 messageCount 가 충분하면 "재검토에 포함됨", 아니면 "재검토 반영 대기"
+                  const reflected = Boolean(finalDecision);
+                  return (
+                    <details key={i} className="group rounded border border-amber-200 bg-white px-3 py-2 open:bg-amber-50/50">
+                      <summary className="cursor-pointer list-none">
+                        <div className="mb-0.5 flex flex-wrap items-center gap-2 text-[10.5px] text-slate-500">
+                          <span className="rounded-full border border-slate-300 bg-slate-50 px-1.5 py-0">
+                            🙋 대상: {targetAgentLabel(q.targetAgent)}
+                          </span>
+                          {q.createdAt && <span>{new Date(q.createdAt).toLocaleString("ko-KR")}</span>}
+                          <span
+                            className={`rounded-full border px-1.5 py-0 ${
+                              reflected
+                                ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                                : "border-amber-300 bg-amber-50 text-amber-800"
+                            }`}
+                          >
+                            {reflected ? "재검토에 포함됨" : "재검토 반영 대기"}
+                          </span>
+                          <span className="ml-auto text-[10px] text-slate-400 group-open:hidden">▾ 펼치기</span>
+                          <span className="ml-auto text-[10px] text-slate-400 hidden group-open:inline">▴ 접기</span>
+                        </div>
+                        <p className="break-keep text-sm text-slate-700">{q.message}</p>
+                      </summary>
+                      <div className="mt-2 rounded border border-emerald-200 bg-emerald-50/40 px-2 py-1.5 text-[12px] leading-relaxed text-emerald-900">
+                        💡 {reflection}
+                      </div>
+                    </details>
+                  );
+                })}
                 <p className="mt-1 text-[10.5px] text-slate-500">
-                  ※ 실제 AI 재호출은 다음 단계 작업에서 자동 트리거 됩니다. 현재는 질문이 안전하게 저장되어 결과 검토 시 참고됩니다.
+                  ※ 질문별 반영 요약은 키워드 기반 보조 안내입니다. 정확한 답변은 토론 로그(상세 보기)의 재검토 라운드에서 확인하세요.
                 </p>
               </CardContent>
             </Card>

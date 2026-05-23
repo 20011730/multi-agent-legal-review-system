@@ -156,6 +156,25 @@ const liveTicker = [
 
 const POLL_INTERVAL = 3000;
 
+/**
+ * Phase 10.33 — targetAgent 내부 코드 → 사용자 친화 한국어 라벨 매핑.
+ * 사용자 화면(말풍선, 헤더, /verdict)에서 judge/ethics/system 같은 내부명이 노출되지 않도록.
+ */
+export function targetAgentLabel(v?: string | null): string {
+  if (!v) return "전체 에이전트";
+  const k = v.toLowerCase().trim();
+  switch (k) {
+    case "all": return "전체 에이전트";
+    case "business":
+    case "risk": return "비즈니스 전략가";
+    case "legal": return "법률 전문가";
+    case "ethics": return "리스크 검토자";
+    case "judge": return "최종 판정관";
+    case "system": return "시스템 안내";
+    default: return v;
+  }
+}
+
 /* ── JUDGE 메시지 렌더링 (JSON → 사람이 읽는 형식) ── */
 function renderJudgeContent(content: string) {
   // 이미 마크다운 형식이면 그대로 렌더링
@@ -430,10 +449,11 @@ export function Result() {
 
       if (isFinal) {
         const hasError = mapped.some((m) => m.type === "error");
-        if (hasError) setError("AI 분석에 실패했습니다. 결과가 제한적일 수 있습니다.");
+        // Phase 10.33 — 사용자 친화 문구 + 기존 결과 유지 안내
+        if (hasError) setError("일부 검토 단계에서 문제가 발생했습니다. 기존 검토 결과는 유지됩니다. 잠시 후 다시 시도하거나 기존 결과로 최종 리포트를 확인할 수 있습니다.");
         setIsComplete(true);
         isCompleteRef.current = true;
-        setCurrentPhase({ label: "분석 완료", description: "모든 에이전트의 검토가 완료되었습니다.", progress: 100, humourLabel: "세 명의 전문가를 설득하는 데 성공했습니다!" });
+        setCurrentPhase({ label: "검토 완료", description: "AI 검토팀의 논의가 완료되어 최종 리포트가 준비되었습니다.", progress: 100, humourLabel: "최종 리포트를 확인할 준비가 되었습니다." });
         setIsAnalyzing(false);
       }
     } catch (e) {
@@ -480,8 +500,9 @@ export function Result() {
               ? {
                   ...prev,
                   progress: 15,
-                  label: "세션 생성 및 입력 분석 중",
-                  description: "Python AI 서버에 분석 요청을 전송하고 보조 컨텍스트(공고/첨부/추가 질문)를 주입하고 있습니다.",
+                  // Phase 10.30 — 사용자용 친화 문구 (내부 구현 용어 제거)
+                  label: "검토 준비 중",
+                  description: "입력하신 내용, 공고 정보, 첨부자료, 추가 질문을 함께 정리하고 있습니다.",
                 }
               : prev,
           );
@@ -521,7 +542,8 @@ export function Result() {
           }
         } else if (status.status === "FAILED") {
           cleanup();
-          setError("분석에 실패했습니다. 다시 시도해주세요.");
+          // Phase 10.27 — 실패 시 기존 결과 보존 안내 추가
+          setError("분석에 실패했습니다. 기존 결과는 유지됩니다. 잠시 후 다시 시도하거나 서버 상태를 확인하세요.");
           setIsAnalyzing(false);
         }
       } catch {
@@ -647,7 +669,7 @@ export function Result() {
           ...prev,
           progress: 100,
           label: "토론이 완료되어 최종 판정을 확인할 수 있습니다.",
-          description: "치열한 토론 끝에 결론이 도출되었습니다.",
+          description: "AI 검토팀의 논의가 완료되어 최종 리포트가 준비되었습니다.",
         }));
         // 최종 결과 (finalDecision/evidences) 는 기존 fetch 로 받아 채움
         fetchDebateResult(String(sessionId), true);
@@ -674,10 +696,34 @@ export function Result() {
     };
   }, [navigate, cleanup, pollSessionStatus, fetchDebateResult]);
 
-  /* ── 경과 시간 타이머 ── */
+  /* ── 경과 시간 타이머 + Phase 10.26 시간 기반 progress 점진 bump + Phase 10.27 장시간 안내 ── */
   useEffect(() => {
     if (!isAnalyzing) return;
-    timerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
+    timerRef.current = setInterval(() => {
+      setElapsedSeconds((s) => {
+        const next = s + 1;
+        // Phase 10.26 — SSE/polling 이벤트가 도착하지 않아 progress 가 15% 등에서 멈춘 경우 시간 기반 nudge.
+        if (next % 5 === 0) {
+          setCurrentPhase((prev) => {
+            if (prev.progress >= 85) return prev;
+            const bump = Math.min(85, prev.progress + (prev.progress < 30 ? 2 : 1));
+            // Phase 10.30 — 60초 이상 경과 + 메시지가 거의 없을 때 사용자용 대기 안내 (내부 용어 미노출)
+            const longWaitHint =
+              next >= 60 && fetchedCountRef.current === 0
+                ? " · ⏳ 응답이 몰리는 경우 검토에 시간이 조금 더 걸릴 수 있습니다."
+                : "";
+            return {
+              ...prev,
+              progress: bump,
+              description: longWaitHint && !prev.description.includes("응답이 몰리는")
+                ? prev.description + longWaitHint
+                : prev.description,
+            };
+          });
+        }
+        return next;
+      });
+    }, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isAnalyzing]);
 
@@ -938,6 +984,13 @@ export function Result() {
                     에이전트 간 논쟁이 격화되고 있습니다.
                   </div>
                 )}
+                {/* Phase 10.32 — 현재 발언 중 안내 (사용자 친화 문구) */}
+                {liveStatus.speakingNow && (
+                  <p className="mt-3 text-center text-[12px] text-[#1E3A8A]">
+                    <Loader2 className="inline w-3 h-3 mr-1 animate-spin" />
+                    {liveStatus.roundDescription}
+                  </p>
+                )}
               </CardContent>
             </Card>
 
@@ -962,6 +1015,75 @@ export function Result() {
 
             {/* Phase 10.23 — SSE 연결 상태 배지 */}
             <StreamStatusBadge status={streamStatus} />
+            {/* Phase 10.35 — 진행 중 provisional agent 말풍선.
+                10.33 의 messages.length === 0 조건이 너무 빨리 사라지던 문제 해결:
+                실제 서버 메시지가 3개 미만이거나 아직 분석 중일 때는 provisional 도 함께 표시 →
+                사용자가 끊김 없이 단계별 에이전트 검토 흐름을 인지 가능. */}
+            {(messages.length < 3 || (isAnalyzing && messages.length < 5)) && (() => {
+              type ProvAgent = "risk" | "legal" | "ethics" | "judge";
+              const provisional: Array<{ ag: ProvAgent; text: string; activeAt: number }> = [
+                { ag: "risk", text: "입력된 사업 상황과 첨부 자료를 정리하고 있습니다.", activeAt: 10 },
+                { ag: "legal", text: "협약·정산·개인정보·지식재산권 관련 검토 포인트를 확인하고 있습니다.", activeAt: 25 },
+                { ag: "ethics", text: "중복 수혜·환수 조건·외주/고용 관련 리스크를 비교하고 있습니다.", activeAt: 50 },
+                { ag: "judge", text: "각 에이전트의 의견을 종합해 최종 판단 방향을 정리하고 있습니다.", activeAt: 80 },
+              ];
+              // Phase 10.35 — 실제 메시지 존재 시 제목 보정 (provisional + 실시간 메시지 병존 안내)
+              const hasRealMsgs = messages.length > 0;
+              const titleByProgress =
+                hasRealMsgs ? "AI 검토팀 진행 단계 (실제 토론은 아래에 표시)" :
+                currentPhase.progress >= 80 ? "AI 검토팀이 마무리 검토 중" :
+                currentPhase.progress >= 25 ? "AI 검토팀이 순차 검토 중" :
+                "AI 검토팀 준비 중";
+              return (
+                <Card className="border-slate-200 bg-white">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <MessageSquare className="w-5 h-5 text-[#1E3A8A]" />
+                      {titleByProgress}
+                    </CardTitle>
+                    <CardDescription>
+                      검토 진행 상황이 실시간으로 업데이트됩니다. AI 검토팀의 의견이 순차적으로 표시됩니다.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2.5">
+                      {provisional.map((p, i) => {
+                        const ag = agentMap[p.ag];
+                        const Icon = ag.icon;
+                        const active = currentPhase.progress >= p.activeAt;
+                        const isSpeaking = active && (i === provisional.length - 1 || currentPhase.progress < provisional[i + 1].activeAt);
+                        return (
+                          <div
+                            key={i}
+                            className={`flex justify-start ${active ? "opacity-100" : "opacity-40"}`}
+                          >
+                            <div className={`max-w-[88%] rounded-2xl rounded-tl-sm border px-3 py-2 ${ag.bg} ${ag.border} shadow-sm`}>
+                              <div className={`text-xs font-medium flex flex-wrap items-center gap-1.5 ${ag.color}`}>
+                                <Icon className="w-3.5 h-3.5" />
+                                <span>{ag.name}</span>
+                                {isSpeaking && (
+                                  <span className="flex items-center gap-0.5 text-[10px] text-slate-500">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    검토 중
+                                  </span>
+                                )}
+                                {active && !isSpeaking && (
+                                  <span className="text-[10px] text-emerald-700">✓ 1차 정리 완료</span>
+                                )}
+                              </div>
+                              <p className="mt-1 text-[13px] text-slate-700 leading-relaxed">{p.text}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        💡 검토 중에도 아래에서 추가 질문을 남길 수 있습니다. 실제 토론 내용은 곧 이 영역에 순차적으로 표시됩니다.
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
             {/* Phase 10.20/10.21 — 실시간 토론 메시지 타임라인 (staged reveal + 채팅 UX) */}
             {messages.length > 0 && (
               <LiveDebateTimeline
@@ -997,14 +1119,44 @@ export function Result() {
           </Card>
         )}
 
-        {/* ── AI 분석 실패 경고 (결과는 있지만 에러 포함) ── */}
+        {/* Phase 10.33 — AI 검토 일부 실패 경고 (결과는 있지만 에러 포함) — 기존 결과 보기 + 다시 시도 CTA */}
         {isComplete && error && (
           <Card className="border-amber-200 bg-amber-50">
             <CardContent className="pt-6">
               <div className="flex items-center gap-2 text-amber-800 font-medium">
-                <AlertCircle className="w-5 h-5" /> {error}
+                <AlertCircle className="w-5 h-5" /> 추가 질문 반영 재검토를 완료하지 못했습니다
               </div>
-              <p className="text-sm text-amber-700 mt-1">판정 결과 페이지에서 상세 내용을 확인해 주세요.</p>
+              <p className="text-sm text-amber-700 mt-1">
+                기존 검토 결과는 유지됩니다. 잠시 후 다시 시도하거나, 기존 결과로 최종 리포트를 확인할 수 있습니다.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  className="rounded-full border-amber-400 text-amber-800 hover:bg-amber-100"
+                  onClick={() => {
+                    setError("");
+                    const sid = sessionStorage.getItem("sessionId");
+                    if (sid) {
+                      isCompleteRef.current = false;
+                      setIsComplete(false);
+                      setIsAnalyzing(true);
+                      // POST reanalyze 다시 시도
+                      fetch(`http://localhost:8080/api/sessions/${sid}/reanalyze`, { method: "POST" })
+                        .then(() => pollSessionStatus(sid))
+                        .catch(() => setError("다시 시도가 실패했습니다. 잠시 후 다시 시도해 주세요."));
+                    }
+                  }}
+                >
+                  🔁 다시 시도
+                </Button>
+                <Button
+                  variant="outline"
+                  className="rounded-full"
+                  onClick={() => navigate("/verdict")}
+                >
+                  📄 기존 결과로 최종 리포트 보기 <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -1015,10 +1167,13 @@ export function Result() {
             <CardContent className="pt-6">
               <div className="flex items-center gap-2 text-emerald-800 font-medium">
                 <CheckCircle2 className="w-5 h-5" />
-                치열한 토론 끝에 결론이 도출되었습니다.
+                AI 검토팀의 논의가 완료되었습니다.
               </div>
               <p className="text-sm text-emerald-700 mt-2">
-                에이전트들이 나눈 {messages.filter((m) => m.type !== "error").length}개의 논쟁 로그가 준비되었습니다.
+                {/* Phase 10.31 — 사용자 친화 문구로 정제 */}
+                {reanalyzeBadge
+                  ? "최근 재검토 결과가 최종 리포트에 반영되었습니다. 아래 버튼으로 최종 판정을 확인하세요."
+                  : `에이전트별 검토 결과 ${messages.filter((m) => m.type !== "error").length}건이 정리되었습니다. 최종 리포트를 확인할 준비가 되었습니다.`}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button variant="outline" className="rounded-full" onClick={() => navigate("/verdict")}>
@@ -1063,7 +1218,7 @@ export function Result() {
                 <div key={i} className="flex justify-end">
                   <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-[#1E3A8A] px-3 py-2 text-sm text-white shadow-sm">
                     <div className="mb-0.5 text-[10px] opacity-80">
-                      대상: {q.targetAgent ?? "전체"} {q.createdAt && `· ${new Date(q.createdAt).toLocaleTimeString("ko-KR")}`}
+                      대상: {targetAgentLabel(q.targetAgent)} {q.createdAt && `· ${new Date(q.createdAt).toLocaleTimeString("ko-KR")}`}
                     </div>
                     <p className="break-keep">{q.message}</p>
                   </div>
@@ -1076,11 +1231,12 @@ export function Result() {
           </Card>
         )}
 
-        {/* Phase 10.6/10.11 — 라운드 사이 사용자 개입 영역 */}
+        {/* Phase 10.6/10.11/10.31 — 라운드 사이 사용자 개입 영역. 분석 중/완료 상태 전달. */}
         {messages.length > 0 && !error && (
           <RoundInterventionBlock
             startupContext={startupContext}
             lastRoundMessages={Object.values(groupedRounds).pop() ?? []}
+            isAnalyzing={isAnalyzing}
             onQuestionSaved={(q) => setUserFollowUps((prev) => [...prev, q])}
             onReanalyzeStarted={(sessionId) => {
               // Phase 10.18 — 부모 스코프의 polling 재시작 (REANALYZING 상태 추적)
@@ -1114,6 +1270,7 @@ export function Result() {
 function RoundInterventionBlock({
   startupContext,
   lastRoundMessages,
+  isAnalyzing = false,
   onQuestionSaved,
   onReanalyzeStarted,
 }: {
@@ -1125,6 +1282,7 @@ function RoundInterventionBlock({
     source?: string;
     applyUrl?: string;
   } | null;
+  isAnalyzing?: boolean;
   onQuestionSaved?: (q: { targetAgent: string; message: string; createdAt: string }) => void;
   onReanalyzeStarted?: (sessionId: string) => void;
   lastRoundMessages: Message[];
@@ -1169,46 +1327,125 @@ function RoundInterventionBlock({
     }
   };
 
-  // Phase 10.6 — startupContext 와 직전 라운드 키워드 기반 deterministic 추천 질문 3개
-  const suggestions = useMemo(() => {
-    if (startupContext) {
-      const base = [
-        "이 지원사업에서 사업비를 외주 용역비로 사용할 때 주의할 점을 더 구체적으로 검토해주세요.",
-        "성과물의 지식재산권이 우리 회사에 귀속되는지 확인하려면 어떤 조항을 봐야 하나요?",
-        "협약 해지나 지원금 환수 위험이 발생할 수 있는 조건을 정리해주세요.",
-      ];
-      // 직전 라운드 본문에 특정 키워드가 있으면 우선 순위 조정
-      const hay = lastRoundMessages
-        .map((m) => m.content)
-        .join(" ")
-        .toLowerCase();
-      if (hay.includes("개인정보") || hay.includes("데이터")) {
-        return [
-          "참가자/고객/근로자 개인정보를 수집할 때 동의·보관·제3자 제공 측면에서 확인해야 할 사항을 알려주세요.",
-          ...base.slice(0, 2),
-        ];
-      }
-      if (hay.includes("고용") || hay.includes("외주") || hay.includes("청년")) {
-        return [
-          "사업비로 인력을 고용하거나 외주를 줄 때 근로계약·도급 구분 측면에서 점검할 사항을 알려주세요.",
-          ...base.slice(0, 2),
-        ];
-      }
-      return base;
-    }
-    return [
-      "방금 토론 내용에서 가장 중요한 리스크 3가지를 우선순위대로 정리해주세요.",
-      "법무 관점에서 추가로 확인이 필요한 조항이 있다면 어떤 것인가요?",
-      "사업 관점에서 이 결정이 미치는 단기/장기 영향을 비교해주세요.",
-    ];
-  }, [startupContext, lastRoundMessages]);
+  // Phase 10.30 — 추천 질문 새로고침용 cycle index. + 버튼 클릭 시 +1.
+  const [suggestionsCycle, setSuggestionsCycle] = useState(0);
 
+  /**
+   * Phase 10.30 — 에이전트(targetAgent)별 + 직전 라운드 메시지 키워드 + startupContext 기반
+   * 추천 질문 생성. 각 에이전트마다 6~9개 후보 pool 에서 cycle 에 따라 3개 회전.
+   */
+  const suggestions = useMemo(() => {
+    const isStartup = Boolean(startupContext);
+    const hay = lastRoundMessages.map((m) => m.content).join(" ").toLowerCase();
+    const hasPrivacy = /개인정보|데이터|동의|제3자/.test(hay);
+    const hasLabor = /고용|외주|용역|청년|프리랜서|근로/.test(hay);
+    const hasIp = /지식재산|성과물|특허|상표|저작권/.test(hay);
+    const hasFunding = /환수|정산|사업비|보조금|협약/.test(hay);
+    const hasMarketing = /광고|홍보|100%|무료|보장|이벤트/.test(hay);
+
+    // 대상별 pool — startup 우선, 그 외엔 일반 카테고리 fallback
+    const poolByTarget: Record<string, string[]> = {
+      business: isStartup
+        ? [
+            "이 지원사업에서 사업비를 외주 용역비로 사용할 때 실무적으로 주의할 점을 더 구체적으로 알려주세요.",
+            "성과 지표나 KPI를 어떻게 작성해야 환수 리스크를 줄일 수 있을까요?",
+            "우리 회사가 이 공고에 지원할 때 사업계획서에서 강조해야 할 부분은 무엇인가요?",
+            "협약 체결 전 비즈니스 관점에서 가장 먼저 검토할 조건을 알려주세요.",
+            "이 지원사업 수행 중 매출/고객/홍보 측면에서 발생할 수 있는 부수 효과를 정리해 주세요.",
+            "지원사업 종료 후에도 우리 회사가 성과물을 자유롭게 활용할 수 있는지 사업적 관점에서 점검해 주세요.",
+          ]
+        : [
+            "이 거래 구조에서 협상 전에 가장 먼저 확인해야 할 사업상 리스크는 무엇인가요?",
+            "상대방에게 불리하게 보이지 않으면서도 우리 회사의 책임을 줄이는 방법은 무엇인가요?",
+            "사업 관점에서 이 결정이 미치는 단기/장기 영향을 비교해 주세요.",
+            "이 사안을 진행할 때 매출/고객/평판 측면 리스크를 우선순위대로 정리해 주세요.",
+            "투자 유치나 향후 거래에 영향을 줄 수 있는 비즈니스 리스크가 있다면 알려 주세요.",
+            "이 조건을 그대로 수용했을 때 대체 가능한 비즈니스 옵션이 있는지 알려 주세요.",
+          ],
+      legal: isStartup
+        ? [
+            "협약서에서 환수나 제재로 이어질 수 있는 조항을 구체적으로 알려주세요.",
+            "성과물의 지식재산권이 우리 회사에 귀속되려면 어떤 조항을 확인해야 하나요?",
+            "개인정보를 수집하거나 외주업체에 공유할 때 어떤 동의·위탁 조항이 필요한가요?",
+            "사업비 집행/정산 시 적용되는 법적 기준과 위반 시 책임을 알려주세요.",
+            "협약 해지·정산·환수 사유와 절차에 대해 법적으로 확인해야 할 사항을 알려주세요.",
+            "참여인력 인정 범위와 외주 사용 조건에 대해 법령상 주의할 부분을 알려주세요.",
+            "공고문에 있는 '100% 지원' 같은 표현을 홍보 문구로 사용할 때 표시광고법 리스크가 있나요?",
+          ]
+        : [
+            "이 조항이 약관규제법이나 전자상거래법상 문제가 될 가능성이 있나요?",
+            "개인정보 제3자 제공과 처리위탁을 구분해서 어떤 문구가 필요한지 알려주세요.",
+            "이 거래에서 법적으로 가장 위험한 조항과 그 근거 법령을 정리해 주세요.",
+            "법무 관점에서 추가로 확인이 필요한 조항이 있다면 어떤 것인가요?",
+            "관련 판례나 법령 기준으로 가장 유리한 협상 카드를 알려주세요.",
+            "이 사안에 적용되는 핵심 법령과 위반 시 행정·형사 책임을 정리해 주세요.",
+          ],
+      judge: [
+        "현재까지의 논의를 기준으로 가장 우선순위가 높은 리스크 3가지를 정리해주세요.",
+        "최종 신청/서명 전에 반드시 확인해야 할 체크리스트를 우선순위대로 알려주세요.",
+        "지금 상태에서 진행 가능/보류/수정 필요 중 어느 쪽에 가까운지 판단해주세요.",
+        "비즈니스 측과 법률 측 의견 중 합의된 부분과 충돌하는 부분을 정리해 주세요.",
+        "지금까지 논의된 위험을 모두 줄이려면 어떤 조치가 먼저 필요한지 순서대로 알려주세요.",
+        "현재 입력 정보와 첨부 자료만으로 결론을 내리기에 부족한 부분이 있다면 알려주세요.",
+      ],
+      ethics: [
+        "현재까지 토론에서 합의된 부분과 합의되지 않은 부분을 짧게 정리해 주세요.",
+        "비즈니스 측과 법률 측 주장 중 어느 쪽이 더 설득력 있는지 근거와 함께 알려주세요.",
+        "최종 결정 시 양보할 수 없는 핵심 원칙과 양보 가능한 부분을 구분해 주세요.",
+      ],
+      all: [
+        "사업비 정산, IP 귀속, 개인정보 처리 중 가장 위험한 부분을 비교해서 알려주세요.",
+        "현재 입력 정보에서 빠진 자료가 무엇인지 에이전트별로 정리해주세요.",
+        "이 사안을 진행하기 전에 반드시 수정해야 할 부분과 선택적으로 보완할 부분을 나눠주세요.",
+        "방금 토론 내용에서 가장 중요한 리스크 3가지를 우선순위대로 정리해주세요.",
+        "에이전트별로 가장 우려하는 지점을 한 문장씩 요약해 주세요.",
+        "지금까지 논의를 토대로 추가로 어떤 자료를 첨부하면 진단 품질이 높아질지 알려주세요.",
+      ],
+    };
+
+    // 직전 라운드 키워드 가중치 — 매칭되는 prompt 를 pool 의 앞쪽으로 끌어올림
+    const keywordBoosters: Array<{ on: boolean; text: string }> = [
+      {
+        on: hasPrivacy,
+        text: "참가자/고객/근로자 개인정보를 수집할 때 동의·보관·제3자 제공 측면에서 확인해야 할 사항을 알려주세요.",
+      },
+      {
+        on: hasLabor,
+        text: "사업비로 인력을 고용하거나 외주를 줄 때 근로계약·도급 구분 측면에서 점검할 사항을 알려주세요.",
+      },
+      {
+        on: hasIp,
+        text: "성과물의 지식재산권 귀속과 사용권 범위를 어디서 확인해야 하는지 알려주세요.",
+      },
+      {
+        on: hasFunding,
+        text: "사업비 정산·환수 가능성과 협약 조건을 함께 검토해 주세요.",
+      },
+      {
+        on: hasMarketing,
+        text: "'100% 지원/무료/보장' 표현이 표시광고법상 문제가 없는지 확인해 주세요.",
+      },
+    ];
+    const boosted = keywordBoosters.filter((b) => b.on).map((b) => b.text);
+
+    const pool = poolByTarget[target] || poolByTarget.all;
+    const merged = [...boosted, ...pool.filter((p) => !boosted.includes(p))];
+
+    // cycle 기반 회전 — suggestionsCycle 만큼 시작 인덱스 이동
+    const start = (suggestionsCycle * 3) % Math.max(1, merged.length);
+    const rotated = [...merged.slice(start), ...merged.slice(0, start)];
+    return rotated.slice(0, 3);
+  }, [target, startupContext, lastRoundMessages, suggestionsCycle]);
+
+  const refreshSuggestions = () => setSuggestionsCycle((c) => c + 1);
+
+  // Phase 10.33 — 사용자 친화 라벨로 통일. value 는 backend/Python schema 호환 코드 유지.
   const targetOptions = [
     { value: "all", label: "전체 에이전트" },
-    { value: "legal", label: "법률 전문가" },
     { value: "business", label: "비즈니스 전략가" },
+    { value: "legal", label: "법률 전문가" },
     { value: "ethics", label: "리스크 검토자" },
-    { value: "judge", label: "조정자/사회자" },
+    { value: "judge", label: "최종 판정관" },
   ];
 
   const handleSubmit = async () => {
@@ -1250,7 +1487,9 @@ function RoundInterventionBlock({
       setFollowUpStatus("saved");
       // Phase 10.21 — 자동 reanalyze 제거. 사용자가 "질문 반영해 재검토" 를 직접 누르도록 분리.
       setFollowUpStatusMsg(
-        "질문이 저장되었습니다. 다음 재검토 요청에 반영됩니다. '질문 반영해 재검토' 버튼을 누르면 즉시 AI 분석에 포함됩니다.",
+        isAnalyzing
+          ? "질문이 저장되었습니다. 현재 검토가 끝난 뒤 재검토에 반영할 수 있습니다."
+          : "질문이 저장되었습니다. '질문 반영해 재검토'를 누르면 새 검토가 기존 토론 아래에 이어집니다.",
       );
     } else {
       setFollowUpStatus("failed");
@@ -1285,23 +1524,37 @@ function RoundInterventionBlock({
           추가로 물어볼 내용이 있나요?
         </div>
         <p className="text-xs text-slate-600">
-          비서가 제안하는 질문을 클릭해 입력하거나 직접 작성한 뒤 전송할 수 있습니다.
-          질문은 다음 라운드 또는 재검토 요청에 반영됩니다.
+          {/* Phase 10.30/10.31 — 사용자 친화 + 분석 진행/완료 상태별 안내 */}
+          비서가 제안하는 질문을 클릭해 입력하거나 직접 작성한 뒤 전송할 수 있습니다.{" "}
+          선택한 에이전트의 발언과 현재 쟁점을 바탕으로 추천 질문을 제안합니다.
+          {isAnalyzing
+            ? " 검토가 진행되는 동안 질문을 저장하면 현재 검토가 끝난 뒤 재검토에 반영할 수 있습니다."
+            : " 질문을 저장한 뒤 '질문 반영해 재검토'를 누르면 기존 토론 아래에 새 검토가 이어집니다."}
         </p>
 
-        {/* 비서 추천 질문 chips */}
-        <div className="flex flex-wrap gap-1.5">
+        {/* Phase 10.30 — 비서 추천 질문 chips + 새로고침 버튼 */}
+        <div className="flex flex-wrap items-center gap-1.5">
           {suggestions.map((s, i) => (
             <button
-              key={i}
+              key={`${suggestionsCycle}-${i}`}
               type="button"
               onClick={() => setQuestion(s)}
               className="rounded-full border border-[#1E3A8A]/25 bg-[#1E3A8A]/5 px-3 py-1 text-[12px] text-[#1E3A8A] hover:bg-[#1E3A8A] hover:text-white"
               aria-label={`추천 질문 ${i + 1} 입력창에 채우기`}
+              title={s}
             >
               {s.length > 50 ? s.slice(0, 50) + "..." : s}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={refreshSuggestions}
+            className="ml-auto inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
+            aria-label="추천 질문을 다른 후보로 새로고침"
+            title="선택한 에이전트와 현재 쟁점을 기준으로 다른 추천 질문을 표시합니다"
+          >
+            ↻ 다른 질문 보기
+          </button>
         </div>
 
         <div className="grid gap-2 sm:grid-cols-[180px_1fr]">
@@ -1352,7 +1605,7 @@ function RoundInterventionBlock({
             disabled={!question.trim() || followUpStatus === "reanalyzing"}
             className="rounded-md bg-[#1E3A8A] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#16306f] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {submitted ? "💾 질문 업데이트" : "💾 질문 저장"}
+            {submitted ? "💾 질문 수정 저장" : "💾 질문 저장"}
           </button>
           {/* Phase 10.21 — 질문 저장과 재검토를 명확히 분리. 저장 후에만 노출. */}
           {submitted && (
@@ -1454,6 +1707,8 @@ function LiveDebateTimeline({
   });
 
   let lastRound = -1;
+  // Phase 10.27 — 재검토 시점 추적. system 메시지 등장 후의 라운드는 "재검토 · 라운드 N" 로 표시.
+  let inReanalyzeSegment = false;
   const agentLabel = (k?: AgentKey) => (k ? (agentMap[k]?.name ?? "") : "");
 
   return (
@@ -1529,6 +1784,9 @@ function LiveDebateTimeline({
           if (item.kind === "user") {
             // Phase 10.22 — system 메시지는 가운데 정렬 + 회색 톤으로 별도 표시
             if (item.q.targetAgent === "system") {
+              // Phase 10.27 — system 메시지 이후의 agent 메시지는 "재검토 · 라운드 N" 로 표시
+              inReanalyzeSegment = true;
+              lastRound = -1; // 다음 agent 메시지에서 round divider 강제 표시
               return (
                 <div key={`u-${i}`} className="flex justify-center animate-in fade-in slide-in-from-bottom-2 duration-400">
                   <div className="max-w-[88%] rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11.5px] text-slate-600">
@@ -1546,7 +1804,7 @@ function LiveDebateTimeline({
               <div key={`u-${i}`} className="flex justify-end animate-in fade-in slide-in-from-bottom-2 duration-400">
                 <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-[#1E3A8A] px-3 py-2 text-sm text-white shadow-sm">
                   <div className="mb-0.5 text-[10px] opacity-80">
-                    🙋 사용자 추가 질문 · 대상: {item.q.targetAgent ?? "전체"}
+                    🙋 사용자 추가 질문 · 대상: {targetAgentLabel(item.q.targetAgent)}
                     {item.q.createdAt && ` · ${new Date(item.q.createdAt).toLocaleTimeString("ko-KR")}`}
                   </div>
                   <p className="break-keep whitespace-pre-wrap">{item.q.message}</p>
@@ -1566,11 +1824,17 @@ function LiveDebateTimeline({
             <div key={`a-${i}`} className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-400">
               {showRoundHeader && (
                 <div className="flex items-center gap-2 pt-1">
-                  <div className="h-px flex-1 bg-slate-200" />
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
-                    {isJudge ? "최종 판정" : `라운드 ${msg.round}`}
+                  <div className={`h-px flex-1 ${inReanalyzeSegment ? "bg-emerald-200" : "bg-slate-200"}`} />
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                    inReanalyzeSegment
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-slate-50 text-slate-600"
+                  }`}>
+                    {isJudge
+                      ? (inReanalyzeSegment ? "재검토 · 최종 판정" : "최종 판정")
+                      : (inReanalyzeSegment ? `재검토 · 라운드 ${msg.round}` : `라운드 ${msg.round}`)}
                   </span>
-                  <div className="h-px flex-1 bg-slate-200" />
+                  <div className={`h-px flex-1 ${inReanalyzeSegment ? "bg-emerald-200" : "bg-slate-200"}`} />
                 </div>
               )}
               <div className="flex justify-start">

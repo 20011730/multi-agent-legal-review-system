@@ -55,7 +55,8 @@ const KEYWORDS = {
   mentoring: ["멘토링", "컨설팅", "상담", "자문"],
   subsidy: ["보조금", "정산", "환수", "협약"],
   privacy: ["개인정보", "데이터", "ai", "고객정보"],
-  marketing: ["100%", "무료", "보장", "최저가"],
+  // Phase 10.26 — 표시광고/과장 표현 후보 확장. 공고 title/summary 에 자주 등장.
+  marketing: ["100%", "무료", "보장", "최저가", "정부지원", "환급", "지원금 100", "선정 보장", "성과 보장", "인증", "수료"],
 };
 
 function hay(item: SupportItem): string {
@@ -107,22 +108,28 @@ function isTruncatedSentence(s: string | undefined | null): boolean {
   return t.endsWith("...") || t.endsWith("…") || t.endsWith("..") || t.length < 12;
 }
 
-/** Phase 10.9 — 카테고리 기반 자연어 한 줄 요약 생성. truncated 본문에 의존하지 않음. */
+/** Phase 10.9/10.26 — 카테고리 + 분야 기반 자연어 한 줄 요약. fieldSummary 가 있으면 분야로 활용. */
 function buildSummary(item: SupportItem, kind: ProgramKind): string {
   const org = item.organization && item.organization !== "확인 필요" ? item.organization : "공공기관";
   const target = item.target && item.target !== "확인 필요" ? item.target : "스타트업/예비창업자";
   const cat = item.category;
 
+  // Phase 10.26 — fieldSummary 에서 "분야/지원내용" 후보 추출 (없으면 카테고리로 fallback).
+  // 사용자 요청 구조: "{org}이 {target}을 대상으로 {분야/지원내용}을 지원하는 사업입니다."
+  const fieldRaw = (item.fieldSummary || "").trim();
+  const fieldShort = fieldRaw ? fieldRaw.split(/[.。\n]/)[0].slice(0, 40).trim() : "";
+  const subject = fieldShort || `${cat} 분야`;
+
   const map: Record<ProgramKind, string> = {
-    "교육": `${org}이 ${target}에게 제공하는 ${cat} 분야 교육·강좌 프로그램입니다.`,
-    "멘토링·컨설팅": `${org}이 ${target} 대상으로 진행하는 멘토링·컨설팅 지원사업입니다.`,
-    "R&D": `${org}이 ${target}의 R&D·기술개발을 지원하는 프로그램으로 성과물·지식재산권 귀속 검토가 필요합니다.`,
-    "투자·IR": `${org}이 ${target}의 투자·IR 활동을 지원하는 프로그램으로 투자계약·지분구조 검토가 동반될 수 있습니다.`,
-    "정책자금·바우처": `${org}이 ${target}에게 정책자금·바우처를 제공하는 사업으로 사용 목적·정산 요건 검토가 필요합니다.`,
-    "사업화·창업패키지": `${org}이 ${target}의 사업화 단계를 종합 지원하는 패키지로 협약·정산·성과물 관련 리스크가 동반됩니다.`,
-    "보조금·정산": `${org}이 ${target}에게 보조금을 지원하는 사업으로 정산·환수·중복수혜 리스크를 신청 전 점검해야 합니다.`,
-    "행사·네트워킹": `${org}이 주최하는 ${cat} 관련 행사·네트워킹 프로그램입니다.`,
-    "기타": `${org}이 ${target}에게 제공하는 ${cat} 분야 지원사업입니다.`,
+    "교육": `${org}이 ${target}을 대상으로 ${subject} 교육·강좌를 지원하는 사업입니다.`,
+    "멘토링·컨설팅": `${org}이 ${target}을 대상으로 ${subject} 분야 멘토링·컨설팅을 지원하는 사업입니다.`,
+    "R&D": `${org}이 ${target}을 대상으로 ${subject} 분야 R&D·기술개발을 지원하는 사업입니다. 성과물·지식재산권 귀속 검토가 필요합니다.`,
+    "투자·IR": `${org}이 ${target}을 대상으로 ${subject} 분야 투자·IR 활동을 지원하는 사업입니다. 투자계약·지분구조 검토가 동반될 수 있습니다.`,
+    "정책자금·바우처": `${org}이 ${target}을 대상으로 ${subject} 분야 정책자금·바우처를 지원하는 사업입니다. 사용 목적·정산 요건 검토가 필요합니다.`,
+    "사업화·창업패키지": `${org}이 ${target}의 ${subject} 분야 사업화 단계를 종합 지원하는 사업입니다. 협약·정산·성과물 관련 리스크가 동반됩니다.`,
+    "보조금·정산": `${org}이 ${target}을 대상으로 ${subject} 분야 보조금을 지원하는 사업입니다. 정산·환수·중복수혜 리스크를 신청 전 점검해야 합니다.`,
+    "행사·네트워킹": `${org}이 ${target}을 대상으로 주최하는 ${subject} 관련 행사·네트워킹 프로그램입니다.`,
+    "기타": `${org}이 ${target}을 대상으로 ${subject}을 지원하는 사업입니다.`,
   };
   return map[kind];
 }

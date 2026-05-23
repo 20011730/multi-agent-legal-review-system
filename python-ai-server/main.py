@@ -50,6 +50,25 @@ app.add_middleware(
 )
 
 
+def _mask_url(url: str | None) -> str | None:
+    """Phase 10.26 — /health 응답에서 OLLAMA_BASE_URL 같은 secret-tier URL 을 마스킹.
+    스킴/포트/path 는 보존, host 부분만 ****. tunnel URL/serviceKey 노출 방지."""
+    if not url:
+        return None
+    try:
+        from urllib.parse import urlparse, urlunparse
+        p = urlparse(url)
+        if not p.hostname:
+            return "<masked>"
+        masked_host = "****" + p.hostname[-4:] if len(p.hostname) > 6 else "****"
+        netloc = masked_host
+        if p.port:
+            netloc += f":{p.port}"
+        return urlunparse((p.scheme, netloc, p.path or "", "", "", ""))
+    except Exception:
+        return "<masked>"
+
+
 @app.get("/health")
 def health():
     law_api_key = os.getenv("LAW_API_KEY")
@@ -61,7 +80,9 @@ def health():
         "version": "0.4.0",
         "engine": "langgraph" if USE_LANGGRAPH else "rule-based",
         "provider": provider,
-        "ollamaBaseUrl": ollama_base,
+        # Phase 10.26 — full URL 노출 방지. configured 여부 + 마스킹된 형태만 표시.
+        "ollamaBaseUrlConfigured": bool(ollama_base),
+        "ollamaBaseUrlMasked": _mask_url(ollama_base),
         "ollamaModel": ollama_model,
         "lawApiConfigured": bool(law_api_key),
     }
