@@ -71,7 +71,8 @@ public class LawList {
     private String deptName;
 
     /** 소관부처코드. */
-    @Column(name = "dept_code", length = 50)
+    /**0506 insert error 발생해서 length 50 -> 100수정 */
+    @Column(name = "dept_code", length = 100)
     private String deptCode;
 
     /** 공포일자 (YYYYMMDD 문자열). */
@@ -91,7 +92,8 @@ public class LawList {
     private String amendType;
 
     /** 법령상세링크. */
-    @Column(name = "detail_link", length = 255)
+    /**0506 length길이 수정 */
+    @Column(name = "detail_link", length = 512)
     private String detailLink;
 
     /** 자법·타법 여부. */
@@ -105,4 +107,8 @@ public class LawList {
     /** 공동부령 공포번호. */
     @Column(name = "joint_promulgate_no", length = 50)
     private String jointPromulgateNo;
+
+    /** 0506 추가, 현행, 시행예정 구분 코드. 1: 연혁, 2: 시행예정, 3: 현행 */
+    @Column(name = "law_status")
+    private Integer lawStatus;
 }

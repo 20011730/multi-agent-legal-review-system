@@ -150,7 +150,7 @@ public class LegalIngestionService {
         doc.setUrl(seed.getUrl());
         doc.setIssues(seed.getIssues());
         doc.setSummary(seed.getSummary());
-        doc.setReasoning(seed.getReasoning());
+        doc.setRawcontent(seed.getRawcontent());
         doc.setUpdatedAt(LocalDateTime.now());
 
         boolean alreadyChunked = doc.isChunked();
@@ -207,7 +207,10 @@ public class LegalIngestionService {
                 s.url = (String) m.get("url");
                 s.issues = (String) m.get("issues");
                 s.summary = (String) m.get("summary");
-                s.reasoning = (String) m.get("reasoning");
+                //s.reasoning = (String) m.get("reasoning");
+                s.rawcontent = (String) m.get("rawcontent");
+                s.referencedProvisions = (String) m.get("referencedProvisions");
+                s.referencedPrecedents = (String) m.get("referencedPrecedents");
                 result.add(s);
             }
             return result;
@@ -239,7 +242,10 @@ public class LegalIngestionService {
         private String url;
         private String issues;
         private String summary;
-        private String reasoning;
+        //private String reasoning;
+        private String rawcontent;
+        private String referencedProvisions;
+        private String referencedPrecedents;
     }
 
     @Getter

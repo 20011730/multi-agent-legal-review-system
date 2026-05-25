@@ -1,0 +1,14 @@
+# AI 및 RAG 데이터/임시 파일
+ai/generate_rag/tmp/
+ai/generate_rag/chroma_data/
+ai/generate_rag/chroma_legal_db/
+ai/generate_rag/legal-e5-finetuned/
+ai/generate_rag/startup_legal_rag/
+ai/generate_rag/yanolja_analysis/
+ai/embedding-finetuning.zip
+ai/generate_rag/판례테스트.py
+ai/generate_rag/jsonl_exports.tar.gz
+ai/generate_rag/current_laws.json
+학교/4-2/캡스톤_ver2/캡스톤_ver2/ai/generate_rag/scheduled_laws.json
+학교/4-2/캡스톤_ver2/캡스톤_ver2/ai/generate_rag/precedent_list.json
+학교/4-2/캡스톤_ver2/캡스톤_ver2/ai/generate_rag/precedent_list_raw_page1.json

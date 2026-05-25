@@ -26,9 +26,9 @@ import java.time.LocalDateTime;
 public class CaseDocument {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "case_doc_seq")
+    @SequenceGenerator(name = "case_doc_seq", sequenceName = "case_document_id_seq", allocationSize = 1000)
     private Long id;
-
     /** 판례일련번호 (법제처 PRC ID). */
     @Column(length = 50)
     private String referenceId;
@@ -41,13 +41,17 @@ public class CaseDocument {
     @Column(length = 100)
     private String caseNumber;
 
-    /** 법원명. */
-    @Column(length = 200)
-    private String court;
-
     /** 선고일자 (YYYYMMDD). */
     @Column(length = 8)
     private String judgmentDate;
+
+    /*선고 */
+    @Column(length = 200)
+    private String judgment;
+
+    /** 법원명. */
+    @Column(length = 200)
+    private String court;
 
     /** 사건종류. */
     @Column(length = 100)
@@ -57,6 +61,10 @@ public class CaseDocument {
     @Column(columnDefinition = "TEXT")
     private String url;
 
+    /* 판결 유형 */
+    @Column(columnDefinition = "TEXT")
+    private String prectype;
+
     /** 판시사항 (법원의 핵심 쟁점 정리). */
     @Column(columnDefinition = "TEXT")
     private String issues;
@@ -65,9 +73,21 @@ public class CaseDocument {
     @Column(columnDefinition = "TEXT")
     private String summary;
 
-    /** 판단이유 / 본문. */
+    /*판례 내용 */
     @Column(columnDefinition = "TEXT")
-    private String reasoning;
+    private String rawcontent;
+
+    /** 판단이유 (판례내용 태그 안에 존재). 
+    @Column(columnDefinition = "TEXT")
+    private String reasoning;*/
+
+    /** 참조조문 (추가됨). */
+    @Column(columnDefinition = "TEXT")
+    private String referencedProvisions;
+
+    /** 참조판례 (추가됨). */
+    @Column(columnDefinition = "TEXT")
+    private String referencedPrecedents;
 
     /** chunk 적재 완료 여부. */
     @Column(nullable = false)

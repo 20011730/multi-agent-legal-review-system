@@ -24,6 +24,8 @@ logging:
   level:
     com.legalreview.service.LawApiClient: ${LAW_API_LOG_LEVEL:INFO}
     com.legalreview.service.LawSearchService: ${LAW_API_LOG_LEVEL:INFO}
+    com.legalreview.api.law.LawCaseApiClient: ${LAW_API_LOG_LEVEL:INFO}
+    com.legalreview.service.ingestion.CaseDocumentIngestionService: ${LAW_API_LOG_LEVEL:INFO}
 
 app:
   ai:
@@ -35,8 +37,17 @@ app:
       model: ${OLLAMA_MODEL:glm-4.7-flash:q4_K_M}
       timeout-seconds: ${OLLAMA_TIMEOUT:300}
   law-api:
-    base-url: https://www.law.go.kr/DRF/lawSearch.do
+    base-url: https://www.law.go.kr/DRF/lawSearch.do  #기존 상훈님 (목록)
+    service-url: https://www.law.go.kr/DRF/lawService.do  # 신규 - 0515 추가 (본문)
     oc: ${LAW_API_OC:}
+
+    # 판례 본문 적재 전용 설정 0515 혜진
+    case-ingest:
+      request-interval-ms: ${LAW_CASE_INGEST_INTERVAL_MS:300}
+      max-retries: ${LAW_CASE_INGEST_MAX_RETRIES:3}
+      connect-timeout-ms: ${LAW_CASE_INGEST_CONNECT_TIMEOUT_MS:10000}
+      read-timeout-ms: ${LAW_CASE_INGEST_READ_TIMEOUT_MS:30000}
+      precedent-view-url-template: "https://www.law.go.kr/precInfoP.do?precSeq=%d"
 
   # 법령/판례 RAG (Chroma) 설정
   # 기본은 비활성. APP_RAG_ENABLED=true 환경변수로만 켠다.

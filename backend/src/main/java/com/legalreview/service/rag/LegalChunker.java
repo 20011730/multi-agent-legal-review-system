@@ -82,7 +82,7 @@ public class LegalChunker {
         List<Chunk> result = new ArrayList<>();
         addCaseSection(result, doc, "issues", doc.getIssues());
         addCaseSection(result, doc, "summary", doc.getSummary());
-        addCaseSection(result, doc, "reasoning", doc.getReasoning());
+        addCaseSection(result, doc, "rawcontent", doc.getRawcontent());
         return result;
     }
 

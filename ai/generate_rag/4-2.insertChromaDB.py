@@ -10,7 +10,7 @@ from sentence_transformers import SentenceTransformer
 DB_CONFIG = {
     'dbname': 'legalreview',
     'user': 'legalreview',
-    'password': 'legalreview',  # 본인의 DB 비밀번호로 변경하세요!
+    'password': 'legalreview',  
     'host': 'localhost',
     'port': '5432'
 }
@@ -22,7 +22,7 @@ class E5EmbeddingFunction(EmbeddingFunction):
         self.model = SentenceTransformer(model_name)
 
     def __call__(self, input: Documents) -> Embeddings:
-        # DB 적재용 문서는 'passage: ' 접두사를 붙여야 E5 모델 성능이 극대화됩니다.
+        # DB 적재용 문서는 'passage: ' 접두사를 붙여야 E5 모델 성능이 극대화
         passages = [f"passage: {doc}" for doc in input]
         embeddings = self.model.encode(passages, normalize_embeddings=True)
         return embeddings.tolist()

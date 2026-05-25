@@ -2,7 +2,7 @@ import json
 import psycopg2
 from psycopg2.extras import execute_batch
 
-# 1. 데이터베이스 접속 정보 (본인의 환경에 맞게 수정하세요)
+# 1. 데이터베이스 접속 정보 
 DB_CONFIG = {
     'dbname': 'legalreview',
     'user': 'legalreview',
