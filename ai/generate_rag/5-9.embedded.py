@@ -1,123 +1,194 @@
 import os
 import glob
 import json
+import sqlite3
 import torch
 import chromadb
+from concurrent.futures import ThreadPoolExecutor
 from sentence_transformers import SentenceTransformer
-from tqdm import tqdm
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. 설정 및 하드웨어 가속 준비
 # ─────────────────────────────────────────────────────────────────────────────
-INPUT_DIR = "./tmp/jsonl_exports"
-CHROMA_DB_PATH = "./chroma_legal_db"
+INPUT_DIR = "/workspace/tmp/jsonl_exports"
+CHROMA_DB_PATH = "/workspace/chroma_legal_db"
 COLLECTION_NAME = "legal_case_chunks"
-BATCH_SIZE = 64 
+CHUNKS_DB_PATH = "/workspace/case_chunks.db"
+BATCH_SIZE = 1024
+UPSERT_CHUNK_SIZE = 5000
+MAX_PENDING_UPSERTS = 2   # 백그라운드에 쌓일 수 있는 작업 최대 개수 (메모리 보호)
 
-# Apple Silicon (MPS) 지원 여부 확인
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-    print("🚀 Apple Silicon (MPS) GPU 가속을 사용합니다!")
-else:
-    device = torch.device("cpu")
-    print("⚠️ MPS를 찾을 수 없어 CPU로 구동합니다.")
+device = torch.device("cuda")
+print(f"🚀 NVIDIA CUDA GPU 가속을 사용합니다! (디바이스: {device})")
 
-# 모델 로드 
 print("📥 임베딩 모델 로딩 중...")
 model = SentenceTransformer("intfloat/multilingual-e5-base", device=device)
-# [안전장치] 혹시 모를 토큰 초과 방지를 위해 512로 자름
-model.max_seq_length = 512 
+model.max_seq_length = 512
+model.half()  # FP16
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. Chroma DB 설정
+# 2. Chroma DB 설정 (벡터 인덱스 전용)
 # ─────────────────────────────────────────────────────────────────────────────
-# 디스크에 영구 저장되는 클라이언트 생성
 chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-
-# 컬렉션 생성 (유사도 검색 방식으로 코사인 유사도 지정)
 collection = chroma_client.get_or_create_collection(
     name=COLLECTION_NAME,
-    metadata={"hnsw:space": "cosine"} # 정규화된 벡터에는 cosine이 최적
+    metadata={"hnsw:space": "cosine"}
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2-1. 청크 본문 SQLite (case_chunks)
+# ─────────────────────────────────────────────────────────────────────────────
+chunks_conn = sqlite3.connect(CHUNKS_DB_PATH)
+chunks_conn.execute("""
+    CREATE TABLE IF NOT EXISTS case_chunks (
+        chunk_id         TEXT PRIMARY KEY,
+        case_db_id       INTEGER NOT NULL,
+        case_number      TEXT,
+        court            TEXT,
+        section_type     TEXT,
+        subsection_label TEXT,
+        content          TEXT NOT NULL
+    )
+""")
+chunks_conn.execute(
+    "CREATE INDEX IF NOT EXISTS idx_chunks_case_db_id ON case_chunks(case_db_id)"
+)
+chunks_conn.execute("PRAGMA journal_mode=WAL")
+chunks_conn.execute("PRAGMA synchronous=NORMAL")
+chunks_conn.commit()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2-2. 비동기 upsert용 워커 (단일 스레드: ChromaDB는 쓰기 직렬화됨)
+# ─────────────────────────────────────────────────────────────────────────────
+upsert_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chroma-upsert")
+pending_futures = []
+
+def upsert_to_chroma(ids, embs, metas, file_label):
+    """백그라운드에서 ChromaDB upsert 수행"""
+    for i in range(0, len(ids), UPSERT_CHUNK_SIZE):
+        collection.upsert(
+            ids=ids[i:i+UPSERT_CHUNK_SIZE],
+            embeddings=embs[i:i+UPSERT_CHUNK_SIZE],
+            metadatas=metas[i:i+UPSERT_CHUNK_SIZE],
+        )
+    print(f"   ✓ [{file_label}] ChromaDB upsert 완료 ({len(ids):,}개)")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. 임베딩 및 적재 파이프라인
 # ─────────────────────────────────────────────────────────────────────────────
 def embed_and_ingest():
     jsonl_files = sorted(glob.glob(os.path.join(INPUT_DIR, "*.jsonl")))
-    
     if not jsonl_files:
         print("❌ 처리할 JSONL 파일이 없습니다.")
         return
 
-    print(f"📦 총 {len(jsonl_files)}개의 파일을 Chroma DB에 적재합니다.")
+    print(f"📦 총 {len(jsonl_files)}개의 파일을 적재합니다.")
 
     for file_idx, file_path in enumerate(jsonl_files, start=1):
         filename = os.path.basename(file_path)
         print(f"\n▶ [{file_idx}/{len(jsonl_files)}] 파일 처리 중: {filename}")
-        
-        # 임시 보관용 리스트
+
         batch_ids = []
         batch_texts_for_embed = []
-        batch_texts_original = []
         batch_metadatas = []
-        
+        batch_chunk_rows = []
+
         with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            
-        for line in tqdm(lines, desc="Reading chunks"):
-            if not line.strip(): continue
-            doc = json.loads(line)
-            meta = doc["meta"]
-            
-            for child in doc["children"]:
-                # 1. 고유 ID
-                batch_ids.append(f"{meta['db_id']}_{child['child_id']}")
-                # 2. 메타데이터 조립 (검색 필터링 용도)
-                chunk_meta = {
-                    "db_id": meta["db_id"],
-                    "case_number": meta["case_number"],
-                    "court": meta["court"],
-                    "section_type": child["section_type"],
-                    "subsection_label": child.get("subsection_label") or "",
-                    # 참조 조문/판례가 너무 길면 DB 부하가 오므로 앞부분만 자르거나, 있으면 넣음
-                    "ref_statutes": str(meta.get("ref_statutes", ""))[:500],
-                    "ref_cases": str(meta.get("ref_cases", ""))[:500]
-                }
-                batch_metadatas.append(chunk_meta)
-                
-                # 3. 원본 텍스트 (LLM에게 전달할 실제 내용)
-                batch_texts_original.append(child["content"])
-                
-                # 4. 임베딩용 텍스트 (E5 모델 필수 Prefix 적용!!)
-                batch_texts_for_embed.append(f"passage: {child['content']}")
-                
-                # 배치 사이즈에 도달하면 임베딩 및 DB 삽입
-                if len(batch_texts_for_embed) >= BATCH_SIZE:
-                    insert_batch(batch_ids, batch_texts_for_embed, batch_texts_original, batch_metadatas)
-                    
-                    # 리스트 초기화
-                    batch_ids.clear()
-                    batch_texts_for_embed.clear()
-                    batch_texts_original.clear()
-                    batch_metadatas.clear()
+            for line in f:
+                if not line.strip():
+                    continue
+                doc = json.loads(line)
+                meta = doc["meta"]
 
-        # 파일 끝에 도달했을 때 남은 자투리 데이터 처리
-        if len(batch_texts_for_embed) > 0:
-            insert_batch(batch_ids, batch_texts_for_embed, batch_texts_original, batch_metadatas)
+                for child in doc["children"]:
+                    chunk_id = f"{meta['db_id']}_{child['child_id']}"
+                    content = child["content"]
+                    section_type = child.get("section_type", "기타")
+                    subsection_label = child.get("subsection_label") or ""
 
-def insert_batch(ids, texts_for_embed, texts_original, metadatas):
-    """배치 단위로 모델 임베딩 후 Chroma DB에 Upsert 수행"""
-    # normalize_embeddings=True 를 통해 코사인 유사도 검색 최적화
-    embeddings = model.encode(texts_for_embed, normalize_embeddings=True, show_progress_bar=False)
-    
-    collection.upsert(
-        ids=ids,
-        embeddings=embeddings.tolist(),
-        documents=texts_original, # 주의: DB에는 "passage:" 가 안 붙은 원본을 저장
-        metadatas=metadatas
-    )
+                    batch_ids.append(chunk_id)
+                    batch_texts_for_embed.append(f"passage: {content}")
+
+                    batch_metadatas.append({
+                        "db_id": meta["db_id"],
+                        "case_number": meta["case_number"],
+                        "court": meta.get("court", ""),
+                        "section_type": section_type,
+                        "subsection_label": subsection_label,
+                        "ref_statutes": str(meta.get("ref_statutes", ""))[:500],
+                        "ref_cases": str(meta.get("ref_cases", ""))[:500],
+                    })
+
+                    batch_chunk_rows.append((
+                        chunk_id,
+                        meta["db_id"],
+                        meta["case_number"],
+                        meta.get("court", ""),
+                        section_type,
+                        subsection_label,
+                        content,
+                    ))
+
+        if not batch_texts_for_embed:
+            continue
+
+        # 2. 임베딩 연산 (GPU)
+        print(f"🚀 {len(batch_texts_for_embed)}개 청크 임베딩 연산 중...")
+        embeddings = model.encode(
+            batch_texts_for_embed,
+            batch_size=BATCH_SIZE,
+            normalize_embeddings=True,
+            show_progress_bar=True,
+        ).astype("float32")
+
+        # 3-1. SQLite 본문 적재 (빠르니까 동기 유지)
+        print("📝 SQLite(case_chunks)에 본문 저장 중...")
+        chunks_conn.executemany(
+            """INSERT OR REPLACE INTO case_chunks
+               (chunk_id, case_db_id, case_number, court,
+                section_type, subsection_label, content)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            batch_chunk_rows,
+        )
+        chunks_conn.commit()
+
+        # 3-2. ChromaDB upsert는 백그라운드로 던지기
+        #     너무 쌓이면(메모리 보호) 가장 오래된 거 끝날 때까지 대기
+        while len(pending_futures) >= MAX_PENDING_UPSERTS:
+            pending_futures.pop(0).result()
+
+        print(f"💾 ChromaDB upsert 백그라운드 시작 (대기 {len(pending_futures)+1}개)")
+        future = upsert_executor.submit(
+            upsert_to_chroma,
+            batch_ids, embeddings, batch_metadatas, filename,
+        )
+        pending_futures.append(future)
+
 
 if __name__ == "__main__":
-    embed_and_ingest()
-    print("\n🎉 모든 데이터의 임베딩 및 Chroma DB 적재가 완료되었습니다!")
+    import time
+    try:
+        embed_and_ingest()
+        print(f"\n⏳ 남은 ChromaDB upsert {len(pending_futures)}개 완료 대기 중...")
+        for f in pending_futures:
+            f.result()
+        
+        # ★ ChromaDB 내부 compactor가 인덱스 동기화할 시간 확보
+        print("⏳ ChromaDB 인덱스 동기화 대기 (30초)...")
+        time.sleep(30)
+        
+        # ★ 인덱스 정상 빌드 확인 (여기서 에러나면 즉시 알 수 있음)
+        try:
+            cnt = collection.count()
+            print(f"\n✅ ChromaDB 최종 청크 수: {cnt:,}")
+        except Exception as e:
+            print(f"\n⚠️ count() 실패 — 인덱스 빌드 미완: {e}")
+            print("   30초 더 대기 후 재시도...")
+            time.sleep(30)
+            cnt = collection.count()
+            print(f"✅ 재시도 성공: {cnt:,}")
+        
+        print("\n🎉 모든 데이터의 임베딩 및 적재가 완료되었습니다!")
+    finally:
+        upsert_executor.shutdown(wait=True)
+        chunks_conn.close()
