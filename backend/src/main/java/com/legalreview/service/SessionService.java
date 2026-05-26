@@ -148,6 +148,8 @@ public class SessionService {
         }
         java.util.Map<String, Object> entry = new java.util.LinkedHashMap<>(question);
         entry.putIfAbsent("createdAt", java.time.Instant.now().toString());
+        // Phase 10.44 — 신규 질문은 pending 상태로 시작 (재검토 트리거 시 in-progress 로 전환됨)
+        entry.putIfAbsent("reanalyzeStatus", "pending");
         // 중복 메시지 가드
         String msg = String.valueOf(question.get("message"));
         boolean dup = list.stream().anyMatch(q -> msg.equals(String.valueOf(q.get("message"))));
@@ -256,6 +258,18 @@ public class SessionService {
         session.setStatus("REANALYZING");
         session.setAnalysisStartedAt(java.time.LocalDateTime.now());
         session.setAnalysisCompletedAt(null);
+
+        // Phase 10.44 — followUp 들을 in-progress 상태로 마킹 후 영속화 (영구 status 추적 source of truth)
+        try {
+            for (var q : followUps) {
+                q.put("reanalyzeStatus", "in-progress");
+                q.put("reanalyzeStatusUpdatedAt", java.time.Instant.now().toString());
+            }
+            session.setFollowUpQuestionsJson(objectMapper.writeValueAsString(followUps));
+        } catch (Exception ex) {
+            log.warn("[reanalyze] followUp in-progress 마킹 실패: {}", ex.getMessage());
+        }
+
         sessionRepository.save(session);
         log.info("[reanalyze] 재검토 트리거 (sessionId={}, followUps={}건)", sessionId, followUps.size());
 

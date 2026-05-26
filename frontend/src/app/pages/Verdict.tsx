@@ -71,6 +71,8 @@ export function Verdict() {
     message?: string;
     createdAt?: string;
   }>>([]);
+  // Phase 10.42 — backend status 에서 derive 한 결과 출처. sessionStorage 의존 제거 → race condition 해소.
+  const [resultSource, setResultSource] = useState<"initial" | "latest-reanalyze" | "latest-reanalyze-partial" | "prior-after-reanalyze-fail" | null>(null);
 
   useEffect(() => {
     const data = sessionStorage.getItem("reviewData");
@@ -138,12 +140,125 @@ export function Verdict() {
         if (Array.isArray(result?.followUpQuestions)) {
           setFollowUpQuestions(result.followUpQuestions);
         }
+        // Phase 10.38 — Result 가 persist 한 userFollowUps (reanalyzeStatus 포함) 가 있으면
+        // 백엔드 followUpQuestions 보다 우선 사용 — system 메시지 제외하고 사용자 작성 항목만.
+        try {
+          const cached = sessionStorage.getItem("userFollowUps");
+          if (cached) {
+            const arr = JSON.parse(cached);
+            if (Array.isArray(arr)) {
+              const userOnly = arr.filter((q) => q?.targetAgent !== "system");
+              if (userOnly.length > 0) setFollowUpQuestions(userOnly);
+            }
+          }
+        } catch { /* ignore */ }
 
         // top-level evidences를 1순위로, finalDecision.evidences fallback 포함
         const freshEvidences = normalizeEvidences(result);
         setEvidences(freshEvidences);
         sessionStorage.setItem("evidences", JSON.stringify(freshEvidences));
         setEvidenceLoadState("loaded");
+
+        // Phase 10.43 — resultSource derive 규칙 재정비.
+        //  단순 type=error fallback 메시지 한두 건으로 전체 재검토를 실패로 단정짓지 않는다.
+        //  우선순위:
+        //   A. userFollowUps.reanalyzeStatus === "completed/reflected" & hasFinal → latest-reanalyze
+        //   B. userFollowUps.reanalyzeStatus === "failed" → prior-after-reanalyze-fail
+        //   C. backend status=COMPLETED & hasFinal & fqCount>0 → latest-reanalyze
+        //      (messages 내 type=error 가 일부 있으면 latest-reanalyze-partial)
+        //   D. backend status=FAILED & !hasFinal → prior-after-reanalyze-fail
+        //   E. 그 외 → initial
+        fetch(`http://localhost:8080/api/sessions/${sessionId}/status`)
+          .then((r) => r.ok ? r.json() : null)
+          .then((s) => {
+            if (cancelled || !s) return;
+            const status = String(s.status || "").toUpperCase();
+            const fqCount = Array.isArray(result?.followUpQuestions) ? result.followUpQuestions.length : 0;
+            const hasFinal = !!result?.finalDecision || !!s.hasFinalDecision;
+            const msgs = Array.isArray(result?.messages) ? result.messages : [];
+            const errMsgCount = msgs.filter((m: { type?: string }) => String(m?.type) === "error").length;
+            // Phase 10.44 — followUp 개별 reanalyzeStatus 의 source of truth 는 backend.
+            // 1순위: result.followUpQuestions (backend), 2순위: sessionStorage (legacy fallback).
+            let userFollowUpStatus: string | null = null;
+            let partialFromBackend = false;
+            const backendFqs = Array.isArray(result?.followUpQuestions) ? result.followUpQuestions : [];
+            const backendUserFqs = backendFqs.filter(
+              (q: { targetAgent?: string }) => q?.targetAgent !== "system",
+            );
+            if (backendUserFqs.length > 0) {
+              const statuses: string[] = backendUserFqs.map((q: { reanalyzeStatus?: string }) =>
+                String(q?.reanalyzeStatus || ""));
+              if (statuses.includes("failed")) userFollowUpStatus = "failed";
+              else if (statuses.includes("partial")) {
+                userFollowUpStatus = "completed";
+                partialFromBackend = true;
+              }
+              else if (statuses.some((st: string) => st === "completed" || st === "reflected")) userFollowUpStatus = "completed";
+              else if (statuses.includes("in-progress")) userFollowUpStatus = "in-progress";
+            } else {
+              try {
+                const cached = sessionStorage.getItem("userFollowUps");
+                if (cached) {
+                  const arr = JSON.parse(cached);
+                  if (Array.isArray(arr)) {
+                    const userOnly = arr.filter((q) => q?.targetAgent !== "system");
+                    const statuses = userOnly.map((q) => String(q?.reanalyzeStatus || ""));
+                    if (statuses.includes("failed")) userFollowUpStatus = "failed";
+                    else if (statuses.includes("partial")) {
+                      userFollowUpStatus = "completed";
+                      partialFromBackend = true;
+                    }
+                    else if (statuses.some((st) => st === "reflected" || st === "completed")) userFollowUpStatus = "completed";
+                    else if (statuses.includes("in-progress")) userFollowUpStatus = "in-progress";
+                  }
+                }
+              } catch { /* ignore */ }
+            }
+
+            let derived: "initial" | "latest-reanalyze" | "latest-reanalyze-partial" | "prior-after-reanalyze-fail" = "initial";
+
+            // Phase 10.49 — backend followUpStatus 가 가장 권위 있음.
+            //   안내성 system error 메시지(errMsgCount) 는 banner 분기에 사용하지 않음.
+            //   partialFromBackend (followUp.reanalyzeStatus === "partial") 만 partial 분기.
+            // A
+            if (userFollowUpStatus === "completed" && hasFinal) {
+              derived = partialFromBackend ? "latest-reanalyze-partial" : "latest-reanalyze";
+            }
+            // B
+            else if (userFollowUpStatus === "failed") {
+              derived = "prior-after-reanalyze-fail";
+            }
+            // C — backend followUp 상태가 없는데 후속 질문이 있고 분석 완료된 케이스 (legacy)
+            else if (status === "COMPLETED" && hasFinal && fqCount > 0) {
+              derived = "latest-reanalyze";
+            }
+            // D
+            else if (status === "FAILED" && !hasFinal) {
+              derived = "prior-after-reanalyze-fail";
+            }
+            // E (fallback): finalDecision 만 있고 fq=0 이면 최초 결과로 판단
+            else {
+              derived = "initial";
+            }
+
+            setResultSource(derived);
+            try { sessionStorage.setItem("verdictResultSource", derived); } catch { /* */ }
+          })
+          .catch(() => {
+            try {
+              const cached = sessionStorage.getItem("verdictResultSource");
+              if (
+                cached === "initial" ||
+                cached === "latest-reanalyze" ||
+                cached === "latest-reanalyze-partial" ||
+                cached === "prior-after-reanalyze-fail"
+              ) {
+                setResultSource(cached as "initial" | "latest-reanalyze" | "latest-reanalyze-partial" | "prior-after-reanalyze-fail");
+              } else {
+                setResultSource("initial");
+              }
+            } catch { setResultSource("initial"); }
+          });
       })
       .catch((err) => {
         if (cancelled) return;
@@ -250,17 +365,53 @@ export function Verdict() {
           <div>
             <h2 className="text-2xl font-semibold text-[#1E3A8A]">최종 법률 리스크 리포트</h2>
             <p className="text-sm text-slate-600 mt-1">토론 결과를 구조화한 최종 보고서입니다.</p>
-            {/* Phase 10.29 — 분석 대상 요약 chip (회사명/카테고리/목적/지원사업/첨부/질문 수) */}
+            {/* Phase 10.29/10.37 — 분석 대상 요약 chip (회사명/카테고리/목적/지원사업/첨부/질문 수)
+                Phase 10.37: 내부 영문 raw value (data/custom 등) → 사용자 친화 한국어 라벨 매핑 */}
             {(() => {
               const sc = startupContext as { title?: string } | null;
               const attachmentsRaw = (reviewData as unknown as { attachments?: unknown }).attachments;
               const attCount = Array.isArray(attachmentsRaw) ? (attachmentsRaw as unknown[]).length : 0;
               const fqCount = followUpQuestions.length;
-              const purpose = ((reviewData as unknown as { diagnosticPurpose?: string; customPurpose?: string }).diagnosticPurpose
+              const purposeRaw = ((reviewData as unknown as { diagnosticPurpose?: string; customPurpose?: string }).diagnosticPurpose
                 || (reviewData as unknown as { customPurpose?: string }).customPurpose || "").toString().trim();
+              // Phase 10.37 — 카테고리 영문 코드 → 한국어 매핑
+              const categoryLabel = (v: string): string => {
+                const m: Record<string, string> = {
+                  contract: "계약·거래",
+                  ip: "지식재산·브랜드",
+                  data: "개인정보·데이터",
+                  privacy: "개인정보·데이터",
+                  regulation: "규제·인허가",
+                  labor: "인사·노무",
+                  hr: "인사·노무",
+                  funding: "투자·자금조달",
+                  invest: "투자·자금조달",
+                  operation: "기업운영·법무",
+                  exit: "사업정리·재도전",
+                  startup: "지원사업/정부과제",
+                };
+                return m[v.toLowerCase().trim()] || v;
+              };
+              // Phase 10.37 — 진단 목적 영문 코드 → 한국어 매핑
+              const purposeLabel = (v: string): string => {
+                const m: Record<string, string> = {
+                  custom: "직접 입력",
+                  "startup-support": "지원사업 사전 검토",
+                  investment: "투자 조건 검토",
+                  "privacy-data": "개인정보·데이터 점검",
+                  ip: "지식재산 권리 검토",
+                  labor: "인사·노무 검토",
+                  "toxic-terms": "독소조항 점검",
+                  "compliance-check": "컴플라이언스 점검",
+                  "dispute-response": "분쟁 대응 검토",
+                  "risk-screening": "리스크 스크리닝",
+                };
+                return m[v.toLowerCase().trim()] || v;
+              };
+              const purpose = purposeRaw ? purposeLabel(purposeRaw) : "";
               const chips: Array<{ k: string; v: string; cls?: string }> = [];
               if (reviewData.companyName) chips.push({ k: "회사", v: reviewData.companyName });
-              if (reviewData.reviewType) chips.push({ k: "카테고리", v: reviewData.reviewType });
+              if (reviewData.reviewType) chips.push({ k: "카테고리", v: categoryLabel(reviewData.reviewType) });
               if (purpose) chips.push({ k: "진단 목적", v: purpose.slice(0, 28) });
               if (sc?.title) chips.push({ k: "지원사업", v: sc.title.slice(0, 28), cls: "border-[#1E3A8A]/30 bg-[#1E3A8A]/5 text-[#1E3A8A]" });
               chips.push({ k: "첨부", v: `${attCount}건` });
@@ -281,6 +432,29 @@ export function Verdict() {
                 </div>
               );
             })()}
+            {/* Phase 10.42 — backend status 기반 결과 출처 banner (sessionStorage race condition 제거).
+                최초 검토 / 재검토 성공 / 재검토 실패 후 기존 결과 3 분기. */}
+            {/* Phase 10.47 — banner 톤 정리. partial 은 사용자에게 과장된 경고 대신 차분한 안내. */}
+            {resultSource === "latest-reanalyze" && (
+              <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800">
+                🔁 추가 질문을 반영한 최신 검토 결과입니다.
+              </div>
+            )}
+            {resultSource === "latest-reanalyze-partial" && (
+              <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900">
+                🔁 추가 질문을 반영한 검토 결과입니다. 일부 보조 항목은 다음 검토에 더 자세히 반영될 수 있습니다.
+              </div>
+            )}
+            {resultSource === "prior-after-reanalyze-fail" && (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+                ⚠ 최근 재검토를 마치지 못해 직전 검토 결과를 기준으로 표시합니다. 결과 화면에서 다시 시도할 수 있습니다.
+              </div>
+            )}
+            {resultSource === "initial" && (
+              <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700">
+                📄 최초 검토 결과입니다. 추가 질문을 저장한 뒤 재검토하면 최신 의견이 반영됩니다.
+              </div>
+            )}
             {/* Phase 10.27 — finalDecision 일부 필드 누락 안내 (빈 카드만 보이지 않도록) */}
             {finalDecision && (() => {
               const s = (finalDecision.summary || "").trim();
@@ -619,7 +793,9 @@ export function Verdict() {
             let metaOnly = 0;
             let masked = 0;
             for (const a of list) {
-              const ok = a?.bodyText || a?.extractionStatus === "ok";
+              // Phase 10.51 — extracted / partial / pending-server-extract 도 본문 반영 카운트.
+              const s = a?.extractionStatus;
+              const ok = a?.bodyText || s === "ok" || s === "extracted" || s === "partial" || s === "pending-server-extract";
               if (ok) withBody += 1;
               else metaOnly += 1;
               const flags = a?.sensitivityFlags;
@@ -633,7 +809,7 @@ export function Verdict() {
                     첨부자료 분석 반영 ({list.length}건)
                   </CardTitle>
                   <CardDescription>
-                    텍스트 본문이 추출된 자료는 에이전트 발언에 직접 인용 가능합니다. PDF/DOCX 는 파일명·유형만 참고됩니다.
+                    텍스트 본문이 추출된 자료는 에이전트 발언에 직접 인용됩니다. PDF/DOCX 본문도 일부 추출해 검토에 반영합니다.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
@@ -656,13 +832,42 @@ export function Verdict() {
                           {sizeKb && <span className="text-slate-500">{sizeKb}</span>}
                           <span
                             className={`rounded border px-1.5 py-0 text-[10px] ${
-                              status === "ok"
+                              status === "ok" || status === "extracted"
                                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : status === "partial" || status === "pending-server-extract"
+                                ? "border-sky-200 bg-sky-50 text-sky-700"
+                                : status === "failed" || status === "error"
+                                ? "border-red-200 bg-red-50 text-red-700"
                                 : "border-slate-200 bg-white text-slate-600"
                             }`}
                           >
-                            {status}
+                            {/* Phase 10.51 — 사용자 친화 라벨 */}
+                            {status === "ok" || status === "extracted"
+                              ? "본문 반영됨"
+                              : status === "partial"
+                              ? "본문 일부 반영"
+                              : status === "pending-server-extract"
+                              ? "본문 분석 가능"
+                              : status === "failed" || status === "error"
+                              ? "본문 추출 실패"
+                              : status === "skipped-too-large"
+                              ? "용량 초과 — 파일명만 참고"
+                              : status === "skipped-unsupported"
+                              ? "파일명만 참고"
+                              : status}
                           </span>
+                          {/* Phase 10.54 — 핵심 검토 키워드 및 반영된 문단 수 */}
+                          {Array.isArray(a?.priorityKeywords) && (a.priorityKeywords as string[]).length > 0 && (
+                            <span className="rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0 text-[10px] text-indigo-800">
+                              주요 키워드: {(a.priorityKeywords as string[]).slice(0,4).join(", ")}
+                              {(a.priorityKeywords as string[]).length > 4 ? " 외" : ""}
+                            </span>
+                          )}
+                          {typeof a?.selectedParagraphCount === "number" && (a.selectedParagraphCount as number) > 0 && (
+                            <span className="rounded border border-slate-200 bg-white px-1.5 py-0 text-[10px] text-slate-600">
+                              반영 문단 {a.selectedParagraphCount as number}개
+                            </span>
+                          )}
                           {flags.length > 0 && (
                             <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0 text-[10px] text-amber-800">
                               ⚠ {flags.join(", ")}
@@ -673,7 +878,7 @@ export function Verdict() {
                     })}
                   </ul>
                   <p className="text-[10.5px] text-slate-500">
-                    ※ 데모 단계 — 본문 추출은 텍스트 파일에 한정됩니다. 운영 단계에서는 PDF/DOCX parser 도입 예정입니다.
+                    ※ PDF/DOCX 본문도 텍스트 추출이 가능한 경우 핵심 조항 중심으로 검토에 반영합니다. 스캔본/이미지 PDF 등 본문 추출이 어려운 자료는 파일명·유형 기준으로 참고됩니다.
                   </p>
                 </CardContent>
               </Card>
@@ -919,9 +1124,27 @@ export function Verdict() {
                     }
                     return "이 질문은 재검토 요청에 포함되었으며, 관련 내용은 종합 요약과 주요 리스크/권고안에 반영되었습니다.";
                   })();
-                  // 재검토 반영 상태 판단 — finalDecision 존재 + reanalyzeBadge 데이터 부재로 단순화:
-                  // finalDecision 이 있고 messageCount 가 충분하면 "재검토에 포함됨", 아니면 "재검토 반영 대기"
-                  const reflected = Boolean(finalDecision);
+                  // Phase 10.45 — chip 표시 우선순위:
+                  //   1) resultSource (backend session status 기반 — 가장 권위 있음)
+                  //   2) rs (개별 followUp.reanalyzeStatus — backend 가 영속화)
+                  //   stale "in-progress" 가 화면에 남는 문제를 방지하기 위해 resultSource 가
+                  //   확정 상태(완료/부분/실패)이면 그 값으로 chip 결정.
+                  const rs = (q as { reanalyzeStatus?: string }).reanalyzeStatus;
+                  const statusChip = (() => {
+                    // resultSource 우선 (확정 상태)
+                    if (resultSource === "latest-reanalyze") return { label: "반영 완료", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+                    if (resultSource === "latest-reanalyze-partial") return { label: "반영 완료 (보조 항목 일부 보완 예정)", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+                    if (resultSource === "prior-after-reanalyze-fail") return { label: "다시 시도 필요", cls: "border-red-300 bg-red-50 text-red-700" };
+                    // rs fallback
+                    if (rs === "completed" || rs === "reflected") return { label: "반영 완료", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+                    if (rs === "partial") return { label: "반영 완료 (보조 항목 일부 보완 예정)", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+                    if (rs === "failed") return { label: "다시 시도 필요", cls: "border-red-300 bg-red-50 text-red-700" };
+                    if (rs === "in-progress") return { label: "재검토 중", cls: "border-blue-300 bg-blue-50 text-blue-700" };
+                    if (rs === "pending") return { label: "재검토 반영 대기", cls: "border-amber-300 bg-amber-50 text-amber-800" };
+                    // legacy fallback
+                    if (Boolean(finalDecision)) return { label: "재검토에 포함됨", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+                    return { label: "재검토 반영 대기", cls: "border-amber-300 bg-amber-50 text-amber-800" };
+                  })();
                   return (
                     <details key={i} className="group rounded border border-amber-200 bg-white px-3 py-2 open:bg-amber-50/50">
                       <summary className="cursor-pointer list-none">
@@ -930,14 +1153,8 @@ export function Verdict() {
                             🙋 대상: {targetAgentLabel(q.targetAgent)}
                           </span>
                           {q.createdAt && <span>{new Date(q.createdAt).toLocaleString("ko-KR")}</span>}
-                          <span
-                            className={`rounded-full border px-1.5 py-0 ${
-                              reflected
-                                ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                                : "border-amber-300 bg-amber-50 text-amber-800"
-                            }`}
-                          >
-                            {reflected ? "재검토에 포함됨" : "재검토 반영 대기"}
+                          <span className={`rounded-full border px-1.5 py-0 ${statusChip.cls}`}>
+                            {statusChip.label}
                           </span>
                           <span className="ml-auto text-[10px] text-slate-400 group-open:hidden">▾ 펼치기</span>
                           <span className="ml-auto text-[10px] text-slate-400 hidden group-open:inline">▴ 접기</span>

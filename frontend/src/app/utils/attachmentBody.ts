@@ -24,7 +24,16 @@ export interface ExtractedAttachment {
   /** 본문이 잘렸는지 — true 면 LLM 에게 “일부만 전달됨” 안내 권장 */
   bodyTruncated: boolean;
   /** 추출 실패/스킵 사유 — 사용자에게 “메타데이터만 전달” 등 명확히 안내하기 위함 */
-  extractionStatus: "ok" | "skipped-unsupported" | "skipped-too-large" | "error";
+  extractionStatus:
+    | "ok"
+    | "skipped-unsupported"
+    | "skipped-too-large"
+    | "error"
+    // Phase 10.51 — PDF/DOCX 는 client 에서 base64 만 준비, 실제 텍스트 추출은 서버에서.
+    //   client 단계 상태: "pending-server-extract" (서버 도착 후 extracted/partial/failed 로 갱신)
+    | "pending-server-extract";
+  /** PDF/DOCX 등 바이너리 파일을 서버에서 텍스트 추출하기 위한 base64 본문. 텍스트 파일이면 undefined. */
+  bodyBase64?: string;
   /** 발견된 민감정보 패턴 종류 — UI 경고 표시용 */
   sensitivityFlags: string[];
   /** 사용자 입력 카테고리 (선택) */
@@ -33,8 +42,12 @@ export interface ExtractedAttachment {
   description?: string;
 }
 
-const MAX_BYTES = 8 * 1024;          // 본문 추출 최대 8KB / 파일
-const MAX_TOTAL_BYTES = 32 * 1024;   // 전체 합계 최대 32KB
+const MAX_BYTES = 8 * 1024;          // 본문 추출 최대 8KB / 파일 (텍스트)
+const MAX_TOTAL_BYTES = 32 * 1024;   // 전체 합계 최대 32KB (텍스트)
+// Phase 10.51 — PDF/DOCX 는 base64 로 서버에 전달 후 서버에서 텍스트 추출.
+//   원본 바이너리 크기 제한 — 파일별 1MB, 전체 4MB.
+const BIN_PER_FILE_MAX_BYTES = 1 * 1024 * 1024;
+const BIN_TOTAL_MAX_BYTES = 4 * 1024 * 1024;
 const TEXT_EXT = [".txt", ".md", ".json", ".csv", ".log", ".yaml", ".yml"];
 
 function isTextLike(file: File): boolean {
@@ -126,9 +139,23 @@ async function readFileAsText(file: File, maxBytes: number): Promise<{ text: str
  * 여러 파일에서 본문/메타데이터를 추출한다.
  * 호출 측은 결과를 그대로 payload.attachments 로 직렬화하면 됨.
  */
+async function readFileAsBase64(file: File, maxBytes: number): Promise<string | null> {
+  if (file.size > maxBytes) return null;
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  // chunked to avoid stack overflow
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 export async function extractAttachments(files: File[]): Promise<ExtractedAttachment[]> {
   const out: ExtractedAttachment[] = [];
   let totalBytes = 0;
+  let totalBinBytes = 0;
 
   for (const file of files) {
     const base: ExtractedAttachment = {
@@ -142,8 +169,28 @@ export async function extractAttachments(files: File[]): Promise<ExtractedAttach
     };
 
     if (isStructuredButUnsupported(file)) {
-      // TODO(Phase 10.x): PDF/DOCX 본문 추출 라이브러리 도입 (예: pdfjs-dist, mammoth)
-      // 현재는 메타데이터만 전달 — Python AI prompt 에서도 "본문 미추출, 파일명/유형만 참고" 안내됨.
+      // Phase 10.51 — PDF/DOCX 는 base64 로 서버에 전달.
+      // 파일별 1MB / 전체 4MB 한도. 초과 시 메타데이터만.
+      const lower = file.name.toLowerCase();
+      const isPdfOrDocx = lower.endsWith(".pdf") || lower.endsWith(".docx")
+        || file.type === "application/pdf"
+        || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      if (isPdfOrDocx
+          && file.size <= BIN_PER_FILE_MAX_BYTES
+          && (totalBinBytes + file.size) <= BIN_TOTAL_MAX_BYTES) {
+        try {
+          const b64 = await readFileAsBase64(file, BIN_PER_FILE_MAX_BYTES);
+          if (b64) {
+            base.bodyBase64 = b64;
+            base.extractionStatus = "pending-server-extract";
+            totalBinBytes += file.size;
+            out.push(base);
+            continue;
+          }
+        } catch {
+          // base64 인코딩 실패 → 메타만
+        }
+      }
       base.extractionStatus = "skipped-unsupported";
       out.push(base);
       continue;
@@ -195,6 +242,8 @@ export function attachmentsToPayload(items: ExtractedAttachment[]): Array<Record
     bodyTruncated: it.bodyTruncated,
     sensitivityFlags: it.sensitivityFlags,
     ...(it.bodyText ? { bodyText: it.bodyText } : {}),
+    // Phase 10.51 — PDF/DOCX base64 본문은 서버에서 추출. 응답/DB 에는 저장하지 않음.
+    ...(it.bodyBase64 ? { bodyBase64: it.bodyBase64 } : {}),
     ...(it.category ? { category: it.category } : {}),
     ...(it.description ? { description: it.description } : {}),
   }));

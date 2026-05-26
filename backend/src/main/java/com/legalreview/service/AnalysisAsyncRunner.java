@@ -40,6 +40,8 @@ public class AnalysisAsyncRunner {
     private final com.legalreview.config.RagProperties ragProperties;
     // Phase 10.23 — SSE 브로드캐스터 (이벤트 발행만 담당, polling 흐름은 그대로 유지)
     private final SessionStreamService streamService;
+    // Phase 10.44 — followUpQuestionsJson 의 개별 reanalyzeStatus 업데이트용
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Value("${app.ai.engine:python}")
     private String aiEngine;
@@ -180,9 +182,36 @@ public class AnalysisAsyncRunner {
             java.time.LocalDateTime now = java.time.LocalDateTime.now();
             session.setAnalysisCompletedAt(now);
             session.setAnalysisDurationMs(System.currentTimeMillis() - t0);
+            // Phase 10.47 — 재검토 완료 상태 정밀 판정.
+            //   기준:
+            //     - 핵심 에이전트(risk/legal/judge) 의 정상 메시지가 충분히 생성되었는지 검사
+            //     - "분석 중 오류 발생|Ollama HTTP|판정 생성 실패" 패턴은 LLM 호출 실패로 판단
+            //     - 핵심 healthy 메시지 ≥ 4 (라운드 1·2 의 risk·legal 최소 1세트) 이면 completed
+            //     - 핵심 healthy 메시지 ≥ 2 이면 partial (일부 라운드 실패)
+            //     - 핵심 healthy 메시지 0~1 이면 failed (사실상 fallback 만 존재)
+            //   안내성 system-error(type=error, agentId=system) 메시지는 "치명" 판정에 포함하지 않음.
+            java.util.List<DebateMessage> allMsgs = messageRepository.findBySessionIdOrderByRoundAscIdAsc(sessionId);
+            java.util.regex.Pattern errPat = java.util.regex.Pattern.compile(
+                    "분석 중 오류 발생|Ollama\\s+HTTP|판정 생성 실패|설정/요청\\s*오류");
+            long healthyCore = allMsgs.stream()
+                    .filter(m -> {
+                        String aid = m.getAgentId() == null ? "" : m.getAgentId();
+                        return aid.equals("risk") || aid.equals("business") || aid.equals("legal") || aid.equals("judge");
+                    })
+                    .filter(m -> !"error".equalsIgnoreCase(m.getType()))
+                    .filter(m -> {
+                        String c = m.getContent() == null ? "" : m.getContent();
+                        return !errPat.matcher(c).find();
+                    })
+                    .count();
+            String reanalyzeStatus;
+            if (healthyCore >= 4) reanalyzeStatus = "completed";
+            else if (healthyCore >= 2) reanalyzeStatus = "partial";
+            else reanalyzeStatus = "failed";
+            updateFollowUpReanalyzeStatus(session, reanalyzeStatus);
             sessionRepository.save(session);
-            log.info("비동기 AI 분석 완료 (sessionId={}, durationMs={})",
-                    sessionId, session.getAnalysisDurationMs());
+            log.info("비동기 AI 분석 완료 (sessionId={}, durationMs={}, healthyCore={}, followUpStatus={})",
+                    sessionId, session.getAnalysisDurationMs(), healthyCore, reanalyzeStatus);
 
             // Phase 10.23 — SSE 완료 이벤트 발행 (frontend 가 final fetch 트리거)
             try {
@@ -205,14 +234,47 @@ public class AnalysisAsyncRunner {
             try {
                 ReviewSession session = sessionRepository.findById(sessionId).orElse(null);
                 if (session != null) {
-                    createFallbackDebateMessages(session);
-                    createFallbackFinalDecision(session);
-                    enrichWithLawSearch(session, request.getContent());
-                    session.setStatus("COMPLETED");
-                    java.time.LocalDateTime now = java.time.LocalDateTime.now();
-                    session.setAnalysisCompletedAt(now);
-                    session.setAnalysisDurationMs(System.currentTimeMillis() - t0);
-                    sessionRepository.save(session);
+                    // Phase 10.49 — 실제 LLM 메시지가 이미 충분히 저장됐는지 먼저 확인.
+                    //   enrichWithLawSearch / RAG persist / phase 콜백 같은 후속 단계에서 예외가 났을 뿐
+                    //   분석 자체는 성공한 경우, dummy fallback 으로 덮어쓰지 말고 healthyCore 기준으로 상태 정리.
+                    java.util.List<DebateMessage> existing = messageRepository.findBySessionIdOrderByRoundAscIdAsc(sessionId);
+                    java.util.regex.Pattern recErrPat = java.util.regex.Pattern.compile(
+                            "분석 중 오류 발생|Ollama\\s+HTTP|판정 생성 실패|설정/요청\\s*오류");
+                    long existingHealthy = existing.stream()
+                            .filter(m -> {
+                                String aid = m.getAgentId() == null ? "" : m.getAgentId();
+                                return aid.equals("risk") || aid.equals("business") || aid.equals("legal") || aid.equals("judge");
+                            })
+                            .filter(m -> !"error".equalsIgnoreCase(m.getType()))
+                            .filter(m -> {
+                                String c = m.getContent() == null ? "" : m.getContent();
+                                return !recErrPat.matcher(c).find();
+                            })
+                            .count();
+                    boolean realAnalysisSucceeded = existingHealthy >= 4
+                            && finalDecisionRepository.findBySessionId(sessionId).isPresent();
+                    if (realAnalysisSucceeded) {
+                        log.info("[recover] LLM 분석은 성공했지만 후속 단계에서 예외 — 정상 완료로 정리 " +
+                                "(sessionId={}, healthyCore={})", sessionId, existingHealthy);
+                        session.setStatus("COMPLETED");
+                        session.setAnalysisCompletedAt(java.time.LocalDateTime.now());
+                        session.setAnalysisDurationMs(System.currentTimeMillis() - t0);
+                        String recoverStatus = existingHealthy >= 4 ? "completed" : "partial";
+                        updateFollowUpReanalyzeStatus(session, recoverStatus);
+                        sessionRepository.save(session);
+                    } else {
+                        // 진짜 LLM 실패 — fallback dummy 데이터로 진행
+                        createFallbackDebateMessages(session);
+                        createFallbackFinalDecision(session);
+                        enrichWithLawSearch(session, request.getContent());
+                        session.setStatus("COMPLETED");
+                        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+                        session.setAnalysisCompletedAt(now);
+                        session.setAnalysisDurationMs(System.currentTimeMillis() - t0);
+                        // Phase 10.47 — fallback 경로는 사실상 실제 LLM 분석이 이뤄지지 않은 상태 → failed.
+                        updateFollowUpReanalyzeStatus(session, "failed");
+                        sessionRepository.save(session);
+                    }
                 }
             } catch (Exception fallbackErr) {
                 log.error("폴백 데이터 생성도 실패 (sessionId={}): {}", sessionId, fallbackErr.getMessage());
@@ -220,6 +282,8 @@ public class AnalysisAsyncRunner {
                     s.setStatus("FAILED");
                     s.setAnalysisCompletedAt(java.time.LocalDateTime.now());
                     s.setAnalysisDurationMs(System.currentTimeMillis() - t0);
+                    // Phase 10.44 — 완전 실패는 failed
+                    updateFollowUpReanalyzeStatus(s, "failed");
                     sessionRepository.save(s);
                 });
             }
@@ -315,6 +379,30 @@ public class AnalysisAsyncRunner {
     private static String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "...";
+    }
+
+    // ========== Phase 10.44 — followUp 개별 reanalyzeStatus 갱신 ==========
+
+    /**
+     * followUpQuestionsJson 내 각 entry 의 reanalyzeStatus 를 일괄 갱신.
+     * status: pending / in-progress / completed / partial / failed
+     * 세션은 caller 가 save() 한다.
+     */
+    private void updateFollowUpReanalyzeStatus(ReviewSession session, String status) {
+        String json = session.getFollowUpQuestionsJson();
+        if (json == null || json.isBlank()) return;
+        try {
+            java.util.List<java.util.Map<String, Object>> list = objectMapper.readValue(
+                    json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+            for (var q : list) {
+                q.put("reanalyzeStatus", status);
+                q.put("reanalyzeStatusUpdatedAt", java.time.Instant.now().toString());
+            }
+            session.setFollowUpQuestionsJson(objectMapper.writeValueAsString(list));
+        } catch (Exception ex) {
+            log.warn("[followUp] reanalyzeStatus 갱신 실패 (sessionId={}): {}",
+                    session.getId(), ex.getMessage());
+        }
     }
 
     // ========== AI 응답 → DB 저장 ==========

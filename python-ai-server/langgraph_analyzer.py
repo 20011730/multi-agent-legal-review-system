@@ -135,6 +135,13 @@ def _build_supplementary_context(request: "AnalyzeRequest") -> str:
             lines.append(head)
             if summary:
                 lines.append(f"   요약/설명: {summary[:160]}")
+            # Phase 10.54 — priorityKeywords / selectedParagraphCount 가 있으면 prompt 에 노출
+            pkws = a.get("priorityKeywords") or []
+            spc = a.get("selectedParagraphCount")
+            if pkws:
+                lines.append(f"   주요 검토 키워드: {', '.join(pkws[:10])}")
+            if isinstance(spc, int) and spc > 0:
+                lines.append(f"   반영된 핵심 문단 수: {spc}")
             if body:
                 any_body = True
                 excerpt = body[:1500].replace("\n", " ")
@@ -464,6 +471,22 @@ def analyze_with_langgraph(request: AnalyzeRequest) -> AnalyzeResponse:
     if not ok:
         raise RuntimeError(f"LLM provider 사용 불가 — 규칙 기반 폴백: {reason}")
     logger.info("✓ LLM provider 검증 통과: %s", reason)
+
+    # Phase 10.51 — PDF/DOCX 첨부 본문 추출 (bodyBase64 → bodyText).
+    # 기존 텍스트 첨부(bodyText 있음)는 그대로 통과.
+    try:
+        from attachment_extract import enrich_attachments_with_extracted_text
+        if getattr(request, "attachments", None):
+            enriched = enrich_attachments_with_extracted_text(request.attachments)
+            if enriched is not None:
+                request.attachments = enriched
+                pdf_n = sum(1 for a in enriched if isinstance(a, dict) and a.get("fileType") == "pdf")
+                docx_n = sum(1 for a in enriched if isinstance(a, dict) and a.get("fileType") == "docx")
+                if pdf_n or docx_n:
+                    logger.info("[attach-extract] PDF=%d, DOCX=%d 본문 추출 반영", pdf_n, docx_n)
+    except Exception as e:
+        # 추출 실패해도 분석 자체는 계속 진행 — extractionStatus 만 영향
+        logger.warning("[attach-extract] PDF/DOCX 추출 단계 예외: %s", e)
 
     # 안건 텍스트 구성
     base_topic = (

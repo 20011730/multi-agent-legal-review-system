@@ -429,12 +429,15 @@ export function InputPage() {
       .join(" ")
       .toLowerCase();
 
-    // 우선순위: 개인정보·데이터 > 인사·노무 > 규제·인허가 > 지식재산 > 계약·거래
+    // Phase 10.46 — 지원사업 카테고리 분류. 다양한 공고 성격을 더 적절한 검토 영역에 매핑.
+    //   기본은 "contract"(계약·거래) — 지원사업 협약·정산 검토 흐름과 가장 잘 맞음.
+    //   특정 강한 시그널이 있을 때만 다른 카테고리로 이동.
     let cat = "contract";
-    if (/개인정보|데이터|ai|saas|플랫폼|고객정보|프라이버시/i.test(hay)) cat = "data";
+    if (/지식재산|특허|상표|저작권|성과물|\br&d\b|tips|기술개발|연구개발|기술이전|시제품|디딤돌|기술사업화|사업화|지식서비스/i.test(hay)) cat = "ip";
     else if (/고용|채용|인력|외주|용역|근로|컨설팅 수행 인력/i.test(hay)) cat = "labor";
-    else if (/인허가|인증|규제|샌드박스|의료|헬스케어|핀테크/i.test(hay)) cat = "regulation";
-    else if (/지식재산|특허|상표|저작권|성과물|ip|r&d|tips|기술개발|연구개발/i.test(hay)) cat = "ip";
+    else if (/인허가|인증|규제|샌드박스|의료|헬스케어|핀테크|허가|승인/i.test(hay)) cat = "regulation";
+    else if (/개인정보|프라이버시|개인 ?정보|처리방침|고객정보|민감정보|개인식별/i.test(hay)) cat = "data";
+    // 창업/사업화/수출/ESG/컨설팅 — 별도 카테고리 없음 → 기본 "계약·거래"(협약/정산 흐름) 유지
     // else: 협약/사업비/정산/환수 → 계약·거래 (기본)
 
     setScenarioCategory(cat);
@@ -1325,6 +1328,8 @@ export function InputPage() {
                       const statusLabel = (() => {
                         if (!ex) return "대기 중";
                         if (ex.extractionStatus === "ok") return ex.bodyTruncated ? "본문 일부 반영" : "본문 반영";
+                        // Phase 10.51 — PDF/DOCX 는 서버에서 본문 추출 → 분석 시작 시 결과 확정
+                        if (ex.extractionStatus === "pending-server-extract") return "본문 분석 가능 (PDF/DOCX)";
                         if (ex.extractionStatus === "skipped-unsupported") return "메타데이터만 반영";
                         if (ex.extractionStatus === "skipped-too-large") return "용량 초과 — 메타만";
                         return "추출 실패";
@@ -1332,6 +1337,8 @@ export function InputPage() {
                       const statusColor =
                         ex?.extractionStatus === "ok"
                           ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : ex?.extractionStatus === "pending-server-extract"
+                          ? "bg-sky-50 text-sky-700 border-sky-200"
                           : ex?.extractionStatus === "error"
                           ? "bg-red-50 text-red-700 border-red-200"
                           : "bg-slate-50 text-slate-600 border-slate-200";

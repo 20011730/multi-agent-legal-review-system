@@ -52,11 +52,13 @@ const agentMap: Record<
     border: "border-amber-200",
   },
   ethics: {
-    name: "최종 판정관",
-    icon: Gavel,
-    color: "text-violet-700",
-    bg: "bg-violet-50",
-    border: "border-violet-200",
+    // Phase 10.41 — provisional 카드에서 "최종 판정관" 중복 표시되던 문제 해결.
+    // ethics 는 리스크/윤리 관점이므로 "리스크 검토자"로 분리.
+    name: "리스크 검토자",
+    icon: Shield,
+    color: "text-rose-700",
+    bg: "bg-rose-50",
+    border: "border-rose-200",
   },
   judge: {
     name: "최종 판정관",
@@ -131,17 +133,17 @@ const phaseMap: Record<string, PhaseInfo> = {
   },
   COLLECTING_EVIDENCE: {
     label: "법령·판례 근거 수집 중",
-    description: "법제처 공공 API에서 관련 법령과 판례를 검색하고 있습니다.",
+    description: "공공 법령·판례 데이터에서 관련 근거를 검색하고 있습니다.",
     progress: 95,
     humourLabel: "세 명의 전문가를 설득하는 데 성공했습니다!",
   },
 };
 
 const defaultPhase: PhaseInfo = {
-  label: "세션 생성 및 입력 분석 중",
-  description: "사용자 입력·공고 컨텍스트·첨부 자료를 분석 페이로드에 합치고 있습니다.",
+  label: "검토 준비 중",
+  description: "입력 정보, 공고 정보, 첨부자료를 함께 정리하고 있습니다.",
   progress: 10,
-  humourLabel: "법률 검토 비용 500만 원 절약 중...",
+  humourLabel: "AI 검토팀이 자료를 검토할 준비를 하고 있습니다.",
 };
 
 /* ── 실시간 중계 텍스트 (flavor) ── */
@@ -287,11 +289,13 @@ export function Result() {
     source?: string;
     applyUrl?: string;
   } | null>(null);
-  // Phase 10.11 — 사용자 추가 질문 누적 (sessionStorage + 즉시 표시용)
+  // Phase 10.11/10.38 — 사용자 추가 질문 누적. reanalyzeStatus 로 반영 상태 추적.
   const [userFollowUps, setUserFollowUps] = useState<Array<{
     targetAgent?: string;
     message: string;
     createdAt?: string;
+    // Phase 10.38 — 재검토 반영 상태: 저장됨 → 재검토 중 → 반영 완료 / 다시 시도 필요
+    reanalyzeStatus?: "pending" | "in-progress" | "completed" | "reflected" | "partial" | "failed";
   }>>([]);
 
   // Phase 10.20 — 재분석 완료 후 1회성 안내 배너 ("이번 재검토에는 사용자 추가 질문 N건이 반영되었습니다")
@@ -341,19 +345,18 @@ export function Result() {
     }
   }, [visibleCount]);
 
-  // Phase 10.21/10.22 — staged reveal.
-  // - 분석 중: ~350ms 간격으로 1개씩 등장.
-  // - 완료(isComplete) 상태에서 페이지 재진입/리로드 시: 한꺼번에 즉시 표시 (사용자 답답함 방지).
-  // - 5개 이상 한꺼번에 밀려있으면 reveal 간격을 단축해 따라잡기.
+  // Phase 10.21/10.22/10.51 — staged reveal (준토큰 chunk streaming fallback).
+  // - 분석 중: 80~280ms 간격으로 1개씩 등장 → 한 chunk 가 늘어나는 카카오톡식 느낌.
+  // - 완료(isComplete) 상태에서 페이지 재진입/리로드 시: 즉시 전체 표시.
+  // - backlog 누적 시 간격 단축으로 따라잡음.
   useEffect(() => {
     if (visibleCount >= messages.length) return;
     if (isCompleteRef.current) {
-      // 이미 완료 → 즉시 전체 표시
       setVisibleCount(messages.length);
       return;
     }
     const backlog = messages.length - visibleCount;
-    const interval = backlog >= 5 ? 120 : backlog >= 3 ? 220 : 350;
+    const interval = backlog >= 5 ? 80 : backlog >= 3 ? 160 : 280;
     const timer = setTimeout(() => {
       setVisibleCount((prev) => Math.min(prev + 1, messages.length));
     }, interval);
@@ -447,10 +450,39 @@ export function Result() {
         } catch { /* ignore */ }
       }
 
+      // Phase 10.44 — followUp 의 reanalyzeStatus 를 backend 응답에서 hydrate.
+      // backend 가 source of truth — sessionStorage 는 빠른 first-paint fallback 용도로만 유지.
+      if (Array.isArray(result.followUpQuestions)) {
+        const fromBackend = (result.followUpQuestions as Array<{
+          targetAgent?: string; message?: string; createdAt?: string; reanalyzeStatus?: string;
+        }>)
+          .filter((q) => q?.targetAgent !== "system" && q?.message)
+          .map((q) => ({
+            targetAgent: q.targetAgent,
+            message: q.message as string,
+            createdAt: q.createdAt,
+            reanalyzeStatus: (q.reanalyzeStatus as
+              | "pending" | "in-progress" | "completed" | "reflected" | "partial" | "failed"
+              | undefined) ?? "pending",
+          }));
+        if (fromBackend.length > 0) {
+          setUserFollowUps(fromBackend);
+          try { sessionStorage.setItem("userFollowUps", JSON.stringify(fromBackend)); } catch { /* */ }
+        }
+      }
+
       if (isFinal) {
-        const hasError = mapped.some((m) => m.type === "error");
-        // Phase 10.33 — 사용자 친화 문구 + 기존 결과 유지 안내
-        if (hasError) setError("일부 검토 단계에서 문제가 발생했습니다. 기존 검토 결과는 유지됩니다. 잠시 후 다시 시도하거나 기존 결과로 최종 리포트를 확인할 수 있습니다.");
+        // Phase 10.50 — 안내성 system error 1건만으로 전체 실패처럼 보이지 않게 정리.
+        //   기준: 핵심 agent(risk/legal/business/judge) 의 healthy 메시지 ≥ 4 이면 정상 완료로 간주.
+        const errPat = /분석 중 오류 발생|Ollama HTTP|판정 생성 실패|설정\/요청 오류/;
+        const healthyCore = mapped.filter((m) => {
+          const aid = m.agentId || "";
+          if (!(aid === "risk" || aid === "business" || aid === "legal" || aid === "judge")) return false;
+          if (m.type === "error") return false;
+          return !errPat.test(m.content || "");
+        }).length;
+        const trueFailure = healthyCore < 4 && mapped.some((m) => m.type === "error" || errPat.test(m.content || ""));
+        if (trueFailure) setError("일부 검토 단계에서 문제가 발생했습니다. 기존 검토 결과는 유지됩니다. 잠시 후 다시 시도하거나 기존 결과로 최종 리포트를 확인할 수 있습니다.");
         setIsComplete(true);
         isCompleteRef.current = true;
         setCurrentPhase({ label: "검토 완료", description: "AI 검토팀의 논의가 완료되어 최종 리포트가 준비되었습니다.", progress: 100, humourLabel: "최종 리포트를 확인할 준비가 되었습니다." });
@@ -518,6 +550,12 @@ export function Result() {
           setIsComplete(false);
           setIsAnalyzing(true);
           wasReanalyzingRef.current = true;  // Phase 10.20 — 완료 시 배너 노출 트리거
+          // Phase 10.38 — REANALYZING 전이 시 모든 pending 질문을 "in-progress" 로 표시
+          setUserFollowUps((prev) =>
+            prev.map((q) =>
+              q.targetAgent === "system" ? q : { ...q, reanalyzeStatus: "in-progress" as const },
+            ),
+          );
           // messageCount 가 0으로 떨어진 뒤 다시 증가 → ref도 낮춰서 신규 메시지 감지 가능하게
           if (status.messageCount < fetchedCountRef.current) {
             fetchedCountRef.current = status.messageCount;
@@ -539,12 +577,62 @@ export function Result() {
               count: userFollowUps.length || 1,
               at: new Date().toISOString(),
             });
+            // Phase 10.38 — 성공 시 in-progress 질문 → "reflected"
+            // Phase 10.45 — 토론 타임라인에 "재검토 완료" divider 시스템 메시지 추가
+            const completionMsg = {
+              targetAgent: "system",
+              message: "✅ 재검토 완료 — 추가 질문이 반영된 새 결과가 준비되었습니다.",
+              createdAt: new Date().toISOString(),
+            };
+            setUserFollowUps((prev) => {
+              const updated = prev.map((q) =>
+                q.targetAgent === "system" || q.reanalyzeStatus === "reflected"
+                  ? q
+                  : { ...q, reanalyzeStatus: "reflected" as const },
+              );
+              // 이미 동일한 완료 divider 가 없으면 추가
+              const hasDone = updated.some(
+                (q) => q.targetAgent === "system" && /재검토 완료/.test(q.message || ""),
+              );
+              const next = hasDone ? updated : [...updated, completionMsg];
+              try { sessionStorage.setItem("userFollowUps", JSON.stringify(next)); } catch { /* */ }
+              try { sessionStorage.setItem("verdictResultSource", "latest-reanalyze"); } catch { /* */ }
+              return next;
+            });
+          } else {
+            // 최초 분석 완료 — persist (for verdict)
+            try { sessionStorage.setItem("userFollowUps", JSON.stringify(userFollowUps)); } catch { /* */ }
+            try { sessionStorage.setItem("verdictResultSource", "initial"); } catch { /* */ }
           }
         } else if (status.status === "FAILED") {
           cleanup();
           // Phase 10.27 — 실패 시 기존 결과 보존 안내 추가
           setError("분석에 실패했습니다. 기존 결과는 유지됩니다. 잠시 후 다시 시도하거나 서버 상태를 확인하세요.");
           setIsAnalyzing(false);
+          // Phase 10.38 — 재검토 실패 시 in-progress → "failed" + /verdict 안내용 persist
+          if (wasReanalyzingRef.current) {
+            wasReanalyzingRef.current = false;
+            // Phase 10.45 — 실패 divider
+            const failMsg = {
+              targetAgent: "system",
+              message: "⚠ 재검토 실패 — 기존 결과를 기준으로 표시합니다.",
+              createdAt: new Date().toISOString(),
+            };
+            setUserFollowUps((prev) => {
+              const updated = prev.map((q) =>
+                q.targetAgent === "system" || q.reanalyzeStatus === "reflected"
+                  ? q
+                  : { ...q, reanalyzeStatus: "failed" as const },
+              );
+              const hasFail = updated.some(
+                (q) => q.targetAgent === "system" && /재검토 실패/.test(q.message || ""),
+              );
+              const next = hasFail ? updated : [...updated, failMsg];
+              try { sessionStorage.setItem("userFollowUps", JSON.stringify(next)); } catch { /* */ }
+              try { sessionStorage.setItem("verdictResultSource", "prior-after-reanalyze-fail"); } catch { /* */ }
+              return next;
+            });
+          }
         }
       } catch {
         // 네트워크 오류 → 다음 폴링에서 재시도
@@ -763,8 +851,15 @@ export function Result() {
       let metaOnly = 0;
       let masked = 0;
       for (const a of list) {
-        if (a?.bodyText || a?.extractionStatus === "ok") withBody += 1;
-        else metaOnly += 1;
+        const s = a?.extractionStatus;
+        // Phase 10.51 — extractionStatus 확장:
+        //   ok / extracted / partial (PDF/DOCX 서버 추출 성공) / pending-server-extract → 본문 반영
+        //   skipped-unsupported / skipped-too-large / failed / error → 메타만
+        if (a?.bodyText || s === "ok" || s === "extracted" || s === "partial" || s === "pending-server-extract") {
+          withBody += 1;
+        } else {
+          metaOnly += 1;
+        }
         if (Array.isArray(a?.sensitivityFlags) && a.sensitivityFlags.length > 0) masked += 1;
       }
       return { total: list.length, withBody, metaOnly, masked };
@@ -1021,11 +1116,12 @@ export function Result() {
                 사용자가 끊김 없이 단계별 에이전트 검토 흐름을 인지 가능. */}
             {(messages.length < 3 || (isAnalyzing && messages.length < 5)) && (() => {
               type ProvAgent = "risk" | "legal" | "ethics" | "judge";
+              // Phase 10.46 — 사용자 친화 문구로 정렬. 진행률 구간별로 다른 에이전트가 검토 중인 느낌을 명확히 노출.
               const provisional: Array<{ ag: ProvAgent; text: string; activeAt: number }> = [
-                { ag: "risk", text: "입력된 사업 상황과 첨부 자료를 정리하고 있습니다.", activeAt: 10 },
-                { ag: "legal", text: "협약·정산·개인정보·지식재산권 관련 검토 포인트를 확인하고 있습니다.", activeAt: 25 },
-                { ag: "ethics", text: "중복 수혜·환수 조건·외주/고용 관련 리스크를 비교하고 있습니다.", activeAt: 50 },
-                { ag: "judge", text: "각 에이전트의 의견을 종합해 최종 판단 방향을 정리하고 있습니다.", activeAt: 80 },
+                { ag: "risk", text: "비즈니스 전략가가 사업 관점 리스크를 검토 중입니다.", activeAt: 10 },
+                { ag: "legal", text: "법률 전문가가 협약 조건과 개인정보 처리 가능성을 확인 중입니다.", activeAt: 30 },
+                { ag: "ethics", text: "리스크 검토자가 정산·환수·중복 수혜 가능성을 점검 중입니다.", activeAt: 60 },
+                { ag: "judge", text: "최종 판정관이 검토 의견을 종합하고 있습니다.", activeAt: 85 },
               ];
               // Phase 10.35 — 실제 메시지 존재 시 제목 보정 (provisional + 실시간 메시지 병존 안내)
               const hasRealMsgs = messages.length > 0;
@@ -1772,31 +1868,53 @@ function LiveDebateTimeline({
         {/* Phase 10.20 — 첨부자료 분석 반영 요약 */}
         {attachmentsSummary && (
           <div className="rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-[12px] text-sky-900">
-            📎 첨부자료 {attachmentsSummary.total}건이 분석에 반영되었습니다 — 본문 추출 {attachmentsSummary.withBody}건, 메타데이터만 {attachmentsSummary.metaOnly}건
+            📎 첨부자료 {attachmentsSummary.total}건을 함께 검토합니다 — 본문 반영 {attachmentsSummary.withBody}건, 메타데이터만 {attachmentsSummary.metaOnly}건
             {attachmentsSummary.masked > 0 && ` · 민감정보 자동 마스킹 ${attachmentsSummary.masked}건`}
             <span className="ml-1 text-[10.5px] text-slate-600">
-              (본문 추출은 텍스트 파일만 — PDF/DOCX 는 파일명·유형만 참고됨)
+              (PDF/DOCX 본문 일부도 추출해 검토에 반영합니다 — 본문 분석이 어려운 항목은 파일명·유형만 참고)
             </span>
           </div>
         )}
 
         {items.map((item, i) => {
           if (item.kind === "user") {
-            // Phase 10.22 — system 메시지는 가운데 정렬 + 회색 톤으로 별도 표시
+            // Phase 10.22/10.45 — system 메시지는 시각적으로 명확한 divider 로 표시
             if (item.q.targetAgent === "system") {
-              // Phase 10.27 — system 메시지 이후의 agent 메시지는 "재검토 · 라운드 N" 로 표시
-              inReanalyzeSegment = true;
-              lastRound = -1; // 다음 agent 메시지에서 round divider 강제 표시
+              const msg = item.q.message || "";
+              // 재검토 시작 / 재검토 완료 / 재검토 실패 / 부분 완료 분기
+              const isStart = /시작|REANALYZING|재검토를 시작/.test(msg);
+              const isFail = /실패|FAILED|문제가 발생/.test(msg);
+              const isPartial = /일부|부분|partial/i.test(msg);
+              const isDone = /완료|COMPLETED|반영되었습니다/.test(msg) && !isPartial;
+              if (isStart) {
+                inReanalyzeSegment = true;
+                lastRound = -1;
+              }
+              const tone = isFail
+                ? { line: "bg-red-300", chip: "border-red-300 bg-red-50 text-red-800", icon: "⚠" }
+                : isPartial
+                  ? { line: "bg-amber-300", chip: "border-amber-300 bg-amber-50 text-amber-800", icon: "🟡" }
+                  : isDone
+                    ? { line: "bg-emerald-300", chip: "border-emerald-300 bg-emerald-50 text-emerald-800", icon: "✅" }
+                    : { line: "bg-[#1E3A8A]/30", chip: "border-[#1E3A8A]/30 bg-[#1E3A8A]/5 text-[#1E3A8A]", icon: "🔁" };
               return (
-                <div key={`u-${i}`} className="flex justify-center animate-in fade-in slide-in-from-bottom-2 duration-400">
-                  <div className="max-w-[88%] rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11.5px] text-slate-600">
-                    <span className="break-keep whitespace-pre-wrap">{item.q.message}</span>
+                <div
+                  key={`u-${i}`}
+                  className="flex items-center gap-2 pt-2 pb-1 animate-in fade-in slide-in-from-bottom-2 duration-400"
+                >
+                  <div className={`h-px flex-1 ${tone.line}`} />
+                  <div
+                    className={`rounded-full border px-3 py-1 text-[11.5px] font-medium shadow-sm ${tone.chip}`}
+                  >
+                    <span className="mr-1">{tone.icon}</span>
+                    <span className="break-keep whitespace-pre-wrap">{msg}</span>
                     {item.q.createdAt && (
-                      <span className="ml-1 text-[10px] text-slate-400">
+                      <span className="ml-2 text-[10px] opacity-70">
                         · {new Date(item.q.createdAt).toLocaleTimeString("ko-KR")}
                       </span>
                     )}
                   </div>
+                  <div className={`h-px flex-1 ${tone.line}`} />
                 </div>
               );
             }
@@ -1813,6 +1931,33 @@ function LiveDebateTimeline({
             );
           }
           const msg = item.msg;
+          // Phase 10.45 — backend system 메시지(agentId="system") 가 messages 배열로 오는 경우
+          //   → user followUp 의 system divider 와 동일한 양식으로 변환해 렌더
+          if (msg.agentId === "system" || msg.type === "system" || msg.type === "error") {
+            const text = msg.content || "";
+            const isFail = msg.type === "error" || /실패|FAILED|문제가 발생|연결에 실패/.test(text);
+            const isPartial = /일부|부분|partial/i.test(text);
+            const isDone = /완료|COMPLETED|반영되었습니다/.test(text) && !isPartial && !isFail;
+            const isStart = /시작|REANALYZING|재검토를 시작/.test(text);
+            if (isStart) { inReanalyzeSegment = true; lastRound = -1; }
+            const tone = isFail
+              ? { line: "bg-red-300", chip: "border-red-300 bg-red-50 text-red-800", icon: "⚠" }
+              : isPartial
+                ? { line: "bg-amber-300", chip: "border-amber-300 bg-amber-50 text-amber-800", icon: "🟡" }
+                : isDone
+                  ? { line: "bg-emerald-300", chip: "border-emerald-300 bg-emerald-50 text-emerald-800", icon: "✅" }
+                  : { line: "bg-[#1E3A8A]/30", chip: "border-[#1E3A8A]/30 bg-[#1E3A8A]/5 text-[#1E3A8A]", icon: "🔁" };
+            return (
+              <div key={`a-${i}`} className="flex items-center gap-2 pt-2 pb-1 animate-in fade-in slide-in-from-bottom-2 duration-400">
+                <div className={`h-px flex-1 ${tone.line}`} />
+                <div className={`rounded-full border px-3 py-1 text-[11.5px] font-medium shadow-sm ${tone.chip} max-w-[80%]`}>
+                  <span className="mr-1">{tone.icon}</span>
+                  <span className="break-keep whitespace-pre-wrap">{text}</span>
+                </div>
+                <div className={`h-px flex-1 ${tone.line}`} />
+              </div>
+            );
+          }
           const agKey = (msg.agentId === "ethics" || msg.agentId === "judge") ? "judge" : (msg.agentId as AgentKey);
           const agent = agentMap[agKey] ?? agentMap["legal"];
           const Icon = agent.icon;
