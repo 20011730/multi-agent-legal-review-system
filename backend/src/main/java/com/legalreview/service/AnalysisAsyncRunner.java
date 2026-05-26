@@ -151,6 +151,20 @@ public class AnalysisAsyncRunner {
             // 최종 판정 저장
             saveFinalDecision(session, aiResponse.finalDecision());
 
+            // Phase 10.57 — Python AI 가 enrichment 한 첨부 메타데이터를 session.attachmentsJson 에 영속화.
+            //   이렇게 해야 /verdict 새로고침 후에도 priorityKeywords / selectedParagraphCount 등이 유지됨.
+            //   bodyText / bodyBase64 는 enriched 응답에 포함되지 않음 (보안 + 용량).
+            try {
+                List<Map<String, Object>> enriched = aiResponse.enrichedAttachments();
+                if (enriched != null && !enriched.isEmpty()) {
+                    String json = objectMapper.writeValueAsString(enriched);
+                    session.setAttachmentsJson(json);
+                    log.info("[attach] enriched 첨부 메타 영속화: {}건 (sessionId={})", enriched.size(), sessionId);
+                }
+            } catch (Exception persistErr) {
+                log.debug("[attach] enriched 첨부 영속화 실패 (무시): {}", persistErr.getMessage());
+            }
+
             // 법령/판례 근거 저장 (AI 서버 응답)
             if (aiResponse.evidences() != null && !aiResponse.evidences().isEmpty()) {
                 saveEvidences(session, aiResponse.evidences());

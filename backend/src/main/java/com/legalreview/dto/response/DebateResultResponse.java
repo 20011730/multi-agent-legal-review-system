@@ -34,4 +34,11 @@ public class DebateResultResponse {
      * Verdict 페이지에서 "사용자 추가 질문 반영 항목" 섹션 표시용.
      */
     private List<Map<String, Object>> followUpQuestions;
+
+    /**
+     * Phase 10.57 — 서버 enrichment 한 첨부 메타 (priorityKeywords / selectedParagraphCount 등).
+     * /verdict 새로고침 후에도 sessionStorage 없이 backend 만으로 표시 가능하게 한다.
+     * bodyText / bodyBase64 는 포함하지 않음 (보안 + 용량).
+     */
+    private List<Map<String, Object>> attachments;
 }

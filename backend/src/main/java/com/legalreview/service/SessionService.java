@@ -392,8 +392,20 @@ public class SessionService {
             }
         }
 
-        return new DebateResultResponse(
-                sessionId, 1L, session.getStatus(), messageDtos, fdDto, evidenceDtos, startupCtx, followUps);
+        // Phase 10.57 — enriched attachments 도 응답에 포함 (priorityKeywords/selectedParagraphCount 등)
+        java.util.List<java.util.Map<String, Object>> attachments = new java.util.ArrayList<>();
+        if (session.getAttachmentsJson() != null && !session.getAttachmentsJson().isBlank()) {
+            try {
+                attachments = objectMapper.readValue(session.getAttachmentsJson(),
+                        new com.fasterxml.jackson.core.type.TypeReference<>() {});
+            } catch (Exception ex) {
+                log.warn("[session] attachmentsJson 역직렬화 실패: {}", ex.getMessage());
+            }
+        }
+
+        DebateResultResponse resp = new DebateResultResponse(
+                sessionId, 1L, session.getStatus(), messageDtos, fdDto, evidenceDtos, startupCtx, followUps, attachments);
+        return resp;
     }
 
     /**

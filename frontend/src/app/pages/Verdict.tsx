@@ -140,6 +140,22 @@ export function Verdict() {
         if (Array.isArray(result?.followUpQuestions)) {
           setFollowUpQuestions(result.followUpQuestions);
         }
+        // Phase 10.57 — backend 가 영속화한 enriched attachments 를 reviewData 에 머지.
+        //   /verdict 새로고침 후에도 priorityKeywords / selectedParagraphCount 등이 유지되도록.
+        //   bodyText / bodyBase64 는 backend 응답에 포함되지 않음 (보안).
+        if (Array.isArray(result?.attachments) && result.attachments.length > 0) {
+          try {
+            const raw = sessionStorage.getItem("reviewData");
+            const data = raw ? JSON.parse(raw) : {};
+            data.attachments = result.attachments;
+            sessionStorage.setItem("reviewData", JSON.stringify(data));
+            // React state 도 함께 갱신해야 빈 박스 fallback 분기를 거치지 않음
+            setReviewData((prev) => prev
+              ? ({ ...prev, attachments: result.attachments } as ReviewData)
+              : (data as ReviewData)
+            );
+          } catch { /* */ }
+        }
         // Phase 10.38 — Result 가 persist 한 userFollowUps (reanalyzeStatus 포함) 가 있으면
         // 백엔드 followUpQuestions 보다 우선 사용 — system 메시지 제외하고 사용자 작성 항목만.
         try {
@@ -809,7 +825,7 @@ export function Verdict() {
                     첨부자료 분석 반영 ({list.length}건)
                   </CardTitle>
                   <CardDescription>
-                    텍스트 본문이 추출된 자료는 에이전트 발언에 직접 인용됩니다. PDF/DOCX 본문도 일부 추출해 검토에 반영합니다.
+                    업로드한 자료의 본문 일부를 검토 의견에 함께 반영했습니다. 텍스트 / PDF / Word 문서는 핵심 조항을 우선 추출하며, 스캔본·이미지 파일은 파일명·유형만 참고합니다.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
@@ -1124,26 +1140,31 @@ export function Verdict() {
                     }
                     return "이 질문은 재검토 요청에 포함되었으며, 관련 내용은 종합 요약과 주요 리스크/권고안에 반영되었습니다.";
                   })();
-                  // Phase 10.45 — chip 표시 우선순위:
-                  //   1) resultSource (backend session status 기반 — 가장 권위 있음)
-                  //   2) rs (개별 followUp.reanalyzeStatus — backend 가 영속화)
-                  //   stale "in-progress" 가 화면에 남는 문제를 방지하기 위해 resultSource 가
-                  //   확정 상태(완료/부분/실패)이면 그 값으로 chip 결정.
+                  // Phase 10.56 — chip 표시 우선순위 재정비:
+                  //   1) rs (개별 followUp.reanalyzeStatus) 가 가장 정확. 여러 질문이 섞여 있을 때
+                  //      (예: completed 2건 + pending 1건) 각 질문이 서로 다른 chip 을 가져야 함.
+                  //   2) rs 가 비어있을 때만 resultSource fallback 사용.
+                  //   3) rs="in-progress" 인데 backend status 가 COMPLETED 이면 stale 로 간주 → resultSource override.
                   const rs = (q as { reanalyzeStatus?: string }).reanalyzeStatus;
                   const statusChip = (() => {
-                    // resultSource 우선 (확정 상태)
-                    if (resultSource === "latest-reanalyze") return { label: "반영 완료", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
-                    if (resultSource === "latest-reanalyze-partial") return { label: "반영 완료 (보조 항목 일부 보완 예정)", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
-                    if (resultSource === "prior-after-reanalyze-fail") return { label: "다시 시도 필요", cls: "border-red-300 bg-red-50 text-red-700" };
-                    // rs fallback
+                    // 개별 질문 상태가 명시되어 있으면 우선
                     if (rs === "completed" || rs === "reflected") return { label: "반영 완료", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
                     if (rs === "partial") return { label: "반영 완료 (보조 항목 일부 보완 예정)", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
                     if (rs === "failed") return { label: "다시 시도 필요", cls: "border-red-300 bg-red-50 text-red-700" };
-                    if (rs === "in-progress") return { label: "재검토 중", cls: "border-blue-300 bg-blue-50 text-blue-700" };
-                    if (rs === "pending") return { label: "재검토 반영 대기", cls: "border-amber-300 bg-amber-50 text-amber-800" };
-                    // legacy fallback
+                    if (rs === "pending") return { label: "다음 재검토 반영 대기", cls: "border-amber-300 bg-amber-50 text-amber-800" };
+                    if (rs === "in-progress") {
+                      // stale 가드: resultSource 가 확정 상태면 그 값 사용
+                      if (resultSource === "latest-reanalyze") return { label: "반영 완료", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+                      if (resultSource === "latest-reanalyze-partial") return { label: "반영 완료 (보조 항목 일부 보완 예정)", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+                      if (resultSource === "prior-after-reanalyze-fail") return { label: "다시 시도 필요", cls: "border-red-300 bg-red-50 text-red-700" };
+                      return { label: "재검토 중", cls: "border-blue-300 bg-blue-50 text-blue-700" };
+                    }
+                    // rs 가 비어있는 legacy 응답 → resultSource fallback
+                    if (resultSource === "latest-reanalyze") return { label: "반영 완료", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+                    if (resultSource === "latest-reanalyze-partial") return { label: "반영 완료 (보조 항목 일부 보완 예정)", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+                    if (resultSource === "prior-after-reanalyze-fail") return { label: "다시 시도 필요", cls: "border-red-300 bg-red-50 text-red-700" };
                     if (Boolean(finalDecision)) return { label: "재검토에 포함됨", cls: "border-emerald-300 bg-emerald-50 text-emerald-700" };
-                    return { label: "재검토 반영 대기", cls: "border-amber-300 bg-amber-50 text-amber-800" };
+                    return { label: "다음 재검토 반영 대기", cls: "border-amber-300 bg-amber-50 text-amber-800" };
                   })();
                   return (
                     <details key={i} className="group rounded border border-amber-200 bg-white px-3 py-2 open:bg-amber-50/50">

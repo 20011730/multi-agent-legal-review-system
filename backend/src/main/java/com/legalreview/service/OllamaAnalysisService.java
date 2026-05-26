@@ -228,7 +228,7 @@ public class OllamaAnalysisService {
         ));
 
         // evidences는 빈 리스트 — 법제처 검색은 AnalysisAsyncRunner에서 별도 처리
-        return new AiAnalysisResponse(messages, finalDecision, List.of());
+        return new AiAnalysisResponse(messages, finalDecision, List.of(), null);
     }
 
     // ── 헬퍼 메서드 ──

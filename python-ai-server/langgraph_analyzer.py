@@ -614,8 +614,24 @@ def analyze_with_langgraph(request: AnalyzeRequest) -> AnalyzeResponse:
 
     logger.info("LangGraph 토론 완료 — 메시지 %d건, 판정: %s", len(debate_messages), parsed["verdict"])
 
+    # Phase 10.57 — backend 영속화용 enriched attachment 메타데이터 (bodyText / bodyBase64 제거).
+    enriched_atts = None
+    src_atts = getattr(request, "attachments", None)
+    if isinstance(src_atts, list) and src_atts:
+        enriched_atts = []
+        for a in src_atts:
+            if not isinstance(a, dict):
+                continue
+            slim = {k: v for k, v in a.items() if k not in ("bodyText", "bodyBase64", "contentBase64")}
+            # bodyText 가 있던 경우 길이만 부가
+            if "bodyText" in a and isinstance(a.get("bodyText"), str):
+                slim.setdefault("characterCount", len(a["bodyText"]))
+                slim.setdefault("hasBodyText", True)
+            enriched_atts.append(slim)
+
     return AnalyzeResponse(
         messages=debate_messages,
         finalDecision=final_decision,
         evidences=evidences,
+        enrichedAttachments=enriched_atts,
     )

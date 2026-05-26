@@ -132,8 +132,11 @@ public class AiAnalysisClient {
         List<Map<String, Object>> messages = (List<Map<String, Object>>) response.get("messages");
         Map<String, Object> finalDecision = (Map<String, Object>) response.get("finalDecision");
         List<Map<String, Object>> evidences = (List<Map<String, Object>>) response.get("evidences");
+        // Phase 10.57 — 서버 enrichment 한 첨부 메타 (bodyText/base64 제거된 상태)
+        List<Map<String, Object>> enrichedAttachments =
+                (List<Map<String, Object>>) response.get("enrichedAttachments");
 
-        return new AiAnalysisResponse(messages, finalDecision, evidences);
+        return new AiAnalysisResponse(messages, finalDecision, evidences, enrichedAttachments);
     }
 
     /**
@@ -142,6 +145,7 @@ public class AiAnalysisClient {
     public record AiAnalysisResponse(
             List<Map<String, Object>> messages,
             Map<String, Object> finalDecision,
-            List<Map<String, Object>> evidences
+            List<Map<String, Object>> evidences,
+            List<Map<String, Object>> enrichedAttachments
     ) {}
 }

@@ -1310,18 +1310,35 @@ export function Result() {
               <div className="mb-1 text-sm font-semibold text-slate-700">
                 사용자 추가 질문 ({userFollowUps.length}건)
               </div>
-              {userFollowUps.map((q, i) => (
-                <div key={i} className="flex justify-end">
-                  <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-[#1E3A8A] px-3 py-2 text-sm text-white shadow-sm">
-                    <div className="mb-0.5 text-[10px] opacity-80">
-                      대상: {targetAgentLabel(q.targetAgent)} {q.createdAt && `· ${new Date(q.createdAt).toLocaleTimeString("ko-KR")}`}
+              {userFollowUps.filter((q) => q.targetAgent !== "system").map((q, i) => {
+                // Phase 10.56 — 질문별 상태 chip (반영 완료 / 일부 반영 / 재검토 반영 대기 / 다시 시도 필요 / 재검토 중)
+                const rs = q.reanalyzeStatus;
+                const chip = (() => {
+                  if (rs === "completed" || rs === "reflected") return { label: "반영 완료", cls: "border-emerald-200 bg-emerald-50 text-emerald-700" };
+                  if (rs === "partial") return { label: "일부 반영", cls: "border-sky-200 bg-sky-50 text-sky-700" };
+                  if (rs === "failed") return { label: "다시 시도 필요", cls: "border-red-200 bg-red-50 text-red-700" };
+                  if (rs === "in-progress") return { label: "재검토 중", cls: "border-blue-200 bg-blue-50 text-blue-700" };
+                  return { label: "다음 재검토 반영 대기", cls: "border-amber-200 bg-amber-50 text-amber-800" };
+                })();
+                return (
+                  <div key={i} className="space-y-1">
+                    <div className="flex justify-end">
+                      <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-[#1E3A8A] px-3 py-2 text-sm text-white shadow-sm">
+                        <div className="mb-0.5 text-[10px] opacity-80">
+                          대상: {targetAgentLabel(q.targetAgent)} {q.createdAt && `· ${new Date(q.createdAt).toLocaleTimeString("ko-KR")}`}
+                        </div>
+                        <p className="break-keep">{q.message}</p>
+                      </div>
                     </div>
-                    <p className="break-keep">{q.message}</p>
+                    <div className="flex justify-end">
+                      <span className={`rounded-full border px-2 py-0.5 text-[10.5px] ${chip.cls}`}>{chip.label}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               <p className="mt-1 text-[11px] text-slate-500">
-                ※ 추가 질문은 저장되어 후속 재검토 / 최종 결과 보완 시 반영됩니다.
+                ※ 추가 질문을 남기고 <strong>질문 반영해 재검토</strong> 버튼을 누르면, 다음 라운드 토론과 최종 리포트에 반영됩니다.
+                기존 라운드 1 토론은 그대로 유지되고, 새 라운드가 아래에 이어집니다.
               </p>
             </CardContent>
           </Card>

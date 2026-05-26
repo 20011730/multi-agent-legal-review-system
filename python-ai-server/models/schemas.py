@@ -80,3 +80,7 @@ class AnalyzeResponse(BaseModel):
     analysisSource: str = "LANGGRAPH_OLLAMA"
     fallbackUsed: bool = False
     errorMessage: str | None = None
+    # Phase 10.57 — 서버에서 enrichment 한 첨부자료 메타데이터 (bodyText 제거 후 backend 영속화용).
+    # priorityKeywords / selectedParagraphCount / originalLength / extractionStatus / fileType
+    # 등이 포함되며, bodyBase64 와 bodyText 는 응답에 포함하지 않음 (보안/용량).
+    enrichedAttachments: list[dict[str, Any]] | None = None
