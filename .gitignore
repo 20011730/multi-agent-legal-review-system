@@ -52,6 +52,9 @@ ai/generate_rag/legal-e5-finetuned/model.safetensors
 *.sqlite
 *.sqlite3
 *.db
+*.tar
+*.chromadb
+data/legal_rag_export/
 # HNSW 인덱스 바이너리 (ChromaDB local)
 **/data_level0.bin
 **/header.bin

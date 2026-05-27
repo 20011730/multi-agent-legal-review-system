@@ -55,6 +55,20 @@ public class LegalRetrievalService {
         int kLaw = Math.max(0, ragProperties.getTopK().getLaw());
         int kCase = Math.max(0, ragProperties.getTopK().getCaze());
 
+        // Phase 10.65 — caseSearchMode 결정 + extended collection 존재 여부 가드.
+        //   legacy   : 기존 cases_e5 만
+        //   extended : extended-cases-collection 만 (없으면 legacy 로 fallback)
+        //   dual     : 둘 다 (없으면 legacy 단독)
+        String mode = ragProperties.getChroma().getCaseSearchMode();
+        if (mode == null || mode.isBlank()) mode = "legacy";
+        mode = mode.toLowerCase();
+        boolean hasExtended = ragProperties.getChroma().getExtendedCasesCollection() != null
+                && !ragProperties.getChroma().getExtendedCasesCollection().isBlank();
+        // extended 활성 가능 여부에 따라 모드 보정
+        boolean useLegacyCase = "legacy".equals(mode) || ("dual".equals(mode))
+                || ("extended".equals(mode) && !hasExtended); // fallback
+        boolean useExtendedCase = ("extended".equals(mode) || "dual".equals(mode)) && hasExtended;
+
         List<RetrievedChunk> lawChunks = chromaSearchService.queryLaws(query, kLaw);
         // ── CASE over-fetch: 외부 시스템 case 가 score 마진(예: 0.003)으로 본문 풍부 case 를 누르고
         //    top-K(=2) 안에 들어와 사용자에게 amber 메타만 노출되는 회귀를 방지하기 위해,
@@ -62,7 +76,10 @@ public class LegalRetrievalService {
         //    body-rich(tier=1) 우선 → meta-only(tier=0) 순으로 정렬, 최종 kCase 건만 반환.
         //    하드코딩 도메인 boost 가 아니며, body_status / data_source 메타 기반 정렬일 뿐.
         int caseFetchK = Math.max(kCase, kCase * OVER_FETCH_MULTIPLIER);
-        List<RetrievedChunk> caseChunks = chromaSearchService.queryCases(query, caseFetchK);
+        // Phase 10.65 — caseSearchMode=extended 단독 모드면 cases_e5 호출 자체를 생략 (latency 절감).
+        List<RetrievedChunk> caseChunks = useLegacyCase
+                ? chromaSearchService.queryCases(query, caseFetchK)
+                : new ArrayList<>();
 
         // ── CASE chunk 안정 정렬: 본문 풍부(tier 1) → 메타 only(tier 0) 우선순위 ──
         //   * Chroma 가 내려준 distance 순(코사인 유사도) 은 그대로 유지하되,
@@ -84,12 +101,39 @@ public class LegalRetrievalService {
             caseChunks = new ArrayList<>(caseChunks.subList(0, kCase));
         }
 
-        log.info("[RAG] retrieval 완료 — query='{}', lawTopK={}, caseTopK={}, lawHits={}, caseHits={}",
-                truncate(query, 80), kLaw, kCase, lawChunks.size(), caseChunks.size());
+        // Phase 10.63 — 확장 판례 dual retrieval (config 활성화 시).
+        //   기존 cases_e5 결과와는 score 직접 비교 없이 source 별도 태그로 prompt/EvidenceCard 분리.
+        //   embedding 모델 mismatch 위험 → config 기본값은 비활성. 활성화 후 실패 시 graceful fallback.
+        int kExt = Math.max(0, ragProperties.getChroma().getExtendedCasesTopK());
+        // Phase 10.65 — caseSearchMode 가 extended/dual 일 때만 확장 retrieval. legacy 면 skip.
+        List<RetrievedChunk> extendedChunks = List.of();
+        if (useExtendedCase
+                && kExt > 0
+                && ragProperties.getChroma().getExtendedCasesCollection() != null
+                && !ragProperties.getChroma().getExtendedCasesCollection().isBlank()) {
+            try {
+                extendedChunks = chromaSearchService.queryExtendedCases(query, kExt);
+                log.info("[RAG] 확장 판례 retrieval — collection={}, topK={}, hits={}",
+                        ragProperties.getChroma().getExtendedCasesCollection(), kExt, extendedChunks.size());
+            } catch (Exception extErr) {
+                log.warn("[RAG] 확장 판례 retrieval 실패 — 무시: {}", extErr.getMessage());
+                extendedChunks = List.of();
+            }
+        }
 
-        List<EvidenceDto> evidences = new ArrayList<>(lawChunks.size() + caseChunks.size());
+        log.info("[RAG] retrieval 완료 — query='{}', lawTopK={}, caseTopK={}, lawHits={}, caseHits={}, extHits={}",
+                truncate(query, 80), kLaw, kCase, lawChunks.size(), caseChunks.size(), extendedChunks.size());
+
+        List<EvidenceDto> evidences = new ArrayList<>(
+                lawChunks.size() + caseChunks.size() + extendedChunks.size());
         evidences.addAll(evidenceAssembler.toEvidenceDtos(lawChunks));
         evidences.addAll(evidenceAssembler.toEvidenceDtos(caseChunks));
+        // Phase 10.63/10.64 — 확장 판례 evidence 에 dataSource 태그 부여 → prompt 블록 분리 + UI chip 표시
+        for (RetrievedChunk ec : extendedChunks) {
+            EvidenceDto dto = evidenceAssembler.toEvidenceDto(ec);
+            dto.setDataSource("extended_case_sample");
+            evidences.add(dto);
+        }
         return evidences;
     }
 

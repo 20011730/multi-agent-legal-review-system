@@ -105,6 +105,15 @@ public class EvidenceAssembler {
                 chunkText // quotedText: 인용문 박스로 그대로 노출
         );
 
+        // Phase 10.70 — RAG 출처 collection 을 dataSource 로 태그.
+        //   LegalRetrievalService 가 확장 collection 결과에 "extended_case_sample" 로 overwrite 하므로
+        //   여기서는 default 로 운영 collection 명을 세팅 (이후 overwrite 안전).
+        if (isLaw) {
+            dto.setDataSource("laws_e5");
+        } else {
+            dto.setDataSource("cases_e5");
+        }
+
         // ── RAG 부가 필드: score + metadata ──
         // 응답에만 노출, DB 저장 X (Evidence 엔티티에는 컬럼 없음)
         Double dist = c.getDistance();

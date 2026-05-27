@@ -35,6 +35,8 @@ export interface EvidenceItem {
   score?: number;
   /** 백엔드 EvidenceDto.metadata — RAG chunk 풍부화 정보 (있을 때만). */
   metadata?: EvidenceMetadata;
+  /** Phase 10.64 — 검색 source 태그 ("cases_e5" / "laws_e5" / "extended_case_sample" / undefined). */
+  dataSource?: string;
 }
 
 /** RAG chunk metadata. 모든 키는 optional — 백엔드 변경/구버전 응답에서도 안전.
@@ -115,13 +117,46 @@ function formatScore(score: number | undefined): string {
  */
 function humanizeTextType(textType: string): string {
   if (!textType) return "";
-  switch (textType) {
+  // 공백 정규화 — "이    유" / "이유" / "주    문" / "주문" 등 두 형식 모두 인식
+  const t = textType.replace(/\s+/g, "");
+  switch (t) {
     case "body": return "판례 본문";
-    case "holding": case "summary": return "판결요지";
-    case "issue": case "issues": return "판시사항";
-    case "referenced_laws": return "참조조문";
-    case "referenced_cases": return "참조판례";
+    case "holding":
+    case "summary":
+    case "판결요지":
+    case "판시사항요약":
+      return "판결요지";
+    case "issue":
+    case "issues":
+    case "판시사항":
+      return "판시사항";
+    case "referenced_laws":
+    case "참조조문":
+      return "참조조문";
+    case "referenced_cases":
+    case "참조판례":
+      return "참조판례";
+    case "이유": return "판단이유";
+    case "주문": return "주문";
+    case "결론": return "결론";
+    case "인정근거": return "인정근거";
+    case "청구취지": return "청구취지";
+    case "청구취지및항소취지": return "청구취지";
     case "meta": return "메타정보";
+    // Phase 10.71 — section_type 이 "피고인" / "원고" / "당사자참가인" 등 사건 당사자 라벨 (본문 아닌
+    //   헤더 chunk) 일 때는 사용자 화면에 노출하지 않음 (chip 미표시).
+    case "피고인":
+    case "피고인들":
+    case "피고피상고인":
+    case "원고":
+    case "원고들":
+    case "원고상고인":
+    case "원고피상고인":
+    case "당사자참가인":
+    case "당사자참가인피상고인":
+    case "피고인수참가인":
+    case "원심판결":
+      return "";
     default: return "";
   }
 }
@@ -201,6 +236,25 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
         >
           {isLaw ? "법령" : "판례"}
         </Badge>
+        {/* Phase 10.64 — 검색 source 구분 chip (운영 vs 확장). 내부 collection 명은 노출하지 않음. */}
+        {ev.dataSource === "extended_case_sample" && (
+          <Badge
+            variant="outline"
+            className="text-[10px] flex-shrink-0 border-indigo-300 bg-indigo-50 text-indigo-700"
+            title="확장 판례 DB — 보조 참고 자료"
+          >
+            확장 판례 DB
+          </Badge>
+        )}
+        {ev.dataSource && ev.dataSource !== "extended_case_sample" && !isLaw && (
+          <Badge
+            variant="outline"
+            className="text-[10px] flex-shrink-0 border-emerald-200 bg-emerald-50 text-emerald-700"
+            title="운영 판례 DB"
+          >
+            기존 판례 DB
+          </Badge>
+        )}
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">

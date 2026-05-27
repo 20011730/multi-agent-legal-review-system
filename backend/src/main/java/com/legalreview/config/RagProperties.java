@@ -53,6 +53,23 @@ public class RagProperties {
         // 단순 @ConfigurationProperties 로딩 실패 시 fallback 값과도 일관성 유지.
         private String lawsCollection = "laws_e5";
         private String casesCollection = "cases_e5";
+        /**
+         * Phase 10.63 — 확장 판례 collection (legal_rag_export 기반 샘플).
+         * 빈 값이면 dual retrieval 비활성 (기존 cases_e5 단일 검색 유지).
+         * Phase 10.65 — E5 호환 확인됨 (운영 E5 query encoder 그대로 사용 가능).
+         */
+        private String extendedCasesCollection = "";
+        /** 확장 판례 top-k. */
+        private int extendedCasesTopK = 2;
+        /**
+         * Phase 10.65 — 판례 검색 source 선택자.
+         *   - "legacy"   : cases_e5 단일 검색 (기본, 운영 안정성 우선)
+         *   - "extended" : extended-cases-collection 단일 검색 (sample 또는 full 1.86M)
+         *   - "dual"     : 둘 다 검색하여 source 별 분리 prompt 블록 + chip 표시
+         * extended/dual 모드에서 extended collection 이 비어 있거나 호출 실패 시
+         * 자동으로 legacy(cases_e5) 만 사용하도록 LegalRetrievalService 가 graceful fallback.
+         */
+        private String caseSearchMode = "legacy";
         /** 요청 timeout(초). */
         private int timeoutSeconds = 15;
     }

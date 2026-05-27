@@ -485,16 +485,21 @@ public class SessionService {
             return new ArrayList<>();
         }
         return evidences.stream()
-                .map(ev -> new EvidenceDto(
-                        ev.getSourceType(),
-                        ev.getTitle(),
-                        ev.getReferenceId(),
-                        ev.getArticleOrCourt(),
-                        ev.getSummary(),
-                        ev.getUrl(),
-                        ev.getRelevanceReason(),
-                        ev.getQuotedText()
-                ))
+                .map(ev -> {
+                    EvidenceDto dto = new EvidenceDto(
+                            ev.getSourceType(),
+                            ev.getTitle(),
+                            ev.getReferenceId(),
+                            ev.getArticleOrCourt(),
+                            ev.getSummary(),
+                            ev.getUrl(),
+                            ev.getRelevanceReason(),
+                            ev.getQuotedText()
+                    );
+                    // Phase 10.70 — persisted dataSource 복원 (EvidenceCard chip 표시용)
+                    dto.setDataSource(ev.getDataSource());
+                    return dto;
+                })
                 .toList();
     }
 }

@@ -63,6 +63,13 @@ app:
       # 기존 ``cases`` (384차원, 미사용 fallback) 컬렉션은 보존되며 ENV로 회귀 가능:
       #   CHROMA_CASES_COLLECTION=cases
       cases-collection: ${CHROMA_CASES_COLLECTION:cases_e5}
+      # Phase 10.65/10.66 — 확장 판례 collection (legal_rag_export 기반).
+      #   비어 있으면 dual/extended 모드여도 legacy cases_e5 로 자동 fallback.
+      #   샘플(910건) → legal_case_chunks_sample, 부분 적재 → legal_case_chunks_full, 전체 1.86M 도 동일 이름 권장.
+      extended-cases-collection: ${CHROMA_EXTENDED_CASES_COLLECTION:}
+      extended-cases-top-k: ${CHROMA_EXTENDED_CASES_TOPK:2}
+      # case-search-mode: legacy | extended | dual (기본 legacy — 운영 안정)
+      case-search-mode: ${CASE_SEARCH_MODE:legacy}
       timeout-seconds: ${CHROMA_TIMEOUT_SECONDS:15}
     top-k:
       law: ${RAG_TOPK_LAW:3}

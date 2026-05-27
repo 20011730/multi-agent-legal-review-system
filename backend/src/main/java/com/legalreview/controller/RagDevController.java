@@ -360,9 +360,16 @@ public class RagDevController {
         resp.put("chromaBaseUrl", ragProperties.getChroma().getBaseUrl());
         resp.put("lawsCollection", ragProperties.getChroma().getLawsCollection());
         resp.put("casesCollection", ragProperties.getChroma().getCasesCollection());
+        // Phase 10.71 — 개발자 가시성: 확장 collection / case-search-mode 진단 정보 노출 (사용자 화면 X)
+        String extColl = ragProperties.getChroma().getExtendedCasesCollection();
+        resp.put("caseSearchMode", ragProperties.getChroma().getCaseSearchMode());
+        resp.put("extendedCasesCollection", extColl == null ? "" : extColl);
         if (ragProperties.isEnabled()) {
             resp.put("lawsCount", chromaSearchService.countCollection(ragProperties.getChroma().getLawsCollection()));
             resp.put("casesCount", chromaSearchService.countCollection(ragProperties.getChroma().getCasesCollection()));
+            if (extColl != null && !extColl.isBlank()) {
+                resp.put("extendedCasesCount", chromaSearchService.countCollection(extColl));
+            }
         }
         return ResponseEntity.ok(resp);
     }

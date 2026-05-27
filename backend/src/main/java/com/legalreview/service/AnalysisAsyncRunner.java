@@ -326,18 +326,55 @@ public class AnalysisAsyncRunner {
         int maxItems = ragProperties.getPrompt().getMaxItemsLegal();
         int maxChars = ragProperties.getPrompt().getMaxEvidenceChars();
 
-        // 법령 먼저, 판례 나중 정렬
-        java.util.List<com.legalreview.dto.response.EvidenceDto> ordered = new java.util.ArrayList<>(evs);
-        ordered.sort((a, b) -> {
+        // Phase 10.64 — source 별 evidence 분리:
+        //   primary  : 법령(laws_e5) + 운영 판례(cases_e5) — dataSource null or "cases_e5"/"laws_e5"
+        //   extended : 확장 판례 샘플 — dataSource = "extended_case_sample"
+        // case_number 기준 dedup → primary 가 이미 가지고 있는 사건은 extended 에서 제외.
+        java.util.List<com.legalreview.dto.response.EvidenceDto> primary = new java.util.ArrayList<>();
+        java.util.List<com.legalreview.dto.response.EvidenceDto> extended = new java.util.ArrayList<>();
+        java.util.Set<String> seenCaseNumbers = new java.util.HashSet<>();
+        for (var e : evs) {
+            boolean isExtended = "extended_case_sample".equalsIgnoreCase(e.getDataSource());
+            if (isExtended) {
+                String cn = stringMeta(e.getMetadata(), "case_number");
+                if (!cn.isEmpty() && seenCaseNumbers.contains(cn)) continue; // dedup
+                if (!cn.isEmpty()) seenCaseNumbers.add(cn);
+                extended.add(e);
+            } else {
+                String cn = stringMeta(e.getMetadata(), "case_number");
+                if (!cn.isEmpty()) seenCaseNumbers.add(cn);
+                primary.add(e);
+            }
+        }
+        // 법령 먼저, 판례 나중 (primary 내부)
+        primary.sort((a, b) -> {
             int ra = "LAW".equalsIgnoreCase(a.getSourceType()) ? 0 : 1;
             int rb = "LAW".equalsIgnoreCase(b.getSourceType()) ? 0 : 1;
             return Integer.compare(ra, rb);
         });
 
         StringBuilder sb = new StringBuilder();
-        int n = Math.min(maxItems, ordered.size());
+        sb.append("[기존 판례·법령 검색 결과]\n");
+        appendLegalItems(sb, primary, maxItems, maxChars, /*forExtended=*/ false);
+        if (!extended.isEmpty()) {
+            sb.append("\n[확장 판례 검색 결과 (참고용)]\n");
+            sb.append("※ 아래 항목은 보조 참고 자료입니다. 단정적 결론의 직접 근거로 사용하지 말고,\n");
+            sb.append("   기존 판례·법령 결과를 우선 인용하세요.\n");
+            int extMax = Math.max(1, Math.min(extended.size(), ragProperties.getChroma().getExtendedCasesTopK()));
+            appendLegalItems(sb, extended, extMax, maxChars, /*forExtended=*/ true);
+        }
+        return sb.toString().trim();
+    }
+
+    private void appendLegalItems(
+            StringBuilder sb,
+            java.util.List<com.legalreview.dto.response.EvidenceDto> items,
+            int maxItems,
+            int maxChars,
+            boolean forExtended) {
+        int n = Math.min(maxItems, items.size());
         for (int i = 0; i < n; i++) {
-            com.legalreview.dto.response.EvidenceDto e = ordered.get(i);
+            com.legalreview.dto.response.EvidenceDto e = items.get(i);
             java.util.Map<String, Object> meta = e.getMetadata() == null ? java.util.Map.of() : e.getMetadata();
             String typeLabel = "LAW".equalsIgnoreCase(e.getSourceType()) ? "LAW" : "CASE";
             String title = nullSafe(e.getTitle());
@@ -345,8 +382,6 @@ public class AnalysisAsyncRunner {
                     nullSafe(e.getQuotedText() != null && !e.getQuotedText().isEmpty()
                             ? e.getQuotedText() : e.getSummary()),
                     maxChars);
-
-            // "조문:" 라인 (LAW이고 articleNo 있을 때만)
             String articleLine = null;
             String articleNo = stringMeta(meta, "articleNo");
             String articleTitle = stringMeta(meta, "articleTitle");
@@ -354,17 +389,29 @@ public class AnalysisAsyncRunner {
                 articleLine = "제" + articleNo + "조"
                         + (articleTitle.isEmpty() ? "" : " (" + articleTitle + ")");
             }
+            // 확장 판례에서는 case_number / court / section_type 만 노출
+            String caseNumber = stringMeta(meta, "case_number");
+            String court = stringMeta(meta, "court");
+            String sectionType = stringMeta(meta, "section_type");
             String reason = nullSafe(e.getRelevanceReason());
             if (reason.isEmpty()) reason = "사용자 검토 안건과 의미 매칭";
 
-            sb.append(String.format("%d. %s%n", i + 1, title));
-            sb.append(String.format("- 출처: %s%n", typeLabel));
-            if (articleLine != null) sb.append(String.format("- 조문: %s%n", articleLine));
-            sb.append(String.format("- 내용: %s%n", quoted));
-            sb.append(String.format("- 관련 이유: %s%n", reason));
+            if (forExtended) {
+                sb.append(String.format("%d. %s%s%s%n",
+                        i + 1,
+                        caseNumber.isEmpty() ? title : caseNumber,
+                        court.isEmpty() ? "" : " (" + court + ")",
+                        sectionType.isEmpty() ? "" : " — " + sectionType));
+                sb.append(String.format("- 발췌: %s%n", quoted));
+            } else {
+                sb.append(String.format("%d. %s%n", i + 1, title));
+                sb.append(String.format("- 출처: %s%n", typeLabel));
+                if (articleLine != null) sb.append(String.format("- 조문: %s%n", articleLine));
+                sb.append(String.format("- 내용: %s%n", quoted));
+                sb.append(String.format("- 관련 이유: %s%n", reason));
+            }
             sb.append('\n');
         }
-        return sb.toString().trim();
     }
 
     private static String stringMeta(java.util.Map<String, Object> meta, String key) {
@@ -379,10 +426,16 @@ public class AnalysisAsyncRunner {
     private String buildCommonEvidenceBlock(java.util.List<com.legalreview.dto.response.EvidenceDto> evs) {
         if (evs == null || evs.isEmpty()) return "";
         int maxItems = ragProperties.getPrompt().getMaxItemsCommon();
+        // Phase 10.64 — BIZ/JUDGE 프롬프트에는 확장 판례 노이즈 제외 (운영 cases_e5/laws_e5 만)
+        java.util.List<com.legalreview.dto.response.EvidenceDto> primaryOnly = new java.util.ArrayList<>();
+        for (var e : evs) {
+            if ("extended_case_sample".equalsIgnoreCase(e.getDataSource())) continue;
+            primaryOnly.add(e);
+        }
         StringBuilder sb = new StringBuilder();
-        int n = Math.min(maxItems, evs.size());
+        int n = Math.min(maxItems, primaryOnly.size());
         for (int i = 0; i < n; i++) {
-            com.legalreview.dto.response.EvidenceDto e = evs.get(i);
+            com.legalreview.dto.response.EvidenceDto e = primaryOnly.get(i);
             String typeLabel = "LAW".equalsIgnoreCase(e.getSourceType()) ? "법령" : "판례";
             sb.append(String.format("- [%s] %s%n", typeLabel, nullSafe(e.getTitle())));
         }

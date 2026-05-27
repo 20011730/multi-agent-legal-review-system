@@ -44,6 +44,15 @@ public class EvidenceDto {
     @Setter private Map<String, Object> metadata;
 
     /**
+     * Phase 10.63 — 검색 source 태그. 값 예시:
+     *   - "cases_e5" / "laws_e5" : 운영 RAG 컬렉션 (기본)
+     *   - "extended_case_sample" : 확장 판례 샘플 (실험 단계)
+     *   - null                   : RAG 외 출처 (법제처 OPEN API 등)
+     * EvidenceCard 의 chip 라벨링과 LEGAL prompt 블록 분리에 사용.
+     */
+    @Setter private String dataSource;
+
+    /**
      * 기존 8-arg 생성자 — 모든 호출자(`SessionService`, `ReviewService`,
      * `LawSearchItemDto.toEvidenceDto`, `EvidenceAssembler`)와 호환.
      */
@@ -75,6 +84,8 @@ public class EvidenceDto {
         ev.setUrl(url != null ? url : "");
         ev.setRelevanceReason(relevanceReason != null ? relevanceReason : "");
         ev.setQuotedText(quotedText != null ? quotedText : "");
+        // Phase 10.70 — dataSource 영속화. null 허용 (기존 / RAG 외 evidence).
+        ev.setDataSource(dataSource);
         return ev;
     }
 }

@@ -70,6 +70,24 @@ public class ChromaSearchService {
         return query(ragProperties.getChroma().getCasesCollection(), "CASE", queryText, topK);
     }
 
+    /**
+     * Phase 10.63 — 확장 판례 컬렉션 (legal_rag_export 기반 샘플) 별도 검색.
+     * {@code rag.chroma.extended-cases-collection} 가 빈 값이면 즉시 빈 리스트 반환 (dual retrieval 비활성).
+     * 활성화 시 query 인코딩에 사용된 embedding 모델이 해당 collection 적재 모델과 동일해야 함.
+     */
+    public List<RetrievedChunk> queryExtendedCases(String queryText, int topK) {
+        if (!ragProperties.isEnabled()) return List.of();
+        String coll = ragProperties.getChroma().getExtendedCasesCollection();
+        if (coll == null || coll.isBlank()) return List.of();
+        try {
+            return query(coll, "CASE_EXTENDED", queryText, topK);
+        } catch (Exception e) {
+            log.warn("[RAG] 확장 판례 검색 실패 — 기존 결과만 사용 (collection={}, msg={})",
+                    coll, e.getMessage());
+            return List.of();
+        }
+    }
+
     // ─────────────────────── Ingestion-side ───────────────────────
 
     /**
