@@ -476,7 +476,15 @@ public class AnalysisAsyncRunner {
 
     @SuppressWarnings("unchecked")
     private void saveDebateMessages(ReviewSession session, List<Map<String, Object>> messages) {
-        for (Map<String, Object> m : messages) {
+        // Phase 10.73 — 실제 멀티 에이전트 토론장 UX:
+        //   Python LangGraph 가 모든 라운드/agent 응답을 한 번에 묶어 반환하므로 기존엔
+        //   saveDebateMessages 가 N개를 빠르게 saveAndFlush + SSE publishMessage 해서
+        //   클라이언트가 "동시에 도착" 으로 인식 → 채팅 UX 부재.
+        //   본 phase 에서 SSE publish 사이에 chunk 단위 sleep 을 넣어 카톡식 점진 표시를 구현.
+        //   DB persist 는 즉시 수행 (폴링/dedup 안정성 보존). sleep 은 SSE push 후 적용.
+        long perMessageDelayMs = 900L; // Phase 10.75 — 0.9초 간격 (사용자가 한 줄씩 읽으며 따라갈 수 있는 속도)
+        for (int i = 0; i < messages.size(); i++) {
+            Map<String, Object> m = messages.get(i);
             DebateMessage msg = new DebateMessage();
             msg.setSession(session);
             msg.setAgentId((String) m.get("agentId"));
@@ -487,13 +495,20 @@ public class AnalysisAsyncRunner {
             msg.setStance((String) m.get("stance"));
             msg.setEvidenceSummary((String) m.get("evidenceSummary"));
             messageRepository.saveAndFlush(msg); // 즉시 flush → 폴링 시 messageCount 실시간 반영
-            // Phase 10.23 — SSE 로 새 메시지 push (저장된 id 포함)
             try {
                 streamService.publishMessage(session.getId(),
                         com.legalreview.controller.SessionStreamController.toMessagePayload(msg));
             } catch (Exception sseErr) {
-                // SSE 실패는 분석 흐름에 영향 X — debug 만
                 log.debug("[SSE] message publish 실패 (무시): {}", sseErr.getMessage());
+            }
+            // Phase 10.73 — 마지막 메시지 뒤에는 sleep 생략 (전체 완료까지의 추가 지연 방지)
+            if (i < messages.size() - 1) {
+                try {
+                    Thread.sleep(perMessageDelayMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
             }
         }
     }

@@ -345,10 +345,10 @@ export function Result() {
     }
   }, [visibleCount]);
 
-  // Phase 10.21/10.22/10.51 — staged reveal (준토큰 chunk streaming fallback).
-  // - 분석 중: 80~280ms 간격으로 1개씩 등장 → 한 chunk 가 늘어나는 카카오톡식 느낌.
-  // - 완료(isComplete) 상태에서 페이지 재진입/리로드 시: 즉시 전체 표시.
-  // - backlog 누적 시 간격 단축으로 따라잡음.
+  // Phase 10.21/10.22/10.51/10.73 — staged reveal:
+  //   - 백엔드 (Phase 10.73) 가 agent 메시지 사이 ~700ms 간격으로 SSE push → 클라이언트는 즉시 표시.
+  //   - 페이지 재진입 / reload / 백로그 burst: 짧은 interval 로 따라잡음.
+  //   - 완료(isComplete) 상태: 즉시 전체 표시.
   useEffect(() => {
     if (visibleCount >= messages.length) return;
     if (isCompleteRef.current) {
@@ -356,7 +356,9 @@ export function Result() {
       return;
     }
     const backlog = messages.length - visibleCount;
-    const interval = backlog >= 5 ? 80 : backlog >= 3 ? 160 : 280;
+    // backlog=1 (백엔드가 보낸 단일 신규 메시지) → 거의 즉시 표시 (50ms — 페이드 인 트리거용).
+    // backlog 큰 burst 는 기존 80~280ms.
+    const interval = backlog === 1 ? 50 : backlog >= 5 ? 80 : backlog >= 3 ? 160 : 220;
     const timer = setTimeout(() => {
       setVisibleCount((prev) => Math.min(prev + 1, messages.length));
     }, interval);
@@ -482,7 +484,7 @@ export function Result() {
           return !errPat.test(m.content || "");
         }).length;
         const trueFailure = healthyCore < 4 && mapped.some((m) => m.type === "error" || errPat.test(m.content || ""));
-        if (trueFailure) setError("일부 검토 단계에서 문제가 발생했습니다. 기존 검토 결과는 유지됩니다. 잠시 후 다시 시도하거나 기존 결과로 최종 리포트를 확인할 수 있습니다.");
+        if (trueFailure) setError("일부 AI 응답이 지연되어 기존 검토 결과를 기준으로 이어서 표시합니다. 잠시 후 다시 시도하거나 기존 결과로 최종 리포트를 확인할 수 있습니다.");
         setIsComplete(true);
         isCompleteRef.current = true;
         setCurrentPhase({ label: "검토 완료", description: "AI 검토팀의 논의가 완료되어 최종 리포트가 준비되었습니다.", progress: 100, humourLabel: "최종 리포트를 확인할 준비가 되었습니다." });
@@ -1220,10 +1222,10 @@ export function Result() {
           <Card className="border-amber-200 bg-amber-50">
             <CardContent className="pt-6">
               <div className="flex items-center gap-2 text-amber-800 font-medium">
-                <AlertCircle className="w-5 h-5" /> 추가 질문 반영 재검토를 완료하지 못했습니다
+                <AlertCircle className="w-5 h-5" /> 일부 AI 응답이 지연되어 기존 결과를 그대로 보여드립니다
               </div>
               <p className="text-sm text-amber-700 mt-1">
-                기존 검토 결과는 유지됩니다. 잠시 후 다시 시도하거나, 기존 결과로 최종 리포트를 확인할 수 있습니다.
+                지금까지의 검토 결과는 그대로 유지됩니다. 잠시 후 다시 시도하거나, 기존 결과 그대로 최종 리포트를 확인할 수 있습니다.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button
@@ -1266,14 +1268,15 @@ export function Result() {
                 AI 검토팀의 논의가 완료되었습니다.
               </div>
               <p className="text-sm text-emerald-700 mt-2">
-                {/* Phase 10.31 — 사용자 친화 문구로 정제 */}
+                {/* Phase 10.31/10.76 — 개입 선택지 명시 */}
                 {reanalyzeBadge
                   ? "최근 재검토 결과가 최종 리포트에 반영되었습니다. 아래 버튼으로 최종 판정을 확인하세요."
-                  : `에이전트별 검토 결과 ${messages.filter((m) => m.type !== "error").length}건이 정리되었습니다. 최종 리포트를 확인할 준비가 되었습니다.`}
+                  : `에이전트별 검토 결과 ${messages.filter((m) => m.type !== "error").length}건이 정리되었습니다. 추가로 묻고 싶은 점이 있다면 아래에서 질문을 남기고 '다음 라운드에 반영' 을 누르세요. 그렇지 않으면 바로 최종 판단을 확인할 수 있습니다.`}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
-                <Button variant="outline" className="rounded-full" onClick={() => navigate("/verdict")}>
-                  판정 결과 보기 <ArrowRight className="w-4 h-4 ml-2" />
+                <Button variant="default" className="rounded-full bg-[#1E3A8A] hover:bg-[#1E3A8A]/90" onClick={() => navigate("/verdict")}>
+                  {/* Phase 10.76 — 의도가 명확한 라벨 */}
+                  추가 질문 없이 최종 판단 보기 <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
                 <Button
                   variant="outline"
@@ -1337,8 +1340,8 @@ export function Result() {
                 );
               })}
               <p className="mt-1 text-[11px] text-slate-500">
-                ※ 추가 질문을 남기고 <strong>질문 반영해 재검토</strong> 버튼을 누르면, 다음 라운드 토론과 최종 리포트에 반영됩니다.
-                기존 라운드 1 토론은 그대로 유지되고, 새 라운드가 아래에 이어집니다.
+                ※ 추가 질문을 남기고 <strong>다음 라운드에 반영</strong> 버튼을 누르면, 다음 라운드 토론과 최종 리포트에 반영됩니다.
+                기존 Round 1 토론은 그대로 유지되고, 새 라운드가 아래에 이어집니다.
               </p>
             </CardContent>
           </Card>
@@ -1601,12 +1604,12 @@ function RoundInterventionBlock({
       // Phase 10.21 — 자동 reanalyze 제거. 사용자가 "질문 반영해 재검토" 를 직접 누르도록 분리.
       setFollowUpStatusMsg(
         isAnalyzing
-          ? "질문이 저장되었습니다. 현재 검토가 끝난 뒤 재검토에 반영할 수 있습니다."
-          : "질문이 저장되었습니다. '질문 반영해 재검토'를 누르면 새 검토가 기존 토론 아래에 이어집니다.",
+          ? "✓ 질문이 저장되었습니다. 현재 토론이 끝난 뒤 '다음 라운드에 반영' 버튼을 눌러주세요."
+          : "✓ 질문이 저장되었습니다. '다음 라운드에 반영' 버튼을 누르면 추가 질문을 반영해 다음 라운드를 시작합니다.",
       );
     } else {
       setFollowUpStatus("failed");
-      setFollowUpStatusMsg("백엔드 저장 실패 (로컬에만 저장됨). 재분석에 반영되지 않을 수 있습니다.");
+      setFollowUpStatusMsg("질문 저장에 일시적으로 실패했습니다. 잠시 후 다시 시도해 주세요.");
     }
     // Phase 10.11 — 부모 컴포넌트에 알림 → 채팅 로그 말풍선으로 즉시 렌더
     if (onQuestionSaved) {
@@ -1634,15 +1637,15 @@ function RoundInterventionBlock({
       <CardContent className="space-y-3 py-5">
         <div className="flex items-center gap-2 text-sm font-semibold text-[#1E3A8A]">
           <MessageSquare className="h-4 w-4" />
-          추가로 물어볼 내용이 있나요?
+          다음 라운드에 반영할 질문이나 추가 조건이 있나요?
         </div>
         <p className="text-xs text-slate-600">
-          {/* Phase 10.30/10.31 — 사용자 친화 + 분석 진행/완료 상태별 안내 */}
-          비서가 제안하는 질문을 클릭해 입력하거나 직접 작성한 뒤 전송할 수 있습니다.{" "}
-          선택한 에이전트의 발언과 현재 쟁점을 바탕으로 추천 질문을 제안합니다.
+          {/* Phase 10.30/10.31/10.74 — 사용자 친화 + 개입형 토론 명확화 */}
+          질문을 남기지 않아도 최종 판정까지 그대로 진행됩니다. 추가 질문을 남기면 그 내용이
+          <strong> 다음 라운드 에이전트 검토에 직접 반영</strong>됩니다. 추천 질문을 클릭하거나 직접 작성한 뒤 전송하세요.
           {isAnalyzing
             ? " 검토가 진행되는 동안 질문을 저장하면 현재 검토가 끝난 뒤 재검토에 반영할 수 있습니다."
-            : " 질문을 저장한 뒤 '질문 반영해 재검토'를 누르면 기존 토론 아래에 새 검토가 이어집니다."}
+            : " 질문을 저장한 뒤 '다음 라운드에 반영' 버튼을 누르면 기존 토론 아래에 새 라운드가 이어집니다."}
         </p>
 
         {/* Phase 10.30 — 비서 추천 질문 chips + 새로고침 버튼 */}
@@ -1686,7 +1689,7 @@ function RoundInterventionBlock({
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="추가 질문을 입력하세요 (예: 사업비 정산 시 우리가 놓치기 쉬운 부분은?)"
+            placeholder="다음 라운드에 반영할 질문이나 추가 조건을 입력하세요. (예: 개인정보를 이름과 연락처만 수집하는 경우도 위험한가요?)"
             rows={2}
             aria-label="추가 질문 입력"
             className="min-h-[64px] rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:border-[#1E3A8A] focus:outline-none"
@@ -1699,7 +1702,7 @@ function RoundInterventionBlock({
               ✓ 질문이 저장되었습니다 · 대상: {targetOptions.find((o) => o.value === target)?.label}
               <br />
               <span className="text-[10.5px] text-slate-500">
-                현재는 저장 상태입니다. '질문 반영해 재검토' 를 누르면 이 질문이 AI 분석에 포함됩니다.
+                현재 저장 상태입니다. '다음 라운드에 반영' 버튼을 누르면 이 질문이 다음 라운드 AI 검토에 포함됩니다.
               </span>
             </span>
           )}
@@ -1730,10 +1733,10 @@ function RoundInterventionBlock({
               title="저장된 질문을 즉시 AI 분석에 포함해 재검토를 시작합니다."
             >
               {followUpStatus === "reanalyzing"
-                ? "재검토 시작 중..."
+                ? "다음 라운드 시작 중..."
                 : followUpStatus === "reanalyzed"
-                ? "✓ 재검토 진행 중 (자동 갱신)"
-                : "🔁 질문 반영해 재검토"}
+                ? "✓ 다음 라운드 진행 중 (자동 갱신)"
+                : "🔁 다음 라운드에 반영"}
             </button>
           )}
         </div>
@@ -1820,6 +1823,7 @@ function LiveDebateTimeline({
   });
 
   let lastRound = -1;
+  let lastAgKey: string | null = null; // Phase 10.75 — judge 진입 boundary 감지용
   // Phase 10.27 — 재검토 시점 추적. system 메시지 등장 후의 라운드는 "재검토 · 라운드 N" 로 표시.
   let inReanalyzeSegment = false;
   const agentLabel = (k?: AgentKey) => (k ? (agentMap[k]?.name ?? "") : "");
@@ -1979,8 +1983,12 @@ function LiveDebateTimeline({
           const agent = agentMap[agKey] ?? agentMap["legal"];
           const Icon = agent.icon;
           const isJudge = agKey === "judge";
-          const showRoundHeader = msg.round !== lastRound;
+          // Phase 10.75 — judge 메시지는 round 가 같아도 별도 "최종 종합 판단" 헤더로 강제 표시
+          //   → 사용자에게 "이제 결론 단계" 라는 시각적 boundary 제공.
+          const prevWasJudge = lastAgKey === "judge";
+          const showRoundHeader = msg.round !== lastRound || (isJudge && !prevWasJudge);
           lastRound = msg.round;
+          lastAgKey = agKey;
 
           return (
             <div key={`a-${i}`} className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-400">
@@ -1992,9 +2000,17 @@ function LiveDebateTimeline({
                       ? "border-emerald-300 bg-emerald-50 text-emerald-700"
                       : "border-slate-200 bg-slate-50 text-slate-600"
                   }`}>
-                    {isJudge
-                      ? (inReanalyzeSegment ? "재검토 · 최종 판정" : "최종 판정")
-                      : (inReanalyzeSegment ? `재검토 · 라운드 ${msg.round}` : `라운드 ${msg.round}`)}
+                    {/* Phase 10.75 — Round 의미 명시: Round 1=초기 검토, Round 2=사용자 질문 반영, Round 3+=후속 보강.
+                        재검토 segment 는 emerald "사용자 질문 반영 검토" 톤. JUDGE 는 항상 "최종 종합 판단". */}
+                    {(() => {
+                      if (isJudge) return inReanalyzeSegment ? "최종 종합 판단 · 사용자 질문 반영" : "최종 종합 판단";
+                      const baseLabel =
+                        msg.round === 1 ? `Round ${msg.round} · 초기 검토` :
+                        msg.round === 2 ? `Round ${msg.round} · 쟁점 조율` :
+                        msg.round === 3 ? `Round ${msg.round} · 최종 입장 정리` :
+                        `Round ${msg.round}`;
+                      return inReanalyzeSegment ? `${baseLabel} · 사용자 질문 반영` : baseLabel;
+                    })()}
                   </span>
                   <div className={`h-px flex-1 ${inReanalyzeSegment ? "bg-emerald-200" : "bg-slate-200"}`} />
                 </div>
@@ -2004,7 +2020,22 @@ function LiveDebateTimeline({
                   <div className={`text-xs font-medium flex flex-wrap items-center gap-1.5 ${agent.color}`}>
                     <Icon className="w-3.5 h-3.5" />
                     <span>{msg.agentName || agent.name}</span>
-                    <Badge variant="outline" className="text-[9px] py-0">{msg.type}</Badge>
+                    {/* Phase 10.74 — 내부 type (analysis/concern/recommendation/error) 을 사용자 친화 라벨로 변환 */}
+                    {(() => {
+                      const tLabel = (() => {
+                        switch (msg.type) {
+                          case "analysis": return "초기 검토";
+                          case "concern": return "보완 의견";
+                          case "recommendation": return "최종 판정";
+                          case "system": return "시스템 안내";
+                          case "error": return "응답 지연";
+                          default: return msg.type || "";
+                        }
+                      })();
+                      return tLabel ? (
+                        <Badge variant="outline" className="text-[9px] py-0">{tLabel}</Badge>
+                      ) : null;
+                    })()}
                     <span className="ml-auto text-[10px] text-slate-400">#{i + 1}</span>
                   </div>
                   <div className="mt-1.5 text-sm text-slate-800">
@@ -2016,14 +2047,19 @@ function LiveDebateTimeline({
           );
         })}
 
-        {/* 분석 중에만 "다음 에이전트 응답 대기 중" placeholder — 발언자 정보 포함 */}
+        {/* 분석 중에만 "다음 에이전트 응답 대기 중" placeholder — 발언자 정보 포함.
+            Phase 10.76 — 재검토 segment 일 때는 "사용자 질문 반영" 컨텍스트 명시. */}
         {isAnalyzing && (
           <div className="flex justify-start">
-            <div className="max-w-[70%] rounded-2xl rounded-tl-sm border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-[12px] text-slate-500">
+            <div className="max-w-[80%] rounded-2xl rounded-tl-sm border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-[12px] text-slate-500">
               <Loader2 className="inline w-3 h-3 mr-1 animate-spin" />
               {liveStatus.speakingNow
-                ? `${agentLabel(liveStatus.speakingNow)}이(가) 입력 중입니다...`
-                : "다음 에이전트가 응답을 준비 중입니다..."}
+                ? inReanalyzeSegment
+                  ? `${agentLabel(liveStatus.speakingNow)}이(가) 사용자 질문을 반영해 검토 중입니다...`
+                  : `${agentLabel(liveStatus.speakingNow)}이(가) 앞선 의견을 검토 중입니다...`
+                : inReanalyzeSegment
+                  ? "다음 에이전트가 사용자 질문을 반영해 응답을 준비 중입니다..."
+                  : "다음 에이전트가 응답을 준비 중입니다..."}
             </div>
           </div>
         )}
