@@ -105,11 +105,7 @@ function metaStrAny(meta: EvidenceMetadata | undefined, ...keys: string[]): stri
   return "";
 }
 
-/* score(0~1) → 사람이 읽기 쉬운 라벨. */
-function formatScore(score: number | undefined): string {
-  if (typeof score !== "number" || !isFinite(score)) return "";
-  return `${(score * 100).toFixed(0)}%`;
-}
+/* Phase 10.85 — formatScore 는 사용자 화면 노출을 중단. PDF/내부 디버그에서도 사용하지 않음. */
 
 /**
  * CASE chunk 의 text_type (backend metadata) → 사용자 친화 한글 라벨.
@@ -193,7 +189,7 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
   const lawTypeName = metaStr(ev.metadata, "lawTypeName");
   const deptName = metaStr(ev.metadata, "deptName") || ev.articleOrCourt || "";
   const enforceDate = metaStr(ev.metadata, "enforceDate");
-  const scoreLabel = formatScore(ev.score);
+  // Phase 10.85 — scoreLabel (벡터 유사도 %) 은 사용자 화면에서 노출하지 않음.
 
   // CASE 전용 상태 라벨 (카드 요약 행에 한눈에 보이도록 표시) — 닫힌 상태에서도 본문 vs 메타 구분
   const caseTextType = !isLaw ? metaStrAny(ev.metadata, "text_type", "section") : "";
@@ -221,9 +217,34 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
     });
   };
 
-  const searchUrl = isLaw
-    ? `https://www.law.go.kr/법령/${encodeURIComponent(ev.title)}`
-    : `https://www.law.go.kr/판례검색?query=${encodeURIComponent(ev.title)}`;
+  /* Phase 10.85 — 공식 사이트(국가법령정보센터) deep link.
+     LAW: 법령명으로 법령 페이지(`/법령/{명}`) 열기.
+     CASE: referenceId 에서 순수 사건번호(YYYY+한글+숫자, 예: 2022누56427)만 정규화해
+           판례 단축경로(`/판례/{사건번호}`) 시도. 정규화 실패 시 통합검색 폴백.
+     이전 `판례검색?query=` 경로는 동작하지 않아 빈 결과 페이지가 떴음.
+     검색어(title/referenceId) 가 전혀 없으면 링크 비활성화. */
+  const buildSearchUrl = (): string | null => {
+    if (isLaw) {
+      // 법령 단축경로(`/법령/{명}`)는 조문 번호 없이 순수 법령명만 받음.
+      // title 에 "...법률 제27조" / 중복 "제제27조" 가 붙어 있으면 제거.
+      const rawName = (lawNameKr || ev.title || "").trim();
+      const lawName = rawName.replace(/\s*제+\s*\d+\s*조(?:의\s*\d+)?.*$/, "").trim();
+      if (!lawName) return null;
+      return `https://www.law.go.kr/법령/${encodeURIComponent(lawName)}`;
+    }
+    const ref = (ev.referenceId || "").trim();
+    // "서울고등법원-2022-누-56427" → "서울고등법원2022누56427" → 사건번호 "2022누56427"
+    const cleaned = ref.replace(/[-\s]/g, "");
+    const m = /([0-9]{4}[가-힣]{1,3}[0-9]+)/.exec(cleaned);
+    if (m) {
+      return `https://www.law.go.kr/판례/(${encodeURIComponent(m[1])})`;
+    }
+    // 사건번호 정규화 실패 → 통합검색 폴백 (사건명/제목)
+    const q = (ev.title || ref || "").trim();
+    if (!q) return null;
+    return `https://www.law.go.kr/LSW/precInfoR.do?precSeq=&searchQuery=${encodeURIComponent(q)}`;
+  };
+  const searchUrl = buildSearchUrl();
 
   return (
     <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
@@ -261,14 +282,8 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
             <span className="font-medium text-sm text-gray-900 line-clamp-1">
               {ev.title}
             </span>
-            {scoreLabel && (
-              <span
-                className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 shrink-0"
-                title="RAG 벡터 유사도"
-              >
-                관련도 {scoreLabel}
-              </span>
-            )}
+            {/* Phase 10.85 — 사용자 화면에서 벡터 유사도/관련도 % 표시 제거.
+                내부 RAG 점수는 사용자에게 오해를 줄 수 있어 노출하지 않음. */}
             {/* CASE: 본문 풍부 (text_type=body/holding/issue/...) 시 양성 라벨, 메타 only 시 amber 경고 */}
             {caseTextTypeLabel && (
               <span
@@ -482,14 +497,14 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
             </div>
           )}
 
-          {/* 관련 이유 / 점수 */}
-          {(ev.relevanceReason || scoreLabel) && (
+          {/* 관련 이유 — Phase 10.85: 벡터 유사도 fallback 문구 제거. relevanceReason 이 있을 때만 표시. */}
+          {ev.relevanceReason && (
             <div className="flex items-start gap-2 text-xs">
               <Info className="w-3.5 h-3.5 text-indigo-500 mt-0.5" />
               <div>
                 <span className="text-gray-500">관련 이유:</span>
                 <p className="text-indigo-700 mt-0.5 leading-relaxed">
-                  {ev.relevanceReason || (scoreLabel && `벡터 유사도 ${scoreLabel}`)}
+                  {ev.relevanceReason}
                 </p>
               </div>
             </div>
@@ -538,7 +553,16 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
               variant="outline"
               size="sm"
               className="h-7 text-xs"
-              onClick={() => window.open(searchUrl, "_blank")}
+              disabled={!searchUrl}
+              title={searchUrl ? "국가법령정보센터에서 검색" : "검색어가 없어 검색을 열 수 없습니다"}
+              onClick={() => {
+                if (!searchUrl) return;
+                // Phase 10.85 — deep link 가 결과를 못 띄울 가능성에 대비해 검색어를 함께 복사.
+                navigator.clipboard?.writeText(
+                  ev.title + (ev.referenceId ? ` (${ev.referenceId})` : ""),
+                ).catch(() => { /* 클립보드 실패는 무시 — 링크는 그대로 열림 */ });
+                window.open(searchUrl, "_blank", "noopener,noreferrer");
+              }}
             >
               <ExternalLink className="w-3 h-3 mr-1" />
               공식 사이트에서 검색

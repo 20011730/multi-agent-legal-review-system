@@ -1313,7 +1313,7 @@ export function Result() {
               <div className="mb-1 text-sm font-semibold text-slate-700">
                 사용자 추가 질문 ({userFollowUps.length}건)
               </div>
-              {userFollowUps.filter((q) => q.targetAgent !== "system").map((q, i) => {
+              {userFollowUps.map((q, originalIdx) => ({ q, originalIdx })).filter(({ q }) => q.targetAgent !== "system").map(({ q, originalIdx }) => {
                 // Phase 10.56 — 질문별 상태 chip (반영 완료 / 일부 반영 / 재검토 반영 대기 / 다시 시도 필요 / 재검토 중)
                 const rs = q.reanalyzeStatus;
                 const chip = (() => {
@@ -1323,18 +1323,75 @@ export function Result() {
                   if (rs === "in-progress") return { label: "재검토 중", cls: "border-blue-200 bg-blue-50 text-blue-700" };
                   return { label: "다음 재검토 반영 대기", cls: "border-amber-200 bg-amber-50 text-amber-800" };
                 })();
+                // Phase 10.85 — 수정/삭제는 pending / failed 상태일 때만 가능 (반영 완료/진행 중 변경 차단).
+                const isEditable = !rs || rs === "pending" || rs === "failed";
                 return (
-                  <div key={i} className="space-y-1">
+                  <div key={originalIdx} className="space-y-1">
                     <div className="flex justify-end">
                       <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-[#1E3A8A] px-3 py-2 text-sm text-white shadow-sm">
                         <div className="mb-0.5 text-[10px] opacity-80">
                           대상: {targetAgentLabel(q.targetAgent)} {q.createdAt && `· ${new Date(q.createdAt).toLocaleTimeString("ko-KR")}`}
                         </div>
-                        <p className="break-keep">{q.message}</p>
+                        <p className="break-keep whitespace-pre-wrap">{q.message}</p>
                       </div>
                     </div>
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-end gap-1.5">
                       <span className={`rounded-full border px-2 py-0.5 text-[10.5px] ${chip.cls}`}>{chip.label}</span>
+                      {isEditable && (
+                        <>
+                          <button
+                            type="button"
+                            className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10.5px] text-slate-600 hover:bg-slate-50"
+                            onClick={async () => {
+                              const next = window.prompt("질문 내용을 수정하세요", q.message);
+                              if (next == null) return;
+                              const trimmed = next.trim();
+                              if (!trimmed || trimmed === q.message) return;
+                              const sessionId = sessionStorage.getItem("sessionId");
+                              if (!sessionId) return;
+                              try {
+                                const res = await fetch(`http://localhost:8080/api/sessions/${sessionId}/questions`, {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ index: originalIdx, message: trimmed }),
+                                });
+                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                                setUserFollowUps((prev) => prev.map((p, j) => j === originalIdx ? { ...p, message: trimmed } : p));
+                              } catch (e) {
+                                console.warn("[questions] edit failed", e);
+                                alert("질문 수정에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+                              }
+                            }}
+                            title="질문 수정"
+                          >
+                            ✏ 수정
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md border border-red-200 bg-white px-2 py-0.5 text-[10.5px] text-red-600 hover:bg-red-50"
+                            onClick={async () => {
+                              if (!window.confirm("이 질문을 삭제할까요? 재검토에 반영되지 않습니다.")) return;
+                              const sessionId = sessionStorage.getItem("sessionId");
+                              if (!sessionId) return;
+                              try {
+                                const res = await fetch(`http://localhost:8080/api/sessions/${sessionId}/questions`, {
+                                  method: "DELETE",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ index: originalIdx, message: null }),
+                                });
+                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                                setUserFollowUps((prev) => prev.filter((_, j) => j !== originalIdx));
+                              } catch (e) {
+                                console.warn("[questions] delete failed", e);
+                                alert("질문 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+                              }
+                            }}
+                            title="질문 삭제"
+                          >
+                            🗑 삭제
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );

@@ -90,6 +90,40 @@ public class SessionController {
     }
 
     /**
+     * Phase 10.85 — 저장된 후속 질문 수정/삭제.
+     * body: { index: number, message?: string|null }  (message 가 null 또는 누락이면 삭제)
+     */
+    @RequestMapping(value = "/{sessionId}/questions", method = {RequestMethod.PATCH, RequestMethod.DELETE})
+    public ResponseEntity<Map<String, Object>> updateFollowUpQuestion(
+            @PathVariable Long sessionId,
+            @RequestBody(required = false) Map<String, Object> body) {
+        if (body == null || !body.containsKey("index")) {
+            return ResponseEntity.badRequest().body(Map.of("error", "index 필드가 필요합니다"));
+        }
+        int index;
+        try {
+            index = ((Number) body.get("index")).intValue();
+        } catch (Exception ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", "index 는 정수여야 합니다"));
+        }
+        Object raw = body.get("message");
+        String newMessage = raw == null ? null : String.valueOf(raw);
+        try {
+            int remaining = sessionService.updateFollowUpQuestion(sessionId, index, newMessage);
+            if (remaining < 0) {
+                return ResponseEntity.status(409).body(Map.of(
+                        "error", "이미 반영되었거나 진행 중인 질문은 수정/삭제할 수 없습니다."));
+            }
+            return ResponseEntity.ok(Map.of(
+                    "sessionId", sessionId,
+                    "remainingCount", remaining,
+                    "message", newMessage == null ? "질문이 삭제되었습니다." : "질문이 수정되었습니다."));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        }
+    }
+
+    /**
      * Phase 10.17 — 저장된 followUpQuestions 를 기존 세션에 반영하여 재분석 트리거.
      * 기존 session 의 startupContext / startupExtras / attachments / followUpQuestions 모두 포함.
      * 비동기 분석 시작, status="REANALYZING" 으로 설정.

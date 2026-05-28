@@ -164,6 +164,54 @@ public class SessionService {
     }
 
     /**
+     * Phase 10.85 — 저장된 후속 질문 1건 삭제/수정.
+     * 재검토(in-progress) 또는 이미 반영(completed/reflected/partial)된 질문은 변경할 수 없다.
+     * @param index 질문 배열 인덱스 (system 메시지 포함, 클라이언트가 정확히 지정)
+     * @param newMessage null 이면 삭제, 비어있지 않은 문자열이면 message 갱신
+     * @return 변경 후 총 질문 수 (-1 이면 수정/삭제 불가 상태)
+     */
+    @Transactional
+    public int updateFollowUpQuestion(Long sessionId, int index, String newMessage) {
+        ReviewSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+        java.util.List<java.util.Map<String, Object>> list = new java.util.ArrayList<>();
+        if (session.getFollowUpQuestionsJson() != null && !session.getFollowUpQuestionsJson().isBlank()) {
+            try {
+                list = objectMapper.readValue(session.getFollowUpQuestionsJson(),
+                        new com.fasterxml.jackson.core.type.TypeReference<>() {});
+            } catch (Exception ex) {
+                log.warn("[session] followUp JSON 파싱 실패: {}", ex.getMessage());
+            }
+        }
+        if (index < 0 || index >= list.size()) {
+            throw new IllegalArgumentException("질문 인덱스가 범위를 벗어났습니다: " + index);
+        }
+        java.util.Map<String, Object> target = list.get(index);
+        String status = String.valueOf(target.getOrDefault("reanalyzeStatus", "pending"));
+        // 이미 반영되었거나 진행 중인 질문은 변경 불가
+        if (!"pending".equals(status) && !"failed".equals(status)) {
+            return -1;
+        }
+        if (newMessage == null) {
+            list.remove(index);
+        } else {
+            String trimmed = newMessage.trim();
+            if (trimmed.isEmpty()) {
+                throw new IllegalArgumentException("message 가 비어 있습니다");
+            }
+            target.put("message", trimmed);
+            target.put("updatedAt", java.time.Instant.now().toString());
+        }
+        try {
+            session.setFollowUpQuestionsJson(objectMapper.writeValueAsString(list));
+        } catch (Exception ex) {
+            log.warn("[session] followUp JSON 직렬화 실패: {}", ex.getMessage());
+        }
+        sessionRepository.save(session);
+        return list.size();
+    }
+
+    /**
      * Phase 10.17 — 저장된 followUpQuestions / startupContext / startupExtras / attachments 를
      * 기존 세션의 입력에 합쳐서 재분석 트리거.
      *

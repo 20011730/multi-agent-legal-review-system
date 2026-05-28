@@ -197,12 +197,17 @@ public class EvidenceAssembler {
     }
 
     /**
-     * Chroma distance(낮을수록 유사)를 사람이 읽기 좋은 표현으로 변환.
-     * 코사인 거리 가정: 0~2 범위, 0이 동일.
+     * Phase 10.85 — Chroma distance 를 사용자 친화 라벨로 변환.
+     * 내부 수치(벡터 유사도 0.NN) 노출 금지. 3 단계 등급으로만 표시.
+     *   sim ≥ 0.75 → "관련도 높음"
+     *   sim ≥ 0.55 → "관련도 보통"
+     *   그 외       → "관련도 참고"
      */
     private static String formatRelevance(Double distance) {
         if (distance == null) return "";
         double sim = Math.max(0.0, Math.min(1.0, 1.0 - distance / 2.0));
-        return String.format("벡터 유사도 %.2f", sim);
+        if (sim >= 0.75) return "관련도 높음";
+        if (sim >= 0.55) return "관련도 보통";
+        return "관련도 참고";
     }
 }

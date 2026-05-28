@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   FileText,
+  BookOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 import { exportElementToPdf } from "../utils/exportVerdictPdf";
@@ -1232,6 +1233,108 @@ export function Verdict() {
             <EvidenceCardList evidences={evidences} />
           )}
 
+          {/* Phase 10.78 — 검토 신뢰도 / 추가 확인 사항 카드 */}
+          {finalDecision && (() => {
+            // 신뢰도 지표 카운트
+            const lawEvidenceCount = evidences.filter((e) => e.sourceType === "LAW").length;
+            const caseEvidenceCount = evidences.filter((e) => e.sourceType === "CASE").length;
+            const extendedCaseCount = evidences.filter(
+              (e) => (e as { dataSource?: string }).dataSource === "extended_case_sample",
+            ).length;
+            const hasRichEvidence = lawEvidenceCount + caseEvidenceCount >= 4;
+
+            // 사용자 입력의 키워드 기반 전문가 질문 자동 추천 (template fallback 안전)
+            const hay = (finalDecision.summary || "") + " " + (finalDecision.recommendation || "");
+            const expertQuestions: string[] = [];
+            if (/개인정보|동의|수집|제3자|위탁/.test(hay))
+              expertQuestions.push("개인정보 수집·이용·제3자 제공 동의 문구가 「개인정보 보호법」 제15조·제17조 요건에 충분히 부합하나요?");
+            if (/정산|환수|보조금|지원금|사업비|목적외/.test(hay))
+              expertQuestions.push("지원금/보조금 사용 항목과 증빙 체계가 사업비 정산 기준에 맞고, 환수 사유가 발생할 가능성은 어디까지인가요?");
+            if (/외주|용역|위탁|도급|프리랜서|근로/.test(hay))
+              expertQuestions.push("외주·용역·근로 계약서의 책임 범위·성과물 귀속 조항이 명확하고 4대 보험·세무 처리 책임이 분명한가요?");
+            if (/지식재산|성과물|IP|특허|상표|저작/.test(hay))
+              expertQuestions.push("성과물·지식재산권 귀속 조항이 단독/공동 사용권 범위와 함께 명확히 정리되어 있나요?");
+            if (/표시|광고|홍보|문구|이벤트/.test(hay))
+              expertQuestions.push("홍보·표시 문구가 「표시·광고의 공정화에 관한 법률」상 부당광고에 해당하지 않는지 확인되었나요?");
+            // fallback — 3개 미만이면 일반 질문으로 채움
+            while (expertQuestions.length < 3) {
+              const generics = [
+                "현재 입력 정보 외에 추가로 확인이 필요한 핵심 사실관계나 자료가 있나요?",
+                "관련 법령 또는 판례의 가장 최근 개정/선고 시점이 본 사안에 적용되나요?",
+                "이 사안에 분쟁이 발생할 경우 관할/준거법/조정 절차가 계약서에 명확히 정해져 있나요?",
+              ];
+              for (const g of generics) {
+                if (!expertQuestions.includes(g) && expertQuestions.length < 3) expertQuestions.push(g);
+              }
+            }
+
+            return (
+              <Card className="border-sky-200 bg-sky-50/40">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <BookOpen className="w-5 h-5 text-sky-700" />
+                    검토 신뢰도와 추가 확인 사항
+                  </CardTitle>
+                  <CardDescription>
+                    AI가 현재 입력 정보와 확인된 근거를 바탕으로 정리한 결과입니다. 법률 자문이 아닌 사전 리스크 점검 용도이며,
+                    아래 카드에서 관련 법령·판례 근거를 직접 확인할 수 있습니다.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-slate-700">
+                  {/* 1) 근거 충분 */}
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50/60 px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-emerald-800 font-semibold text-[13px]">
+                      ✓ 근거 충분
+                    </div>
+                    <p className="mt-1 text-[12.5px] leading-relaxed">
+                      {hasRichEvidence
+                        ? `관련 법령 ${lawEvidenceCount}건과 판례 ${caseEvidenceCount}건의 근거가 확인되었습니다.`
+                        : "현재 입력 정보 안에서 확인 가능한 법령·판례 근거를 정리했습니다."}
+                      {extendedCaseCount > 0 && ` 그 중 ${extendedCaseCount}건은 확장 판례 DB에서 보조 근거로 인용되었습니다.`}
+                    </p>
+                  </div>
+
+                  {/* 2) 추가 확인 필요 */}
+                  <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-amber-800 font-semibold text-[13px]">
+                      ⓘ 추가 확인이 필요한 부분
+                    </div>
+                    <p className="mt-1 text-[12.5px] leading-relaxed">
+                      실제 협약서·계약서 원문, 정산 증빙, 개인정보 처리 흐름, 외주 계약 조건 등 구체적 자료는 아직 확보되지 않을 수 있습니다.
+                      위 결과는 입력해 주신 상황 설명을 기반으로 한 사전 점검 결과이므로, 실제 의사결정 전에는 관련 문서를 함께 검토해 주세요.
+                    </p>
+                  </div>
+
+                  {/* 3) 전문가 검토 권장 */}
+                  <div className="rounded-md border border-rose-200 bg-rose-50/60 px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-rose-800 font-semibold text-[13px]">
+                      ⚖ 전문가 검토가 권장되는 부분
+                    </div>
+                    <p className="mt-1 text-[12.5px] leading-relaxed">
+                      아래 항목은 법적 책임이나 계약 조건이 걸려 있어 변호사·세무사·노무사 등 전문가의 직접 검토를 권장드립니다.
+                    </p>
+                    <ul className="mt-2 space-y-1 text-[12.5px] leading-relaxed">
+                      {expertQuestions.slice(0, 3).map((q, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <span className="mt-0.5 text-rose-700">{i + 1}.</span>
+                          <span>{q}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    ※ 이 결과는 법률 자문이 아니라 사전 리스크 점검 결과입니다. 본 결과만으로 최종 의사결정을 내리지 마시고,
+                    중요한 결정 전에는 관련 분야 전문가와 함께 검토해 주세요.
+                  </p>
+
+                  {/* Phase 10.78/10.79 — 간단 피드백 CTA (백엔드 저장) */}
+                  <FeedbackInline sessionId={activeSessionId} />
+                </CardContent>
+              </Card>
+            );
+          })()}
+
           {/* 재검토 */}
           <Card className="border-slate-200">
             <CardHeader>
@@ -1417,8 +1520,7 @@ export function Verdict() {
                   const dept = (m.deptName ? String(m.deptName) : ev.articleOrCourt) || "";
                   const lawType = m.lawTypeName ? String(m.lawTypeName) : "";
                   const enforce = m.enforceDate ? String(m.enforceDate) : "";
-                  const scorePct = typeof ev.score === "number" && isFinite(ev.score)
-                    ? `${(ev.score * 100).toFixed(0)}%` : "";
+                  // Phase 10.85 — PDF 에서도 벡터 유사도(관련도 %) 노출 제거.
                   const body = ev.quotedText || ev.summary || "";
 
                   return (
@@ -1434,14 +1536,6 @@ export function Verdict() {
                         <div style={{ fontSize: "12px", fontWeight: 600, color: "#0f172a", flex: 1, minWidth: 0 }}>
                           {ev.title}
                         </div>
-                        {scorePct && (
-                          <span style={{
-                            fontSize: "9px", fontWeight: 600, padding: "1px 6px", borderRadius: "8px",
-                            background: "#eef2ff", color: "#4338ca", whiteSpace: "nowrap",
-                          }}>
-                            관련도 {scorePct}
-                          </span>
-                        )}
                       </div>
                       {(articleLabel || dept || lawType || enforce) && (
                         <div style={{ fontSize: "10px", color: "#475569", marginBottom: "3px" }}>
@@ -1539,3 +1633,107 @@ const pdfBodyStyle: CSSProperties = {
   margin: 0,
   paddingBottom: 0,
 };
+
+/**
+ * Phase 10.78/10.79 — verdict 신뢰도 카드 하단의 사용자 피드백 (👍/👎 + 자유 의견).
+ *   POST /api/sessions/{id}/feedback 으로 저장. 중복 제출 시 backend 가 alreadySubmitted=true 반환.
+ *   sessionStorage 의 feedbackSubmittedSession 으로 클라이언트 측에서도 1회로 가드.
+ */
+function FeedbackInline({ sessionId }: { sessionId: string | null }) {
+  const sessionKey = sessionId ? `feedbackSubmitted:${sessionId}` : null;
+  const initialSubmitted = (() => {
+    if (!sessionKey) return false;
+    try { return sessionStorage.getItem(sessionKey) === "1"; } catch { return false; }
+  })();
+  const [rating, setRating] = useState<"up" | "down" | null>(null);
+  const [note, setNote] = useState("");
+  const [submitted, setSubmitted] = useState(initialSubmitted);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!sessionId) { setError("세션 식별자가 없어 피드백을 보낼 수 없습니다."); return; }
+    if (!rating) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await fetch(`http://localhost:8080/api/sessions/${sessionId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating, note: note.trim() || null }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // duplicate 도 200 OK 로 반환 — UI 는 동일하게 submitted 전환
+      try { if (sessionKey) sessionStorage.setItem(sessionKey, "1"); } catch { /* */ }
+      setSubmitted(true);
+    } catch (e) {
+      console.warn("[feedback] 전송 실패:", e);
+      setError("피드백 전송이 일시적으로 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (submitted) {
+    return (
+      <div className="rounded-md border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-[12px] text-emerald-800">
+        ✓ 피드백을 받았습니다. 다음 검토 품질 개선에 참고하겠습니다.
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2.5 space-y-2">
+      <div className="text-[12.5px] font-medium text-slate-700">
+        이 검토 결과가 도움이 되었나요?
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className={`rounded-full border px-3 py-1 text-[12px] ${
+            rating === "up"
+              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+          onClick={() => setRating("up")}
+          aria-label="도움이 되었어요"
+        >
+          👍 도움이 되었어요
+        </button>
+        <button
+          type="button"
+          className={`rounded-full border px-3 py-1 text-[12px] ${
+            rating === "down"
+              ? "border-rose-300 bg-rose-50 text-rose-700"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+          onClick={() => setRating("down")}
+          aria-label="아쉬워요"
+        >
+          👎 아쉬워요
+        </button>
+      </div>
+      {rating && (
+        <>
+          <textarea
+            className="w-full rounded-md border border-slate-200 bg-slate-50/40 px-2 py-1.5 text-[12px] text-slate-700"
+            rows={2}
+            placeholder="부족하거나 불명확한 부분이 있다면 알려주세요 (선택)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={submitting}
+              className="rounded-full border border-[#1E3A8A]/30 bg-[#1E3A8A]/5 px-3 py-1 text-[12px] text-[#1E3A8A] hover:bg-[#1E3A8A] hover:text-white disabled:opacity-60"
+              onClick={submit}
+            >
+              {submitting ? "전송 중..." : "의견 보내기"}
+            </button>
+            {error && <span className="text-[11px] text-red-600">{error}</span>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
