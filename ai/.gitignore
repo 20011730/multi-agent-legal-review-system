@@ -9,6 +9,6 @@ ai/embedding-finetuning.zip
 ai/generate_rag/판례테스트.py
 ai/generate_rag/jsonl_exports.tar.gz
 ai/generate_rag/current_laws.json
-학교/4-2/캡스톤_ver2/캡스톤_ver2/ai/generate_rag/scheduled_laws.json
-학교/4-2/캡스톤_ver2/캡스톤_ver2/ai/generate_rag/precedent_list.json
-학교/4-2/캡스톤_ver2/캡스톤_ver2/ai/generate_rag/precedent_list_raw_page1.json
+ai/generate_rag/scheduled_laws.json
+ai/generate_rag/precedent_list.json
+ai/generate_rag/precedent_list_raw_page1.json
