@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+# 5-4 돌리고 약 11만건 판례 잘 가져왔나 개수 확인하는 코드
 # 앞서 저장한 청크 파일들이 있는 폴더 경로
 CHUNK_DIR = "./tmp/parsed_chunks"
 
