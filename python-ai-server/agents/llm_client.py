@@ -97,8 +97,8 @@ def _generate_ollama(system_instruction: str, prompt: str, temperature: float) -
             if 400 <= resp.status_code < 500:
                 summary = _summarize_html_or_text(resp.text)
                 logger.error(
-                    "Ollama HTTP %d (재시도 안 함) — 설정/요청 오류. URL=%s/api/chat, model=%s, body=%s",
-                    resp.status_code, OLLAMA_BASE_URL, OLLAMA_MODEL, summary,
+                    "Ollama HTTP %d (재시도 안 함) — 설정/요청 오류. baseConfigured=true, model=%s, body=%s",
+                    resp.status_code, OLLAMA_MODEL, summary,
                 )
                 raise RuntimeError(
                     f"Ollama HTTP {resp.status_code} (설정/요청 오류): {summary}"
@@ -230,7 +230,7 @@ def is_provider_configured() -> tuple[bool, str]:
     if _PROVIDER == "ollama":
         if not OLLAMA_BASE_URL:
             return False, "OLLAMA_BASE_URL 미설정"
-        return True, f"ollama provider — base={OLLAMA_BASE_URL}, model={OLLAMA_MODEL}"
+        return True, f"ollama provider — baseConfigured=true, model={OLLAMA_MODEL}"
     if _PROVIDER == "gemini":
         if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
             return False, "GEMINI_API_KEY/GOOGLE_API_KEY 미설정"

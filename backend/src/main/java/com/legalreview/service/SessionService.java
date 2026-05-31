@@ -23,10 +23,12 @@ public class SessionService {
 
     private final ReviewSessionRepository sessionRepository;
     private final DebateMessageRepository messageRepository;
+    private final AssistantMessageRepository assistantMessageRepository;
     private final FinalDecisionRepository finalDecisionRepository;
     private final EvidenceRepository evidenceRepository;
     private final UserRepository userRepository;
     private final AnalysisAsyncRunner analysisAsyncRunner;
+    private final AiAnalysisClient aiAnalysisClient;
     // Phase 10.23 — SSE 브로드캐스터 (재분석 시작 시 status + system 메시지 즉시 발행)
     private final SessionStreamService streamService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -64,7 +66,8 @@ public class SessionService {
             situation = header + "\n\n[사용자 입력 상황]\n" + situation;
             request.setSituation(situation);
         }
-        // Phase 10.7 — 첨부 파일 metadata 가 있으면 situation 끝에 간략 안내 추가 (실제 본문 추출은 운영 TODO)
+        // Phase 10.7/10.57 — 첨부 파일 metadata 가 있으면 situation 끝에 간략 안내 추가.
+        // PDF/DOCX 본문은 Python 분석 단계에서 가능한 범위로 추출되어 별도 첨부 컨텍스트에 반영된다.
         if (request.getAttachments() != null && !request.getAttachments().isEmpty()
                 && !situation.contains("[사용자 첨부 자료]")) {
             StringBuilder att = new StringBuilder("\n\n[사용자 첨부 자료]\n");
@@ -79,7 +82,7 @@ public class SessionService {
                         .append(", ").append(sz != null ? sz : "?").append("B]\n");
                 if (++count >= 10) break;
             }
-            att.append("※ 위 파일은 메타데이터만 전달되었습니다. 본문 내용은 사용자가 입력한 상황/원문 영역을 참조하세요.\n");
+            att.append("※ 첨부 본문은 가능한 경우 별도 추출되어 함께 반영됩니다. 추출되지 않은 항목은 파일명·유형을 참고해 추가 확인 사항으로 다룹니다.\n");
             situation = situation + att;
             request.setSituation(situation);
         }
@@ -109,6 +112,7 @@ public class SessionService {
             }
         }
         session.setStatus("ANALYZING");
+        request.setAnalysisMode("ROUND1_ONLY");
         sessionRepository.save(session);
 
         final Long savedSessionId = session.getId();
@@ -151,8 +155,8 @@ public class SessionService {
         // Phase 10.44 — 신규 질문은 pending 상태로 시작 (재검토 트리거 시 in-progress 로 전환됨)
         entry.putIfAbsent("reanalyzeStatus", "pending");
         // 중복 메시지 가드
-        String msg = String.valueOf(question.get("message"));
-        boolean dup = list.stream().anyMatch(q -> msg.equals(String.valueOf(q.get("message"))));
+        String msg = String.valueOf(question.get("message")).trim();
+        boolean dup = list.stream().anyMatch(q -> msg.equals(String.valueOf(q.get("message")).trim()));
         if (!dup) list.add(entry);
         try {
             session.setFollowUpQuestionsJson(objectMapper.writeValueAsString(list));
@@ -199,6 +203,14 @@ public class SessionService {
             if (trimmed.isEmpty()) {
                 throw new IllegalArgumentException("message 가 비어 있습니다");
             }
+            for (int i = 0; i < list.size(); i++) {
+                if (i == index) continue;
+                java.util.Map<String, Object> q = list.get(i);
+                String existing = String.valueOf(q.getOrDefault("message", "")).trim();
+                if (trimmed.equals(existing)) {
+                    throw new IllegalArgumentException("이미 같은 질문이 저장되어 있습니다");
+                }
+            }
             target.put("message", trimmed);
             target.put("updatedAt", java.time.Instant.now().toString());
         }
@@ -239,8 +251,25 @@ public class SessionService {
                 log.warn("[reanalyze] followUpQuestions 역직렬화 실패: {}", ex.getMessage());
             }
         }
-        if (followUps.isEmpty()) {
+        boolean waitingForRound2 = "WAITING_FOR_ROUND2_INPUT".equalsIgnoreCase(session.getStatus())
+                || "WAITING_FOR_USER_INPUT".equalsIgnoreCase(session.getStatus());
+        boolean waitingForFinal = "WAITING_FOR_FINAL_INPUT".equalsIgnoreCase(session.getStatus());
+        boolean isRoundIntervention = waitingForRound2 || waitingForFinal;
+        java.util.List<java.util.Map<String, Object>> storedFollowUps = followUps;
+        java.util.List<java.util.Map<String, Object>> requestFollowUps = storedFollowUps.stream()
+                .filter(SessionService::isUsableFollowUp)
+                .filter(q -> isRoundIntervention || isPendingFollowUp(q))
+                .toList();
+        java.util.List<java.util.Map<String, Object>> applyingFollowUps = storedFollowUps.stream()
+                .filter(SessionService::isUsableFollowUp)
+                .filter(SessionService::isPendingFollowUp)
+                .toList();
+
+        if (storedFollowUps.isEmpty() && !isRoundIntervention) {
             throw new IllegalArgumentException("저장된 후속 질문이 없습니다. 먼저 질문을 추가해 주세요.");
+        }
+        if (requestFollowUps.isEmpty() && !isRoundIntervention) {
+            throw new IllegalArgumentException("반영할 추가 질문이 없습니다. 먼저 질문을 추가해 주세요.");
         }
 
         // 2) startupContext / startupExtras / attachments 역직렬화
@@ -273,22 +302,44 @@ public class SessionService {
         req.setParticipationMode(session.getParticipationMode());
         req.setContent(session.getContent());
 
-        StringBuilder followBlock = new StringBuilder("\n\n[사용자 후속 질문 — 재검토 요청]\n");
-        for (var q : followUps) {
-            Object tgt = q.get("targetAgent");
-            Object msg = q.get("message");
-            followBlock.append("- ")
-                    .append(tgt != null ? "[" + tgt + "] " : "")
-                    .append(msg != null ? msg : "")
-                    .append("\n");
+        String analysisMode = waitingForRound2
+                ? "ROUND2_ONLY"
+                : waitingForFinal
+                    ? "ROUND3_FINAL"
+                    : "ROUND2_FINAL";
+        int applyingRound = waitingForRound2 ? 2 : waitingForFinal ? 3 : 0;
+        StringBuilder followBlock = new StringBuilder(waitingForFinal
+                ? "\n\n[Round 3 진행 조건]\n"
+                : "\n\n[Round 2 진행 조건]\n");
+        if (requestFollowUps.isEmpty()) {
+            followBlock.append(waitingForFinal
+                    ? "- 사용자가 추가 질문 없이 최종 라운드 진행을 선택했습니다.\n"
+                    : "- 사용자가 추가 질문 없이 다음 라운드 진행을 선택했습니다.\n");
+        } else {
+            followBlock.append(isRoundIntervention
+                    ? waitingForFinal
+                        ? "[사용자 추가 질문 — 최종 라운드 반영]\n"
+                        : "[사용자 추가 질문 — 다음 라운드 반영]\n"
+                    : "[사용자 후속 질문 — 재검토 요청]\n");
+            for (var q : requestFollowUps) {
+                Object tgt = q.get("targetAgent");
+                Object msg = q.get("message");
+                followBlock.append("- ")
+                        .append(tgt != null ? "[" + tgt + "] " : "")
+                        .append(msg != null ? msg : "")
+                        .append("\n");
+            }
         }
-        followBlock.append("위 질문에 대한 답변과 보강 의견을 최종 결과 또는 새 라운드에 반영해 주세요.\n");
+        followBlock.append(waitingForFinal
+                ? "위 조건을 Round 3 최종 토론과 최종 결과에 반영해 주세요.\n"
+                : "위 조건을 Round 2와 이후 최종 결과에 반영해 주세요.\n");
         // 기존 situation 의 [지원사업 기반 검토 컨텍스트] 블록은 그대로 둠
         req.setSituation(session.getSituation() + followBlock);
         req.setStartupContext(ctx);
         req.setStartupExtras(extras);
         req.setAttachments(attachments);
-        req.setFollowUpQuestions(followUps);
+        req.setFollowUpQuestions(requestFollowUps);
+        req.setAnalysisMode(analysisMode);
 
         // Phase 10.26 — 이전 토론 기록 **보존**. 재검토 결과는 기존 라운드 아래에 append.
         // 이전(10.18)에는 messages/evidences/finalDecision 을 삭제했지만, 사용자 QA 결과
@@ -309,27 +360,50 @@ public class SessionService {
 
         // Phase 10.44 — followUp 들을 in-progress 상태로 마킹 후 영속화 (영구 status 추적 source of truth)
         try {
-            for (var q : followUps) {
+            for (var q : applyingFollowUps) {
                 q.put("reanalyzeStatus", "in-progress");
+                if (applyingRound > 0) {
+                    q.put("appliedRound", applyingRound);
+                } else {
+                    q.put("appliedRound", "reanalysis");
+                }
                 q.put("reanalyzeStatusUpdatedAt", java.time.Instant.now().toString());
             }
-            session.setFollowUpQuestionsJson(objectMapper.writeValueAsString(followUps));
+            session.setFollowUpQuestionsJson(objectMapper.writeValueAsString(storedFollowUps));
         } catch (Exception ex) {
             log.warn("[reanalyze] followUp in-progress 마킹 실패: {}", ex.getMessage());
         }
 
         sessionRepository.save(session);
-        log.info("[reanalyze] 재검토 트리거 (sessionId={}, followUps={}건)", sessionId, followUps.size());
+        log.info("[reanalyze] 분석 재개 트리거 (sessionId={}, mode={}, followUps={}건)",
+                sessionId, analysisMode, requestFollowUps.size());
 
         // Phase 10.23 — SSE 로 즉시 REANALYZING 상태 + system 메시지 발행
         try {
+            boolean hasNewFollowUps = !applyingFollowUps.isEmpty();
             streamService.publishStatus(sessionId, "REANALYZING", 40,
-                    "추가 질문을 반영해 재검토하고 있습니다.");
+                    !hasNewFollowUps
+                            ? waitingForFinal
+                                ? "추가 질문 없이 최종 라운드를 진행하고 있습니다."
+                                : "추가 질문 없이 다음 라운드를 진행하고 있습니다."
+                            : waitingForFinal
+                                ? "추가 질문을 반영해 최종 라운드를 진행하고 있습니다."
+                                : isRoundIntervention
+                                    ? "추가 질문을 반영해 다음 라운드를 진행하고 있습니다."
+                                    : "추가 질문을 반영해 재검토하고 있습니다.");
             java.util.Map<String, Object> sysMsg = new java.util.LinkedHashMap<>();
             sysMsg.put("id", null);
             sysMsg.put("agentId", "system");
             sysMsg.put("agentName", "시스템");
-            sysMsg.put("content", "🔁 추가 질문 " + followUps.size() + "건을 반영해 재검토를 시작합니다.");
+            sysMsg.put("content", !hasNewFollowUps
+                    ? waitingForFinal
+                        ? "최종 라운드를 시작합니다. 추가 질문 없이 기존 토론 내용을 바탕으로 이어갑니다."
+                        : "다음 라운드를 시작합니다. 추가 질문 없이 기존 검토 내용을 바탕으로 이어갑니다."
+                    : waitingForFinal
+                        ? "추가 질문 " + applyingFollowUps.size() + "건을 반영해 최종 라운드를 시작합니다."
+                        : isRoundIntervention
+                            ? "추가 질문 " + applyingFollowUps.size() + "건을 반영해 다음 라운드를 시작합니다."
+                            : "추가 질문 " + applyingFollowUps.size() + "건을 반영해 재검토를 시작합니다.");
             sysMsg.put("type", "system");
             sysMsg.put("round", 0);
             sysMsg.put("stance", "NEUTRAL");
@@ -351,9 +425,26 @@ public class SessionService {
         return java.util.Map.of(
                 "sessionId", sessionId,
                 "status", "REANALYZING",
-                "followUpCount", followUps.size(),
-                "message", "재검토를 시작했습니다. 잠시 후 결과 페이지를 새로고침해 주세요."
+                "followUpCount", applyingFollowUps.size(),
+                "message", waitingForFinal
+                        ? "최종 라운드를 시작했습니다. 잠시 후 결과 페이지를 새로고침해 주세요."
+                        : "다음 라운드를 시작했습니다. 잠시 후 결과 페이지를 새로고침해 주세요."
         );
+    }
+
+    private static boolean isUsableFollowUp(java.util.Map<String, Object> q) {
+        if (q == null) return false;
+        if ("system".equalsIgnoreCase(String.valueOf(q.getOrDefault("targetAgent", "")))) return false;
+        if ("deleted".equalsIgnoreCase(String.valueOf(q.getOrDefault("reanalyzeStatus", "")))) return false;
+        Object msg = q.get("message");
+        return msg != null && !msg.toString().isBlank();
+    }
+
+    private static boolean isPendingFollowUp(java.util.Map<String, Object> q) {
+        String status = String.valueOf(q.getOrDefault("reanalyzeStatus", "pending"));
+        return status.isBlank()
+                || "pending".equalsIgnoreCase(status)
+                || "failed".equalsIgnoreCase(status);
     }
 
     /**
@@ -454,6 +545,195 @@ public class SessionService {
         DebateResultResponse resp = new DebateResultResponse(
                 sessionId, 1L, session.getStatus(), messageDtos, fdDto, evidenceDtos, startupCtx, followUps, attachments);
         return resp;
+    }
+
+    @Transactional(readOnly = true)
+    public java.util.List<java.util.Map<String, Object>> getAssistantMessages(Long sessionId) {
+        if (!sessionRepository.existsById(sessionId)) {
+            throw new IllegalArgumentException("Session not found: " + sessionId);
+        }
+        return assistantMessageRepository.findBySessionIdOrderByMessageOrderAscIdAsc(sessionId).stream()
+                .map(SessionService::assistantMessageToMap)
+                .toList();
+    }
+
+    @Transactional
+    public java.util.Map<String, Object> askAssistant(Long sessionId, String message, String clientRequestId) {
+        ReviewSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+
+        String trimmed = message == null ? "" : message.trim();
+        if (trimmed.isBlank()) {
+            throw new IllegalArgumentException("message 필드가 필요합니다");
+        }
+        if (trimmed.length() > 1200) {
+            throw new IllegalArgumentException("질문은 1200자 이하로 입력해 주세요.");
+        }
+        String safeClientRequestId = truncateForAssistant(clientRequestId, 80);
+        if (!safeClientRequestId.isBlank()) {
+            java.util.Optional<AssistantMessage> existingAnswer =
+                    assistantMessageRepository.findFirstBySessionIdAndRoleAndClientRequestIdOrderByIdAsc(
+                            sessionId, "ASSISTANT", safeClientRequestId);
+            if (existingAnswer.isPresent()) {
+                java.util.Map<String, Object> response = assistantMessageToMap(existingAnswer.get());
+                response.put("sessionId", sessionId);
+                response.put("messages", getAssistantMessages(sessionId));
+                return response;
+            }
+        }
+
+        if (safeClientRequestId.isBlank()
+                || assistantMessageRepository.findFirstBySessionIdAndRoleAndClientRequestIdOrderByIdAsc(
+                        sessionId, "USER", safeClientRequestId).isEmpty()) {
+            AssistantMessage userMessage = new AssistantMessage();
+            userMessage.setSession(session);
+            userMessage.setRole("USER");
+            userMessage.setContent(trimmed);
+            userMessage.setStatus("COMPLETED");
+            userMessage.setClientRequestId(safeClientRequestId.isBlank() ? null : safeClientRequestId);
+            userMessage.setMessageOrder(nextAssistantMessageOrder(sessionId));
+            assistantMessageRepository.save(userMessage);
+        }
+
+        DebateResultResponse result = getLatestDebateResult(sessionId);
+        java.util.Map<String, Object> context = new java.util.LinkedHashMap<>();
+        context.put("message", trimmed);
+        context.put("status", session.getStatus());
+        context.put("companyName", session.getCompanyName());
+        context.put("industry", session.getIndustry());
+        context.put("reviewType", session.getReviewType());
+        context.put("situation", truncateForAssistant(session.getSituation(), 1600));
+        context.put("content", truncateForAssistant(session.getContent(), 1000));
+        context.put("messages", (result.getMessages() == null ? java.util.List.<AgentMessageDto>of() : result.getMessages()).stream()
+                .limit(18)
+                .map(m -> {
+                    java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("agentName", safeForAssistant(m.getAgentName()));
+                    row.put("agentId", safeForAssistant(m.getAgentId()));
+                    row.put("round", m.getRound());
+                    row.put("type", safeForAssistant(m.getType()));
+                    row.put("content", truncateForAssistant(m.getContent(), 700));
+                    return row;
+                })
+                .toList());
+        if (result.getFinalDecision() != null) {
+            FinalDecisionDto fd = result.getFinalDecision();
+            java.util.Map<String, Object> fdMap = new java.util.LinkedHashMap<>();
+            fdMap.put("verdict", safeForAssistant(fd.getVerdict()));
+            fdMap.put("riskLevel", safeForAssistant(fd.getRiskLevel()));
+            fdMap.put("summary", truncateForAssistant(fd.getSummary(), 700));
+            fdMap.put("recommendation", truncateForAssistant(fd.getRecommendation(), 900));
+            fdMap.put("risks", fd.getRisks() == null ? java.util.List.of() : fd.getRisks().stream()
+                    .limit(5)
+                    .map(r -> java.util.Map.of(
+                            "category", safeForAssistant(r.getCategory()),
+                            "level", safeForAssistant(r.getLevel()),
+                            "description", truncateForAssistant(r.getDescription(), 400)
+                    ))
+                    .toList());
+            context.put("finalDecision", fdMap);
+        }
+        context.put("evidences", result.getEvidences() == null ? java.util.List.of() : result.getEvidences().stream()
+                .limit(6)
+                .map(ev -> {
+                    java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("sourceType", safeForAssistant(ev.getSourceType()));
+                    row.put("title", truncateForAssistant(ev.getTitle(), 140));
+                    row.put("referenceId", truncateForAssistant(ev.getReferenceId(), 80));
+                    row.put("summary", truncateForAssistant(ev.getSummary(), 350));
+                    row.put("relevanceReason", truncateForAssistant(ev.getRelevanceReason(), 350));
+                    row.put("quotedText", truncateForAssistant(ev.getQuotedText(), 350));
+                    return row;
+                })
+                .toList());
+        context.put("followUpQuestions", result.getFollowUpQuestions() == null ? java.util.List.of() : result.getFollowUpQuestions().stream()
+                .filter(SessionService::isUsableFollowUp)
+                .limit(8)
+                .map(q -> java.util.Map.of(
+                        "targetAgent", safeForAssistant(String.valueOf(q.getOrDefault("targetAgent", "all"))),
+                        "message", truncateForAssistant(String.valueOf(q.getOrDefault("message", "")), 400),
+                        "status", safeForAssistant(String.valueOf(q.getOrDefault("reanalyzeStatus", "pending"))),
+                        "appliedRound", safeForAssistant(String.valueOf(q.getOrDefault("appliedRound", "")))
+                ))
+                .toList());
+        context.put("attachments", result.getAttachments() == null ? java.util.List.of() : result.getAttachments().stream()
+                .limit(6)
+                .map(a -> {
+                    java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("name", truncateForAssistant(String.valueOf(a.getOrDefault("name", "")), 160));
+                    row.put("mimeType", truncateForAssistant(String.valueOf(a.getOrDefault("mimeType", a.getOrDefault("fileType", ""))), 80));
+                    row.put("extractionStatus", safeForAssistant(String.valueOf(a.getOrDefault("extractionStatus", ""))));
+                    row.put("characterCount", a.getOrDefault("characterCount", ""));
+                    row.put("bodyTruncated", a.getOrDefault("bodyTruncated", false));
+                    Object keywords = a.get("priorityKeywords");
+                    if (keywords instanceof java.util.List<?> list) {
+                        row.put("priorityKeywords", list.stream().limit(8).map(String::valueOf).toList());
+                    }
+                    row.put("hasBodyText", a.getOrDefault("hasBodyText", false));
+                    return row;
+                })
+                .toList());
+
+        java.util.Map<String, Object> aiResponse = aiAnalysisClient.askSessionAssistant(sessionId, context);
+        String answer = String.valueOf(aiResponse.getOrDefault("message", "")).trim();
+        if (answer.isBlank()) {
+            answer = "현재 검토 내용을 설명하는 중 문제가 발생했습니다. 잠시 후 다시 질문해 주세요.";
+        }
+        AssistantMessage assistantMessage = new AssistantMessage();
+        assistantMessage.setSession(session);
+        assistantMessage.setRole("ASSISTANT");
+        assistantMessage.setContent(sanitizeAssistantDisplayText(answer));
+        assistantMessage.setStatus("COMPLETED");
+        assistantMessage.setClientRequestId(safeClientRequestId.isBlank() ? null : safeClientRequestId);
+        assistantMessage.setMessageOrder(nextAssistantMessageOrder(sessionId));
+        assistantMessageRepository.save(assistantMessage);
+
+        java.util.Map<String, Object> response = assistantMessageToMap(assistantMessage);
+        response.put("sessionId", sessionId);
+        response.put("message", assistantMessage.getContent());
+        response.put("messages", getAssistantMessages(sessionId));
+        return response;
+    }
+
+    private int nextAssistantMessageOrder(Long sessionId) {
+        long count = assistantMessageRepository.countBySessionId(sessionId);
+        return count >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count + 1;
+    }
+
+    private static java.util.Map<String, Object> assistantMessageToMap(AssistantMessage message) {
+        java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+        row.put("id", message.getId());
+        row.put("role", "USER".equalsIgnoreCase(message.getRole()) ? "user" : "assistant");
+        row.put("message", sanitizeAssistantDisplayText(message.getContent()));
+        row.put("content", sanitizeAssistantDisplayText(message.getContent()));
+        row.put("createdAt", message.getCreatedAt() == null ? "" : message.getCreatedAt().toString());
+        row.put("messageOrder", message.getMessageOrder());
+        row.put("status", safeForAssistant(message.getStatus()));
+        return row;
+    }
+
+    private static String safeForAssistant(String value) {
+        return truncateForAssistant(value, 500);
+    }
+
+    private static String truncateForAssistant(String value, int max) {
+        if (value == null || value.isBlank()) return "";
+        String cleaned = value
+                .replaceAll("(?i)OLLAMA[^\\n]*", "")
+                .replaceAll("(?i)stack trace[^\\n]*", "")
+                .replaceAll("(?i)API payload[^\\n]*", "")
+                .replaceAll("(?i)serviceKey[^\\n]*", "")
+                .replaceAll("(?i)bearer[^\\n]*", "")
+                .trim();
+        return cleaned.length() <= max ? cleaned : cleaned.substring(0, max) + "...";
+    }
+
+    private static String sanitizeAssistantDisplayText(String value) {
+        String cleaned = truncateForAssistant(value, 4000);
+        if (cleaned.matches("(?is).*(파싱 실패|파싱에 실패|기본 판정|판정 생성 실패|AI 판정 원문|raw exception|endpoint|model).*")) {
+            return "현재 검토 내용을 설명하는 중 일부 정보를 정리하지 못했습니다. 핵심 쟁점은 계약서, 정산 증빙, 개인정보 처리 문서를 순서대로 확인하는 것입니다.";
+        }
+        return cleaned;
     }
 
     /**

@@ -43,6 +43,15 @@ interface FinalDecision {
   revisedContent: string;
 }
 
+function safeDisplayText(text?: string): string {
+  const t = (text || "").trim();
+  if (!t) return "";
+  if (/파싱\s*오류|판정\s*결과\s*파싱|AI\s*판정\s*(원문|결과)/.test(t)) {
+    return "일부 분석 정보를 불러오지 못했습니다. 잠시 후 다시 시도하거나 전문가 검토와 함께 확인해 주세요.";
+  }
+  return t.replace(/폴백\s*응답/g, "보조 검토 결과");
+}
+
 export function Verdict() {
   const navigate = useNavigate();
   const reportRef = useRef<HTMLDivElement>(null);
@@ -51,7 +60,7 @@ export function Verdict() {
   const [finalDecision, setFinalDecision] = useState<FinalDecision | null>(null);
   const [evidences, setEvidences] = useState<EvidenceItem[]>([]);
   const [isPdfExporting, setIsPdfExporting] = useState(false);
-  const [recheckTarget, setRecheckTarget] = useState<"legal" | "business" | "ethics">("legal");
+  const [recheckTarget, setRecheckTarget] = useState<"legal" | "business" | "risk">("legal");
   const [recheckQuestion, setRecheckQuestion] = useState("");
   // evidence fetch 진행 상태 — empty-state 카드를 fetch 완료 후에만 보여주기 위함
   const [evidenceLoadState, setEvidenceLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
@@ -593,7 +602,7 @@ export function Verdict() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                  {finalDecision.summary}
+                  {safeDisplayText(finalDecision.summary)}
                 </p>
               </CardContent>
             </Card>
@@ -635,8 +644,8 @@ export function Verdict() {
                 {risks.map((risk, idx) => (
                   <div key={idx} className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 p-3 bg-slate-50">
                     <div>
-                      <p className="font-medium text-sm">{risk.category}</p>
-                      <p className="text-sm text-slate-600">{risk.description}</p>
+                      <p className="font-medium text-sm">{safeDisplayText(risk.category)}</p>
+                      <p className="text-sm text-slate-600">{safeDisplayText(risk.description)}</p>
                     </div>
                     <Badge className={risk.level === "high" ? "bg-red-100 text-red-700" : risk.level === "medium" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}>
                       {risk.level.toUpperCase()}
@@ -1207,7 +1216,7 @@ export function Verdict() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                  {finalDecision.recommendation}
+                  {safeDisplayText(finalDecision.recommendation)}
                 </p>
               </CardContent>
             </Card>
@@ -1345,7 +1354,7 @@ export function Verdict() {
               <div className="flex gap-2 flex-wrap">
                 <Button variant={recheckTarget === "legal" ? "default" : "outline"} className={recheckTarget === "legal" ? "bg-[#1E3A8A] text-white" : ""} onClick={() => setRecheckTarget("legal")}>법무</Button>
                 <Button variant={recheckTarget === "business" ? "default" : "outline"} className={recheckTarget === "business" ? "bg-[#1E3A8A] text-white" : ""} onClick={() => setRecheckTarget("business")}>사업</Button>
-                <Button variant={recheckTarget === "ethics" ? "default" : "outline"} className={recheckTarget === "ethics" ? "bg-[#1E3A8A] text-white" : ""} onClick={() => setRecheckTarget("ethics")}>윤리</Button>
+                <Button variant={recheckTarget === "risk" ? "default" : "outline"} className={recheckTarget === "risk" ? "bg-[#1E3A8A] text-white" : ""} onClick={() => setRecheckTarget("risk")}>리스크</Button>
               </div>
               <textarea
                 value={recheckQuestion}
@@ -1409,7 +1418,7 @@ export function Verdict() {
             {finalDecision?.summary && (
               <div style={pdfCardStyle}>
                 <div style={pdfTitleStyle}>종합 요약</div>
-                <div style={pdfBodyStyle}>{finalDecision.summary}</div>
+                <div style={pdfBodyStyle}>{safeDisplayText(finalDecision.summary)}</div>
               </div>
             )}
 
@@ -1443,9 +1452,9 @@ export function Verdict() {
                   <div key={idx} style={{ ...pdfSubCardStyle, marginTop: "0" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: "12px", fontWeight: 600, color: "#0f172a" }}>{risk.category}</div>
+                        <div style={{ fontSize: "12px", fontWeight: 600, color: "#0f172a" }}>{safeDisplayText(risk.category)}</div>
                         <div style={{ fontSize: "11px", color: "#475569", marginTop: "2px", lineHeight: 1.5 }}>
-                          {risk.description}
+                          {safeDisplayText(risk.description)}
                         </div>
                       </div>
                       <span
@@ -1492,7 +1501,7 @@ export function Verdict() {
             {finalDecision?.recommendation && (
               <div style={pdfCardStyle}>
                 <div style={pdfTitleStyle}>최종 권고사항</div>
-                <div style={pdfBodyStyle}>{finalDecision.recommendation}</div>
+                <div style={pdfBodyStyle}>{safeDisplayText(finalDecision.recommendation)}</div>
               </div>
             )}
 

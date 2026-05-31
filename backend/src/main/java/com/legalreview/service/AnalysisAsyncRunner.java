@@ -96,7 +96,7 @@ public class AnalysisAsyncRunner {
                     case "ROUND1_BIZ" -> "비즈니스 전략가가 사업 관점 리스크를 분석 중입니다.";
                     case "ROUND1_LEGAL" -> "법률 전문가가 관련 법령·판례 근거를 확인하고 있습니다.";
                     case "ROUND2_BIZ" -> "비즈니스 측이 법률 측 지적에 대응 중입니다.";
-                    case "ROUND2_LEGAL" -> "법률 측이 비즈니스 측 대응을 재검토 중입니다.";
+                    case "ROUND2_LEGAL" -> "법률 측이 비즈니스 측 대응을 반영해 보완 의견을 정리 중입니다.";
                     case "JUDGING" -> "최종 판정관이 합의된 권고안을 정리하고 있습니다.";
                     case "COLLECTING_EVIDENCE" -> "관련 법령·판례 근거를 확인하고 있습니다.";
                     default -> phase;
@@ -134,36 +134,68 @@ public class AnalysisAsyncRunner {
 
             // AI 엔진 선택: ollama → 로컬 Ollama, python → 기존 Python 서버
             AiAnalysisResponse aiResponse;
+            boolean messagesAlreadySaved = false;
             if ("ollama".equalsIgnoreCase(aiEngine)) {
                 log.info("Ollama 엔진으로 분석 실행 (sessionId={}, ragInjected={})",
                         sessionId, !ragEvidences.isEmpty());
                 aiResponse = ollamaAnalysisService.analyze(
                         sessionId, request, phaseCallback,
                         legalEvidenceBlock, commonEvidenceBlock);
+            } else if (isPythonStepwiseMode(request)) {
+                log.info("Python AI 서버 단계별 분석 실행 (sessionId={}, mode={})",
+                        sessionId, request.getAnalysisMode());
+                aiResponse = runPythonStepwiseAnalysis(session, request, phaseCallback);
+                messagesAlreadySaved = true;
             } else {
                 log.info("Python AI 서버로 분석 실행 (sessionId={})", sessionId);
                 aiResponse = aiAnalysisClient.analyze(sessionId, request);
             }
 
             // 토론 메시지 저장 (개별 저장 → 폴링 시 messageCount 실시간 반영)
-            saveDebateMessages(session, aiResponse.messages());
+            if (!messagesAlreadySaved) {
+                saveDebateMessages(session, aiResponse.messages());
+            }
+            persistEnrichedAttachments(session, aiResponse.enrichedAttachments());
+
+            boolean round1Only = "ROUND1_ONLY".equalsIgnoreCase(request.getAnalysisMode());
+            boolean round2Only = "ROUND2_ONLY".equalsIgnoreCase(request.getAnalysisMode());
+            if (round1Only) {
+                session.setStatus("WAITING_FOR_ROUND2_INPUT");
+                session.setAnalysisPhase(null);
+                sessionRepository.save(session);
+                try {
+                    streamService.publishStatus(sessionId, "WAITING_FOR_ROUND2_INPUT", 35,
+                            "Round 1 검토가 끝났습니다. 다음 라운드에 반영할 질문이나 조건을 입력해 주세요.");
+                } catch (Exception sseErr) {
+                    log.debug("[SSE] waiting publish 실패 (무시): {}", sseErr.getMessage());
+                }
+                log.info("Round 1 완료 후 사용자 입력 대기 (sessionId={})", sessionId);
+                return;
+            }
+            if (round2Only) {
+                session.setStatus("WAITING_FOR_FINAL_INPUT");
+                session.setAnalysisPhase(null);
+                updateFollowUpReanalyzeStatus(session, "reflected");
+                sessionRepository.save(session);
+                try {
+                    streamService.publishStatus(sessionId, "WAITING_FOR_FINAL_INPUT", 65,
+                            "Round 2 토론이 끝났습니다. 최종 라운드 전에 추가 질문이나 조건을 입력해 주세요.");
+                } catch (Exception sseErr) {
+                    log.debug("[SSE] final waiting publish 실패 (무시): {}", sseErr.getMessage());
+                }
+                log.info("Round 2 완료 후 최종 라운드 입력 대기 (sessionId={})", sessionId);
+                return;
+            }
 
             // 최종 판정 저장
-            saveFinalDecision(session, aiResponse.finalDecision());
+            if (aiResponse.finalDecision() != null) {
+                saveFinalDecision(session, aiResponse.finalDecision());
+            }
 
             // Phase 10.57 — Python AI 가 enrichment 한 첨부 메타데이터를 session.attachmentsJson 에 영속화.
             //   이렇게 해야 /verdict 새로고침 후에도 priorityKeywords / selectedParagraphCount 등이 유지됨.
             //   bodyText / bodyBase64 는 enriched 응답에 포함되지 않음 (보안 + 용량).
-            try {
-                List<Map<String, Object>> enriched = aiResponse.enrichedAttachments();
-                if (enriched != null && !enriched.isEmpty()) {
-                    String json = objectMapper.writeValueAsString(enriched);
-                    session.setAttachmentsJson(json);
-                    log.info("[attach] enriched 첨부 메타 영속화: {}건 (sessionId={})", enriched.size(), sessionId);
-                }
-            } catch (Exception persistErr) {
-                log.debug("[attach] enriched 첨부 영속화 실패 (무시): {}", persistErr.getMessage());
-            }
+            persistEnrichedAttachments(session, aiResponse.enrichedAttachments());
 
             // 법령/판례 근거 저장 (AI 서버 응답)
             if (aiResponse.evidences() != null && !aiResponse.evidences().isEmpty()) {
@@ -450,6 +482,105 @@ public class AnalysisAsyncRunner {
 
     // ========== Phase 10.44 — followUp 개별 reanalyzeStatus 갱신 ==========
 
+    private boolean isPythonStepwiseMode(SessionCreateRequest request) {
+        String mode = request.getAnalysisMode();
+        return mode != null && (
+                "ROUND1_ONLY".equalsIgnoreCase(mode)
+                        || "ROUND2_ONLY".equalsIgnoreCase(mode)
+                        || "ROUND3_FINAL".equalsIgnoreCase(mode)
+                        || "ROUND2_FINAL".equalsIgnoreCase(mode)
+        );
+    }
+
+    private AiAnalysisResponse runPythonStepwiseAnalysis(
+            ReviewSession session,
+            SessionCreateRequest request,
+            java.util.function.Consumer<String> phaseCallback
+    ) {
+        Long sessionId = session.getId();
+        String originalMode = request.getAnalysisMode();
+        java.util.List<String> steps = switch (originalMode == null ? "" : originalMode.toUpperCase()) {
+            case "ROUND1_ONLY" -> java.util.List.of("ROUND1_BUSINESS", "ROUND1_LEGAL", "ROUND1_RISK");
+            case "ROUND2_ONLY" -> java.util.List.of("ROUND2_BUSINESS", "ROUND2_LEGAL", "ROUND2_RISK");
+            case "ROUND3_FINAL" -> java.util.List.of("ROUND3_BUSINESS", "ROUND3_LEGAL", "ROUND3_RISK", "ROUND3_JUDGE");
+            default -> java.util.List.of(
+                    "ROUND2_BUSINESS", "ROUND2_LEGAL", "ROUND2_RISK",
+                    "ROUND3_BUSINESS", "ROUND3_LEGAL", "ROUND3_RISK", "ROUND3_JUDGE"
+            );
+        };
+
+        AiAnalysisResponse latest = new AiAnalysisResponse(
+                java.util.List.of(), null, java.util.List.of(), null);
+
+        for (String step : steps) {
+            publishStepPhase(sessionId, step, phaseCallback);
+            request.setAnalysisMode(step);
+            request.setPriorMessages(loadPriorMessagePayloads(sessionId));
+            latest = aiAnalysisClient.analyze(sessionId, request);
+            saveDebateMessages(session, latest.messages());
+            persistEnrichedAttachments(session, latest.enrichedAttachments());
+        }
+
+        request.setPriorMessages(null);
+        request.setAnalysisMode(originalMode);
+        return latest;
+    }
+
+    private void publishStepPhase(
+            Long sessionId,
+            String step,
+            java.util.function.Consumer<String> phaseCallback
+    ) {
+        String phase = switch (step) {
+            case "ROUND1_BUSINESS" -> "ROUND1_BIZ";
+            case "ROUND1_LEGAL" -> "ROUND1_LEGAL";
+            case "ROUND1_RISK" -> "ROUND1_RISK";
+            case "ROUND2_BUSINESS" -> "ROUND2_BIZ";
+            case "ROUND2_LEGAL" -> "ROUND2_LEGAL";
+            case "ROUND2_RISK" -> "ROUND2_RISK";
+            case "ROUND3_BUSINESS" -> "ROUND3_BIZ";
+            case "ROUND3_LEGAL" -> "ROUND3_LEGAL";
+            case "ROUND3_RISK" -> "ROUND3_RISK";
+            case "ROUND3_JUDGE" -> "JUDGING";
+            default -> step;
+        };
+        phaseCallback.accept(phase);
+        String label = switch (step) {
+            case "ROUND1_BUSINESS" -> "비즈니스 전략가가 1차 사업 관점 의견을 정리 중입니다.";
+            case "ROUND1_LEGAL" -> "법률 전문가가 1차 법률 관점 의견을 정리 중입니다.";
+            case "ROUND1_RISK" -> "리스크 검토자가 1차 종합 리스크를 정리 중입니다.";
+            case "ROUND2_BUSINESS" -> "비즈니스 전략가가 사용자 질문을 반영해 의견을 보완 중입니다.";
+            case "ROUND2_LEGAL" -> "법률 전문가가 사용자 질문을 반영해 법률 쟁점을 보완 중입니다.";
+            case "ROUND2_RISK" -> "리스크 검토자가 사용자 질문을 반영해 우선순위를 점검 중입니다.";
+            case "ROUND3_BUSINESS" -> "비즈니스 전략가가 최종 사업 관점 의견을 정리 중입니다.";
+            case "ROUND3_LEGAL" -> "법률 전문가가 최종 법률 관점 의견을 정리 중입니다.";
+            case "ROUND3_RISK" -> "리스크 검토자가 남은 리스크와 우선순위를 정리 중입니다.";
+            case "ROUND3_JUDGE" -> "최종 판정관이 앞선 의견을 종합해 결론을 정리 중입니다.";
+            default -> "AI 검토팀이 다음 의견을 준비 중입니다.";
+        };
+        try {
+            streamService.publishStatus(sessionId, "ANALYZING", null, label);
+        } catch (Exception sseErr) {
+            log.debug("[SSE] step status publish 실패 (무시): {}", sseErr.getMessage());
+        }
+    }
+
+    private java.util.List<java.util.Map<String, Object>> loadPriorMessagePayloads(Long sessionId) {
+        return messageRepository.findBySessionIdOrderByRoundAscIdAsc(sessionId).stream()
+                .map(m -> {
+                    java.util.Map<String, Object> item = new java.util.LinkedHashMap<>();
+                    item.put("agentId", m.getAgentId());
+                    item.put("agentName", m.getAgentName());
+                    item.put("content", m.getContent());
+                    item.put("type", m.getType());
+                    item.put("round", m.getRound());
+                    item.put("stance", m.getStance());
+                    item.put("evidenceSummary", m.getEvidenceSummary());
+                    return item;
+                })
+                .toList();
+    }
+
     /**
      * followUpQuestionsJson 내 각 entry 의 reanalyzeStatus 를 일괄 갱신.
      * status: pending / in-progress / completed / partial / failed
@@ -462,6 +593,10 @@ public class AnalysisAsyncRunner {
             java.util.List<java.util.Map<String, Object>> list = objectMapper.readValue(
                     json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
             for (var q : list) {
+                String current = String.valueOf(q.getOrDefault("reanalyzeStatus", ""));
+                if (!"in-progress".equalsIgnoreCase(current)) {
+                    continue;
+                }
                 q.put("reanalyzeStatus", status);
                 q.put("reanalyzeStatusUpdatedAt", java.time.Instant.now().toString());
             }
@@ -474,8 +609,25 @@ public class AnalysisAsyncRunner {
 
     // ========== AI 응답 → DB 저장 ==========
 
+    private void persistEnrichedAttachments(ReviewSession session, List<Map<String, Object>> enriched) {
+        if (enriched == null || enriched.isEmpty()) {
+            return;
+        }
+        try {
+            String json = objectMapper.writeValueAsString(enriched);
+            session.setAttachmentsJson(json);
+            sessionRepository.saveAndFlush(session);
+            log.info("[attach] enriched 첨부 메타 영속화: {}건 (sessionId={})", enriched.size(), session.getId());
+        } catch (Exception persistErr) {
+            log.debug("[attach] enriched 첨부 영속화 실패 (무시): {}", persistErr.getMessage());
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private void saveDebateMessages(ReviewSession session, List<Map<String, Object>> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return;
+        }
         // Phase 10.73 — 실제 멀티 에이전트 토론장 UX:
         //   Python LangGraph 가 모든 라운드/agent 응답을 한 번에 묶어 반환하므로 기존엔
         //   saveDebateMessages 가 N개를 빠르게 saveAndFlush + SSE publishMessage 해서
@@ -515,8 +667,9 @@ public class AnalysisAsyncRunner {
 
     @SuppressWarnings("unchecked")
     private void saveFinalDecision(ReviewSession session, Map<String, Object> fdMap) {
-        FinalDecision fd = new FinalDecision();
+        FinalDecision fd = finalDecisionRepository.findBySessionId(session.getId()).orElseGet(FinalDecision::new);
         fd.setSession(session);
+        fd.getRisks().clear();
         // null-safe 변환 — FinalDecision의 5개 컬럼은 nullable=false이므로
         // LLM이 "revisedContent": null 같은 명시적 null을 보낸 경우에도 빈 문자열로 보장
         fd.setVerdict(safeStr(fdMap.get("verdict"), "conditional"));

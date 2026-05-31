@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -18,6 +19,8 @@ public class ReviewService {
     private final DebateMessageRepository messageRepository;
     private final FinalDecisionRepository finalDecisionRepository;
     private final EvidenceRepository evidenceRepository;
+    private final AssistantMessageRepository assistantMessageRepository;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     /**
      * 사용자의 검토 기록 목록 조회 (최신순)
@@ -27,7 +30,22 @@ public class ReviewService {
         List<ReviewSession> sessions = sessionRepository.findByUserIdOrderByCreatedAtDesc(userId);
 
         return sessions.stream()
-                .map(ReviewSummaryDto::from)
+                .map(session -> {
+                    List<Map<String, Object>> followUps = parseFollowUps(session.getFollowUpQuestionsJson());
+                    long activeFollowUps = followUps.stream().filter(ReviewService::isVisibleFollowUp).count();
+                    long reanalysisFollowUps = followUps.stream()
+                            .filter(ReviewService::isVisibleFollowUp)
+                            .filter(q -> "reanalysis".equalsIgnoreCase(String.valueOf(q.getOrDefault("appliedRound", ""))))
+                            .count();
+                    return ReviewSummaryDto.from(
+                            session,
+                            messageRepository.countBySessionId(session.getId()),
+                            evidenceRepository.findBySessionIdOrderByIdAsc(session.getId()).size(),
+                            activeFollowUps,
+                            reanalysisFollowUps,
+                            assistantMessageRepository.countBySessionId(session.getId())
+                    );
+                })
                 .toList();
     }
 
@@ -92,6 +110,10 @@ public class ReviewService {
                     })
                     .toList()
                 : new ArrayList<>();
+        List<Map<String, Object>> followUps = parseFollowUps(session.getFollowUpQuestionsJson()).stream()
+                .filter(ReviewService::isVisibleFollowUp)
+                .toList();
+        List<Map<String, Object>> attachments = parseJsonList(session.getAttachmentsJson());
 
         return new ReviewDetailResponse(
                 session.getId(),
@@ -105,7 +127,35 @@ public class ReviewService {
                 session.getCreatedAt().toString(),
                 messageDtos,
                 fdDto,
-                evidenceDtos
+                evidenceDtos,
+                followUps,
+                attachments,
+                assistantMessageRepository.countBySessionId(sessionId)
         );
+    }
+
+    private List<Map<String, Object>> parseFollowUps(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return objectMapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private List<Map<String, Object>> parseJsonList(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return objectMapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private static boolean isVisibleFollowUp(Map<String, Object> item) {
+        if (item == null) return false;
+        String message = String.valueOf(item.getOrDefault("message", "")).trim();
+        String status = String.valueOf(item.getOrDefault("reanalyzeStatus", "")).trim();
+        return !message.isBlank() && !"deleted".equalsIgnoreCase(status);
     }
 }

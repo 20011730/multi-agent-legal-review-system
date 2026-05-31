@@ -8,7 +8,6 @@ export default function App() {
     <>
       <RouterProvider router={router} />
       <Toaster />
-      {/* 전역 floating 비서 위젯 (Phase 1 정적 FAQ only) */}
       <AssistantWidget />
     </>
   );

@@ -54,4 +54,16 @@ public class SessionCreateRequest {
      * 각 entry: { targetAgent, message, createdAt }
      */
     private List<Map<String, Object>> followUpQuestions;
+
+    /**
+     * 분석 실행 범위.
+     * ROUND1_ONLY: 첫 라운드만 실행하고 사용자 입력 대기
+     * ROUND2_FINAL: 사용자 입력 이후 두 번째 라운드와 최종 판정 실행
+     */
+    private String analysisMode;
+
+    /**
+     * Python AI 단계별 호출 시 이전 agent 발언을 함께 전달하기 위한 읽기 전용 컨텍스트.
+     */
+    private List<Map<String, Object>> priorMessages;
 }

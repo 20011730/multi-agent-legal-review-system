@@ -8,6 +8,7 @@ import com.legalreview.service.OllamaClient;
 import com.legalreview.service.SessionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -139,6 +140,53 @@ public class SessionController {
             return ResponseEntity.internalServerError().body(Map.of(
                     "error", "재검토 실행에 실패했습니다.",
                     "detail", String.valueOf(ex.getMessage())));
+        }
+    }
+
+    @PostMapping("/{sessionId}/assistant/messages")
+    public ResponseEntity<Map<String, Object>> askAssistant(
+            @PathVariable Long sessionId,
+            @RequestBody(required = false) Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("message");
+        String message = raw == null ? "" : String.valueOf(raw).trim();
+        Object rawClientRequestId = body == null ? null : body.get("clientRequestId");
+        String clientRequestId = rawClientRequestId == null ? "" : String.valueOf(rawClientRequestId).trim();
+        if (message.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "질문을 입력해 주세요."));
+        }
+        if (message.length() > 1200) {
+            return ResponseEntity.badRequest().body(Map.of("error", "질문은 1200자 이하로 입력해 주세요."));
+        }
+        try {
+            return ResponseEntity.ok(sessionService.askAssistant(sessionId, message, clientRequestId));
+        } catch (IllegalArgumentException ex) {
+            String msg = ex.getMessage() == null ? "" : ex.getMessage();
+            if (msg.startsWith("Session not found")) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "세션을 찾을 수 없습니다."));
+            }
+            return ResponseEntity.badRequest().body(Map.of("error", msg.isBlank() ? "요청을 처리할 수 없습니다." : msg));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "비서 응답을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요."));
+        }
+    }
+
+    @GetMapping("/{sessionId}/assistant/messages")
+    public ResponseEntity<Map<String, Object>> getAssistantMessages(@PathVariable Long sessionId) {
+        try {
+            return ResponseEntity.ok(Map.of(
+                    "sessionId", sessionId,
+                    "messages", sessionService.getAssistantMessages(sessionId)
+            ));
+        } catch (IllegalArgumentException ex) {
+            String msg = ex.getMessage() == null ? "" : ex.getMessage();
+            if (msg.startsWith("Session not found")) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "세션을 찾을 수 없습니다."));
+            }
+            return ResponseEntity.badRequest().body(Map.of("error", msg.isBlank() ? "요청을 처리할 수 없습니다." : msg));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "비서 상담 기록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."));
         }
     }
 }

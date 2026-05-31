@@ -30,13 +30,31 @@ interface Message {
   evidenceSummary?: string;
 }
 
+type FollowUpStatus = "pending" | "in-progress" | "completed" | "reflected" | "partial" | "failed" | "deleted";
+
+interface FollowUpQuestion {
+  targetAgent?: string;
+  message: string;
+  createdAt?: string;
+  updatedAt?: string;
+  reanalyzeStatus?: FollowUpStatus;
+  appliedRound?: number | string;
+}
+
 /* ── 에이전트 맵 (judge 추가, ethics 호환) ── */
-type AgentKey = "legal" | "risk" | "ethics" | "judge";
+type AgentKey = "business" | "legal" | "risk" | "ethics" | "judge";
 
 const agentMap: Record<
   AgentKey,
   { name: string; icon: typeof Scale; color: string; bg: string; border: string }
 > = {
+  business: {
+    name: "비즈니스 전략가",
+    icon: Shield,
+    color: "text-amber-700",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+  },
   legal: {
     name: "법률 전문가",
     icon: Scale,
@@ -45,11 +63,11 @@ const agentMap: Record<
     border: "border-blue-200",
   },
   risk: {
-    name: "비즈니스 전략가",
+    name: "리스크 검토자",
     icon: Shield,
-    color: "text-amber-700",
-    bg: "bg-amber-50",
-    border: "border-amber-200",
+    color: "text-rose-700",
+    bg: "bg-rose-50",
+    border: "border-rose-200",
   },
   ethics: {
     // Phase 10.41 — provisional 카드에서 "최종 판정관" 중복 표시되던 문제 해결.
@@ -70,7 +88,7 @@ const agentMap: Record<
 };
 
 /* ── 대시보드 펄스에 표시할 3가지 에이전트 (UI용) ── */
-const dashboardAgents: AgentKey[] = ["risk", "legal", "ethics"];
+const dashboardAgents: AgentKey[] = ["business", "legal", "risk"];
 
 /* ── 실제 분석 단계 → progress / 활성 에이전트 ── */
 interface PhaseInfo {
@@ -86,7 +104,7 @@ const phaseMap: Record<string, PhaseInfo> = {
     label: "라운드 1 — 비즈니스 전략가 분석 중",
     description: "사업적 가치와 실행 가능성을 분석하고 있습니다.",
     progress: 15,
-    activeAgent: "risk",
+    activeAgent: "business",
     humourLabel: "AI 에이전트가 공고와 입력 자료를 검토하고 있습니다.",
   },
   ROUND1_LEGAL: {
@@ -96,25 +114,39 @@ const phaseMap: Record<string, PhaseInfo> = {
     activeAgent: "legal",
     humourLabel: "AI 에이전트가 공고와 입력 자료를 검토하고 있습니다.",
   },
-  ROUND2_BIZ: {
-    label: "라운드 2 — 비즈니스 전략가 반박 중",
-    description: "법률 전문가의 지적에 대해 반박 자료를 준비하고 있습니다.",
-    progress: 40,
+  ROUND1_RISK: {
+    label: "라운드 1 — 리스크 검토자 분석 중",
+    description: "사업·법률 의견을 종합해 우선순위 리스크를 확인하고 있습니다.",
+    progress: 34,
     activeAgent: "risk",
+    humourLabel: "AI 에이전트가 공고와 입력 자료를 검토하고 있습니다.",
+  },
+  ROUND2_BIZ: {
+    label: "라운드 2 — 비즈니스 전략가 보완 의견 작성 중",
+    description: "사용자 질문과 1차 의견을 반영해 사업 관점 보완 의견을 준비하고 있습니다.",
+    progress: 40,
+    activeAgent: "business",
     humourLabel: "에이전트 간 쟁점이 교차 검증되고 있습니다.",
   },
   ROUND2_LEGAL: {
-    label: "라운드 2 — 법률 전문가 재반박 중",
-    description: "비즈니스 전략가의 반박에 법적 근거로 재반박하고 있습니다.",
+    label: "라운드 2 — 법률 전문가 보완 의견 작성 중",
+    description: "사용자 질문과 1차 의견을 반영해 법률 관점 보완 의견을 준비하고 있습니다.",
     progress: 55,
     activeAgent: "legal",
+    humourLabel: "에이전트 간 쟁점이 교차 검증되고 있습니다.",
+  },
+  ROUND2_RISK: {
+    label: "라운드 2 — 리스크 검토자 보완 의견 작성 중",
+    description: "사용자 질문 반영 후 남는 실행 리스크와 우선순위를 점검하고 있습니다.",
+    progress: 62,
+    activeAgent: "risk",
     humourLabel: "에이전트 간 쟁점이 교차 검증되고 있습니다.",
   },
   ROUND3_BIZ: {
     label: "라운드 3 — 비즈니스 전략가 최종 입장 정리 중",
     description: "지금까지의 논점을 종합하여 최선의 실행 방안을 도출하고 있습니다.",
     progress: 68,
-    activeAgent: "risk",
+    activeAgent: "business",
     humourLabel: "세 번의 논쟁 끝에 합의점에 가까워졌습니다!",
   },
   ROUND3_LEGAL: {
@@ -122,6 +154,13 @@ const phaseMap: Record<string, PhaseInfo> = {
     description: "법적 리스크를 최소화하는 최종 권고안을 준비하고 있습니다.",
     progress: 80,
     activeAgent: "legal",
+    humourLabel: "세 번의 논쟁 끝에 합의점에 가까워졌습니다!",
+  },
+  ROUND3_RISK: {
+    label: "라운드 3 — 리스크 검토자 최종 우선순위 정리 중",
+    description: "최종 판단 전에 남은 위험과 먼저 조치할 항목을 정리하고 있습니다.",
+    progress: 84,
+    activeAgent: "risk",
     humourLabel: "세 번의 논쟁 끝에 합의점에 가까워졌습니다!",
   },
   JUDGING: {
@@ -148,12 +187,12 @@ const defaultPhase: PhaseInfo = {
 
 /* ── 실시간 중계 텍스트 (flavor) ── */
 const liveTicker = [
-  { speaker: "risk" as AgentKey,   text: "에이전트들이 회의실에 입장하여 서류를 검토하기 시작합니다.",     conflict: false },
-  { speaker: "risk" as AgentKey,   text: "사업 에이전트가 법무 에이전트의 보수적 태도에 깊은 한숨을 내쉽니다.", conflict: true },
-  { speaker: "ethics" as AgentKey, text: "윤리 에이전트가 기업 평판 리스크를 근거로 제동을 겁니다.",          conflict: true },
+  { speaker: "business" as AgentKey, text: "에이전트들이 회의실에 입장하여 서류를 검토하기 시작합니다.",     conflict: false },
+  { speaker: "business" as AgentKey, text: "비즈니스 전략가가 법무 에이전트의 보수적 태도에 깊은 한숨을 내쉽니다.", conflict: true },
+  { speaker: "risk" as AgentKey,     text: "리스크 검토자가 정산과 운영 지연 가능성을 근거로 제동을 겁니다.", conflict: true },
   { speaker: "legal" as AgentKey,  text: "법무 에이전트가 판례집을 뒤적거리며 커피를 리필합니다.",              conflict: false },
-  { speaker: "risk" as AgentKey,   text: "사업 에이전트가 숫자를 들이밀며 실행 가능성 반박 자료를 제출합니다.", conflict: true },
-  { speaker: "ethics" as AgentKey, text: "판정 에이전트가 세 에이전트 의견을 취합해 결론 문안을 정리 중입니다.", conflict: false },
+  { speaker: "business" as AgentKey, text: "비즈니스 전략가가 숫자를 들이밀며 실행 가능성 반박 자료를 제출합니다.", conflict: true },
+  { speaker: "judge" as AgentKey,    text: "최종 판정관이 세 에이전트 의견을 취합해 결론 문안을 정리 중입니다.", conflict: false },
 ];
 
 const POLL_INTERVAL = 3000;
@@ -167,14 +206,24 @@ export function targetAgentLabel(v?: string | null): string {
   const k = v.toLowerCase().trim();
   switch (k) {
     case "all": return "전체 에이전트";
-    case "business":
-    case "risk": return "비즈니스 전략가";
+    case "business": return "비즈니스 전략가";
+    case "risk": return "리스크 검토자";
     case "legal": return "법률 전문가";
     case "ethics": return "리스크 검토자";
     case "judge": return "최종 판정관";
     case "system": return "시스템 안내";
     default: return v;
   }
+}
+
+function resolveAgentKey(agentId?: string, agentName?: string, type?: string): AgentKey {
+  if ((agentId === "judge" || agentId === "ethics") && type === "recommendation") return "judge";
+  if (agentId === "business") return "business";
+  if (agentId === "risk" && /비즈니스|사업/.test(agentName || "")) return "business";
+  if (agentId === "risk") return "risk";
+  if (agentId === "legal") return "legal";
+  if (agentId === "judge" || agentId === "ethics") return "judge";
+  return "legal";
 }
 
 /* ── JUDGE 메시지 렌더링 (JSON → 사람이 읽는 형식) ── */
@@ -236,6 +285,17 @@ function sanitizeAgentContent(content: string): string {
     /SocketTimeoutException[^\n]*/g,
     /ResourceAccessException[^\n]*/g,
     /RuntimeException[^\n]*/g,
+    /stack trace[^\n]*/gi,
+    /raw exception[^\n]*/gi,
+    /catastrophic[^\n]*/gi,
+    /fallback[^\n]*/gi,
+    /API payload[^\n]*/gi,
+    /CASE_SEARCH_MODE[^\n]*/g,
+    /dataSource[^\n]*/g,
+    /vector[^\n]*/gi,
+    /similarity[^\n]*/gi,
+    /distance[^\n]*/gi,
+    /\bscore\s*[:=]?\s*[0-9.]+/gi,
   ];
   let sanitized = content;
   let replaced = false;
@@ -246,9 +306,7 @@ function sanitizeAgentContent(content: string): string {
     }
   }
   if (replaced) {
-    sanitized = sanitized.trim();
-    sanitized = (sanitized ? sanitized + "\n\n" : "") +
-      "ℹ️ AI 모델 서버가 준비되지 않아 일부 분석이 규칙 기반 검토 초안으로 표시될 수 있습니다.";
+    sanitized = "일부 AI 응답을 불러오지 못했습니다. 다시 시도하거나 관리자에게 문의해 주세요.";
   }
   return sanitized;
 }
@@ -265,6 +323,75 @@ function renderAgentContent(content: string) {
   });
 }
 
+function cleanMarkdownForBubble(content: string): string {
+  const safe = sanitizeAgentContent(content || "");
+  return safe
+    .replace(/```[\s\S]*?```/g, "")
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (/^\|.*\|$/.test(trimmed)) return false;
+      if (/^[-:| ]{3,}$/.test(trimmed)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/\[(?:라운드|Round)\s*\d+[^\]]*\]/gi, "")
+    .replace(/\bCSO\s*입장\s*:\s*/gi, "")
+    .replace(/최종\s*입장\s*정리/gi, "")
+    .replace(/실제\s*수정\s*표현\s*제시\s*\+?\s*합의\s*정리/gi, "")
+    .replace(/\bVerdict\s*:\s*\w+/gi, "")
+    .replace(/\b(MEDIUM|HIGH|LOW)\b/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function bubblePreview(content: string, isJudge = false): { preview: string; detail: string; collapsed: boolean } {
+  const cleaned = cleanMarkdownForBubble(content);
+  if (!cleaned) {
+    return {
+      preview: "일부 AI 응답을 불러오지 못했습니다. 다시 시도하거나 관리자에게 문의해 주세요.",
+      detail: "",
+      collapsed: false,
+    };
+  }
+  const sentenceParts = cleaned
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?。！？다요니다까])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const maxChars = isJudge ? 180 : 260;
+  const seed = sentenceParts.slice(0, isJudge ? 2 : 3).join(" ") || cleaned;
+  const preview = seed.length > maxChars ? seed.slice(0, maxChars).trim() + "..." : seed;
+  const collapsed = cleaned.length > preview.length + 20;
+  return { preview, detail: cleaned, collapsed };
+}
+
+function BubbleContent({ content, isJudge = false }: { content: string; isJudge?: boolean }) {
+  const { preview, detail, collapsed } = bubblePreview(content, isJudge);
+  return (
+    <div className="text-sm leading-relaxed text-slate-800">
+      <p className="whitespace-pre-wrap break-keep">{preview}</p>
+      {collapsed && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-[11px] font-medium text-[#1E3A8A] hover:underline">
+            자세히 보기
+          </summary>
+          <p className="mt-1 whitespace-pre-wrap break-keep text-[12.5px] leading-relaxed text-slate-600">
+            {detail}
+          </p>
+        </details>
+      )}
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════
    Result 컴포넌트
 ══════════════════════════════════════════ */
@@ -273,7 +400,9 @@ export function Result() {
 
   const [messages, setMessages]               = useState<Message[]>([]);
   const [isComplete, setIsComplete]           = useState(false);
-  const [showDetailedLogs, setShowDetailedLogs] = useState(false);
+  const [isWaitingForUserInput, setIsWaitingForUserInput] = useState(false);
+  const [waitingStage, setWaitingStage] = useState<"round2" | "final" | null>(null);
+  const [showDetailedLogs, setShowDetailedLogs] = useState(true);
   const [error, setError]                     = useState("");
   const [recheckRequest, setRecheckRequest]   = useState<{ target: string; question: string } | null>(null);
   const [tickerIndex, setTickerIndex]         = useState(0);
@@ -290,17 +419,12 @@ export function Result() {
     applyUrl?: string;
   } | null>(null);
   // Phase 10.11/10.38 — 사용자 추가 질문 누적. reanalyzeStatus 로 반영 상태 추적.
-  const [userFollowUps, setUserFollowUps] = useState<Array<{
-    targetAgent?: string;
-    message: string;
-    createdAt?: string;
-    // Phase 10.38 — 재검토 반영 상태: 저장됨 → 재검토 중 → 반영 완료 / 다시 시도 필요
-    reanalyzeStatus?: "pending" | "in-progress" | "completed" | "reflected" | "partial" | "failed";
-  }>>([]);
+  const [userFollowUps, setUserFollowUps] = useState<FollowUpQuestion[]>([]);
 
   // Phase 10.20 — 재분석 완료 후 1회성 안내 배너 ("이번 재검토에는 사용자 추가 질문 N건이 반영되었습니다")
   const [reanalyzeBadge, setReanalyzeBadge] = useState<{ count: number; at: string } | null>(null);
   const wasReanalyzingRef = useRef(false);
+  const continuationModeRef = useRef<"round2" | "final" | "reanalysis" | null>(null);
 
   // Phase 10.21 — staged reveal. messages 가 한꺼번에 도착해도 화면엔 1개씩 ~350ms 간격으로 등장.
   const [visibleCount, setVisibleCount] = useState(0);
@@ -441,8 +565,21 @@ export function Result() {
 
       if (result.finalDecision) {
         sessionStorage.setItem("finalDecision", JSON.stringify(result.finalDecision));
+      } else if (
+        result.status === "WAITING_FOR_USER_INPUT"
+        || result.status === "WAITING_FOR_ROUND2_INPUT"
+        || result.status === "WAITING_FOR_FINAL_INPUT"
+      ) {
+        sessionStorage.removeItem("finalDecision");
       }
       sessionStorage.setItem("evidences", JSON.stringify(result.evidences || []));
+      if (Array.isArray(result.attachments) && result.attachments.length > 0) {
+        try {
+          const raw = sessionStorage.getItem("reviewData");
+          const current = raw ? JSON.parse(raw) : {};
+          sessionStorage.setItem("reviewData", JSON.stringify({ ...current, attachments: result.attachments }));
+        } catch { /* ignore */ }
+      }
 
       // Phase 10.4 — 지원사업 컨텍스트 표시 (백엔드 응답 우선, 없으면 reviewData fallback)
       if (result.startupContext) {
@@ -456,16 +593,16 @@ export function Result() {
       // backend 가 source of truth — sessionStorage 는 빠른 first-paint fallback 용도로만 유지.
       if (Array.isArray(result.followUpQuestions)) {
         const fromBackend = (result.followUpQuestions as Array<{
-          targetAgent?: string; message?: string; createdAt?: string; reanalyzeStatus?: string;
+          targetAgent?: string; message?: string; createdAt?: string; updatedAt?: string; reanalyzeStatus?: string; appliedRound?: number | string;
         }>)
           .filter((q) => q?.targetAgent !== "system" && q?.message)
           .map((q) => ({
             targetAgent: q.targetAgent,
             message: q.message as string,
             createdAt: q.createdAt,
-            reanalyzeStatus: (q.reanalyzeStatus as
-              | "pending" | "in-progress" | "completed" | "reflected" | "partial" | "failed"
-              | undefined) ?? "pending",
+            updatedAt: q.updatedAt,
+            reanalyzeStatus: (q.reanalyzeStatus as FollowUpStatus | undefined) ?? "pending",
+            appliedRound: q.appliedRound,
           }));
         if (fromBackend.length > 0) {
           setUserFollowUps(fromBackend);
@@ -483,8 +620,9 @@ export function Result() {
           if (m.type === "error") return false;
           return !errPat.test(m.content || "");
         }).length;
-        const trueFailure = healthyCore < 4 && mapped.some((m) => m.type === "error" || errPat.test(m.content || ""));
+        const trueFailure = !result.finalDecision && healthyCore < 4 && mapped.some((m) => m.type === "error" || errPat.test(m.content || ""));
         if (trueFailure) setError("일부 AI 응답이 지연되어 기존 검토 결과를 기준으로 이어서 표시합니다. 잠시 후 다시 시도하거나 기존 결과로 최종 리포트를 확인할 수 있습니다.");
+        else setError("");
         setIsComplete(true);
         isCompleteRef.current = true;
         setCurrentPhase({ label: "검토 완료", description: "AI 검토팀의 논의가 완료되어 최종 리포트가 준비되었습니다.", progress: 100, humourLabel: "최종 리포트를 확인할 준비가 되었습니다." });
@@ -511,6 +649,27 @@ export function Result() {
         // 단계별 라벨이 5%/12% 에 멈춘 것처럼 보이지 않도록 구체적 메시지 매핑.
         if (status.analysisPhase && phaseMap[status.analysisPhase]) {
           setCurrentPhase(phaseMap[status.analysisPhase]);
+        } else if (
+          status.status === "WAITING_FOR_USER_INPUT"
+          || status.status === "WAITING_FOR_ROUND2_INPUT"
+          || status.status === "WAITING_FOR_FINAL_INPUT"
+        ) {
+          cleanup();
+          const nextWaitingStage = status.status === "WAITING_FOR_FINAL_INPUT" ? "final" : "round2";
+          isCompleteRef.current = false;
+          setIsComplete(false);
+          setIsAnalyzing(false);
+          setIsWaitingForUserInput(true);
+          setWaitingStage(nextWaitingStage);
+          await fetchDebateResult(sessionId, false);
+          setCurrentPhase({
+            label: nextWaitingStage === "final" ? "Round 2 토론 완료" : "Round 1 검토 완료",
+            description: nextWaitingStage === "final"
+              ? "최종 라운드 전에 추가 질문이나 조건을 입력할 수 있습니다."
+              : "다음 라운드에 반영할 질문이나 조건을 입력할 수 있습니다.",
+            progress: nextWaitingStage === "final" ? 65 : 35,
+            humourLabel: "AI 검토팀이 사용자 의견을 기다리고 있습니다.",
+          });
         } else if (typeof status.messageCount === "number" && status.messageCount > 0) {
           // 메시지 수별 명시적 라벨 (Phase 10.19 — 사용자가 단계를 직관적으로 인지)
           const count = status.messageCount;
@@ -541,21 +700,36 @@ export function Result() {
               : prev,
           );
         } else if (status.status === "REANALYZING") {
-          // Phase 10.18 — 재분석 진행 중. 기존 메시지가 백엔드에서 삭제되므로 fetchedCount 리셋.
+          const mode = continuationModeRef.current;
+          const phaseLabel =
+            mode === "final"
+              ? "최종 라운드 진행 중"
+              : mode === "round2"
+                ? "다음 라운드 진행 중"
+                : "추가 재검토 진행 중";
+          const phaseDescription =
+            mode === "final"
+              ? "최종 라운드 에이전트들이 앞선 토론과 추가 질문을 종합하고 있습니다."
+              : mode === "round2"
+                ? "사용자 추가 질문과 조건을 포함해 다음 라운드 토론을 진행하고 있습니다."
+                : "완료된 검토에 새 질문을 더해 추가 재검토를 진행하고 있습니다.";
           setCurrentPhase((prev) => ({
             ...prev,
-            label: "후속 질문 반영 재분석 중",
-            description: "사용자 추가 질문을 포함한 새 분석을 진행하고 있습니다. 잠시만 기다려 주세요.",
+            label: phaseLabel,
+            description: phaseDescription,
             progress: Math.max(prev.progress, 30),
           }));
           isCompleteRef.current = false;
           setIsComplete(false);
           setIsAnalyzing(true);
+          setWaitingStage(null);
           wasReanalyzingRef.current = true;  // Phase 10.20 — 완료 시 배너 노출 트리거
           // Phase 10.38 — REANALYZING 전이 시 모든 pending 질문을 "in-progress" 로 표시
           setUserFollowUps((prev) =>
             prev.map((q) =>
-              q.targetAgent === "system" ? q : { ...q, reanalyzeStatus: "in-progress" as const },
+              q.targetAgent === "system" || (q.reanalyzeStatus && q.reanalyzeStatus !== "pending" && q.reanalyzeStatus !== "failed")
+                ? q
+                : { ...q, reanalyzeStatus: "in-progress" as const },
             ),
           );
           // messageCount 가 0으로 떨어진 뒤 다시 증가 → ref도 낮춰서 신규 메시지 감지 가능하게
@@ -571,19 +745,27 @@ export function Result() {
 
         if (status.status === "COMPLETED") {
           cleanup();
+          setIsWaitingForUserInput(false);
+          setWaitingStage(null);
           await fetchDebateResult(sessionId, true);
           // Phase 10.20 — REANALYZING → COMPLETED 전이 시 1회성 배너 표시
           if (wasReanalyzingRef.current) {
             wasReanalyzingRef.current = false;
-            setReanalyzeBadge({
-              count: userFollowUps.length || 1,
-              at: new Date().toISOString(),
-            });
+            const completedMode = continuationModeRef.current;
+            if (completedMode === "reanalysis") {
+              setReanalyzeBadge({
+                count: userFollowUps.filter((q) => q.targetAgent !== "system" && q.reanalyzeStatus !== "deleted").length || 1,
+                at: new Date().toISOString(),
+              });
+            } else {
+              setReanalyzeBadge(null);
+            }
+            continuationModeRef.current = null;
             // Phase 10.38 — 성공 시 in-progress 질문 → "reflected"
-            // Phase 10.45 — 토론 타임라인에 "재검토 완료" divider 시스템 메시지 추가
+            // Phase 10.45 — 토론 타임라인에 완료 divider 시스템 메시지 추가
             const completionMsg = {
               targetAgent: "system",
-              message: "✅ 재검토 완료 — 추가 질문이 반영된 새 결과가 준비되었습니다.",
+              message: "추가 토론 완료 — 사용자 질문이 반영된 새 결과가 준비되었습니다.",
               createdAt: new Date().toISOString(),
             };
             setUserFollowUps((prev) => {
@@ -594,7 +776,7 @@ export function Result() {
               );
               // 이미 동일한 완료 divider 가 없으면 추가
               const hasDone = updated.some(
-                (q) => q.targetAgent === "system" && /재검토 완료/.test(q.message || ""),
+                (q) => q.targetAgent === "system" && /추가 토론 완료|재검토 완료/.test(q.message || ""),
               );
               const next = hasDone ? updated : [...updated, completionMsg];
               try { sessionStorage.setItem("userFollowUps", JSON.stringify(next)); } catch { /* */ }
@@ -608,6 +790,8 @@ export function Result() {
           }
         } else if (status.status === "FAILED") {
           cleanup();
+          setIsWaitingForUserInput(false);
+          setWaitingStage(null);
           // Phase 10.27 — 실패 시 기존 결과 보존 안내 추가
           setError("분석에 실패했습니다. 기존 결과는 유지됩니다. 잠시 후 다시 시도하거나 서버 상태를 확인하세요.");
           setIsAnalyzing(false);
@@ -617,7 +801,7 @@ export function Result() {
             // Phase 10.45 — 실패 divider
             const failMsg = {
               targetAgent: "system",
-              message: "⚠ 재검토 실패 — 기존 결과를 기준으로 표시합니다.",
+              message: "추가 검토 실패 — 기존 결과를 기준으로 표시합니다.",
               createdAt: new Date().toISOString(),
             };
             setUserFollowUps((prev) => {
@@ -627,7 +811,7 @@ export function Result() {
                   : { ...q, reanalyzeStatus: "failed" as const },
               );
               const hasFail = updated.some(
-                (q) => q.targetAgent === "system" && /재검토 실패/.test(q.message || ""),
+                (q) => q.targetAgent === "system" && /추가 검토 실패|재검토 실패/.test(q.message || ""),
               );
               const next = hasFail ? updated : [...updated, failMsg];
               try { sessionStorage.setItem("userFollowUps", JSON.stringify(next)); } catch { /* */ }
@@ -657,10 +841,8 @@ export function Result() {
       }
     } catch { /* ignore */ }
 
-    const recheckRaw = sessionStorage.getItem("recheckRequest");
-    if (recheckRaw) {
-      try { setRecheckRequest(JSON.parse(recheckRaw)); } catch { setRecheckRequest(null); }
-    }
+    sessionStorage.removeItem("recheckRequest");
+    setRecheckRequest(null);
 
     const sessionId = sessionStorage.getItem("sessionId");
     if (!sessionId) {
@@ -681,10 +863,16 @@ export function Result() {
     const appendIfNew = (m: StreamDebateMessage) => {
       const k = keyOf(m);
       if (seenMessageKeysRef.current.has(k)) return;
-      seenMessageKeysRef.current.add(k);
-      setMessages((prev) => [
-        ...prev,
-        {
+      setMessages((prev) => {
+        if (prev.some((existing) => keyOf(existing) === k)) {
+          seenMessageKeysRef.current.add(k);
+          return prev;
+        }
+        seenMessageKeysRef.current.add(k);
+        fetchedCountRef.current = Math.max(fetchedCountRef.current, prev.length + 1);
+        return [
+          ...prev,
+          {
           agentId: m.agentId || "legal",
           agentName: m.agentName || "",
           content: m.content || "",
@@ -692,9 +880,9 @@ export function Result() {
           round: m.round ?? 1,
           stance: m.stance || "",
           evidenceSummary: m.evidenceSummary || "",
-        },
-      ]);
-      fetchedCountRef.current += 1;
+          },
+        ];
+      });
     };
 
     const ctrl = connectSessionStream(Number(sessionId), {
@@ -734,9 +922,20 @@ export function Result() {
           isCompleteRef.current = false;
           setIsComplete(false);
           setIsAnalyzing(true);
+          setIsWaitingForUserInput(false);
+          setWaitingStage(null);
           wasReanalyzingRef.current = true;
-          // 새 분석 시작 — 메시지 중복 키 캐시 일부 초기화 (system 메시지 제외)
-          seenMessageKeysRef.current = new Set();
+        } else if (
+          e.status === "WAITING_FOR_USER_INPUT"
+          || e.status === "WAITING_FOR_ROUND2_INPUT"
+          || e.status === "WAITING_FOR_FINAL_INPUT"
+        ) {
+          const nextWaitingStage = e.status === "WAITING_FOR_FINAL_INPUT" ? "final" : "round2";
+          isCompleteRef.current = false;
+          setIsComplete(false);
+          setIsAnalyzing(false);
+          setIsWaitingForUserInput(true);
+          setWaitingStage(nextWaitingStage);
         }
       },
       onMessage: (e) => {
@@ -755,6 +954,8 @@ export function Result() {
         isCompleteRef.current = true;
         setIsComplete(true);
         setIsAnalyzing(false);
+        setIsWaitingForUserInput(false);
+        setWaitingStage(null);
         setCurrentPhase((prev) => ({
           ...prev,
           progress: 100,
@@ -840,6 +1041,8 @@ export function Result() {
   const attachmentsSummary = useMemo<{
     total: number;
     withBody: number;
+    partial: number;
+    limited: number;
     metaOnly: number;
     masked: number;
   } | null>(() => {
@@ -850,6 +1053,8 @@ export function Result() {
       const list = Array.isArray(data?.attachments) ? data.attachments : [];
       if (list.length === 0) return null;
       let withBody = 0;
+      let partial = 0;
+      let limited = 0;
       let metaOnly = 0;
       let masked = 0;
       for (const a of list) {
@@ -859,12 +1064,15 @@ export function Result() {
         //   skipped-unsupported / skipped-too-large / failed / error → 메타만
         if (a?.bodyText || s === "ok" || s === "extracted" || s === "partial" || s === "pending-server-extract") {
           withBody += 1;
+          if (s === "partial" || a?.bodyTruncated) partial += 1;
+        } else if (s === "failed-image-or-empty" || s === "failed" || s === "error") {
+          limited += 1;
         } else {
           metaOnly += 1;
         }
         if (Array.isArray(a?.sensitivityFlags) && a.sensitivityFlags.length > 0) masked += 1;
       }
-      return { total: list.length, withBody, metaOnly, masked };
+      return { total: list.length, withBody, partial, limited, metaOnly, masked };
     } catch {
       return null;
     }
@@ -888,17 +1096,15 @@ export function Result() {
     const lastMsg = visible[visible.length - 1];
     const currentRound = lastMsg?.round ?? 1;
 
-    const nextSpeakerOrder: AgentKey[] = ["risk", "legal", "judge"];
+    const nextSpeakerOrder: AgentKey[] = ["business", "legal", "risk", "judge"];
     let speakingNow: AgentKey | undefined;
     let nextUp: AgentKey | undefined;
 
     if (!lastMsg) {
-      speakingNow = "risk";
+      speakingNow = "business";
       nextUp = "legal";
     } else {
-      const lastAg = (lastMsg.agentId === "ethics" || lastMsg.agentId === "judge")
-        ? "judge"
-        : (lastMsg.agentId as AgentKey);
+      const lastAg = resolveAgentKey(lastMsg.agentId, lastMsg.agentName, lastMsg.type);
       const idx = nextSpeakerOrder.indexOf(lastAg);
       if (idx < 0) {
         speakingNow = activeAgentId;
@@ -920,8 +1126,8 @@ export function Result() {
     const roundLabel = (() => {
       if (!isAnalyzing) return null;
       if (visible.length === 0) return "분석 준비 중";
-      if (visible.length >= 5) return "Round 3 · 최종 권고 정리";
-      if (visible.length >= 4) return "Round 2 · 쟁점 조율";
+      if (currentRound >= 3) return "Round 3 · 최종 토론 및 판단";
+      if (currentRound === 2) return "Round 2 · 사용자 질문 반영 토론";
       if (visible.length >= 2) return "Round 1 · 초기 분석";
       return `Round ${currentRound}`;
     })();
@@ -930,8 +1136,9 @@ export function Result() {
       if (!isAnalyzing) return "토론이 완료되었습니다.";
       if (!speakingNow) return currentPhase.description;
       const labels: Record<string, string> = {
-        risk: "비즈니스 전략가가 사업 관점 리스크를 분석 중입니다.",
+        business: "비즈니스 전략가가 사업 관점 리스크를 분석 중입니다.",
         legal: "법률 전문가가 관련 법령·판례 근거와 위반 가능성을 점검 중입니다.",
+        risk: "리스크 검토자가 운영·정산·계약 위험을 종합 점검 중입니다.",
         judge: "최종 판정관이 권고안을 정리하고 있습니다.",
         ethics: "리스크 검토자가 추가 위험 요소를 점검 중입니다.",
       };
@@ -1019,7 +1226,7 @@ export function Result() {
 
           {recheckRequest && (
             <div className="mt-3 rounded-xl border border-[#1E3A8A]/20 bg-[#1E3A8A]/5 p-3 text-sm">
-              재검토 요청 반영: {recheckRequest.target} / {recheckRequest.question || "추가 질문 없음"}
+              추가 질문 반영: {recheckRequest.target} / {recheckRequest.question || "추가 질문 없음"}
             </div>
           )}
           {isAnalyzing && elapsedSeconds > 0 && (
@@ -1060,8 +1267,7 @@ export function Result() {
                   {dashboardAgents.map((agentId) => {
                     const agent = agentMap[agentId];
                     const Icon = agent.icon;
-                    const isActive = activeAgentId === agentId
-                      || (agentId === "ethics" && activeAgentId === "judge");
+                    const isActive = activeAgentId === agentId;
                     return (
                       <div key={agentId} className="relative text-center">
                         {isActive && (
@@ -1117,12 +1323,12 @@ export function Result() {
                 실제 서버 메시지가 3개 미만이거나 아직 분석 중일 때는 provisional 도 함께 표시 →
                 사용자가 끊김 없이 단계별 에이전트 검토 흐름을 인지 가능. */}
             {(messages.length < 3 || (isAnalyzing && messages.length < 5)) && (() => {
-              type ProvAgent = "risk" | "legal" | "ethics" | "judge";
+              type ProvAgent = "business" | "legal" | "risk" | "judge";
               // Phase 10.46 — 사용자 친화 문구로 정렬. 진행률 구간별로 다른 에이전트가 검토 중인 느낌을 명확히 노출.
               const provisional: Array<{ ag: ProvAgent; text: string; activeAt: number }> = [
-                { ag: "risk", text: "비즈니스 전략가가 사업 관점 리스크를 검토 중입니다.", activeAt: 10 },
+                { ag: "business", text: "비즈니스 전략가가 사업 관점 리스크를 검토 중입니다.", activeAt: 10 },
                 { ag: "legal", text: "법률 전문가가 협약 조건과 개인정보 처리 가능성을 확인 중입니다.", activeAt: 30 },
-                { ag: "ethics", text: "리스크 검토자가 정산·환수·중복 수혜 가능성을 점검 중입니다.", activeAt: 60 },
+                { ag: "risk", text: "리스크 검토자가 정산·환수·중복 수혜 가능성을 점검 중입니다.", activeAt: 60 },
                 { ag: "judge", text: "최종 판정관이 검토 의견을 종합하고 있습니다.", activeAt: 85 },
               ];
               // Phase 10.35 — 실제 메시지 존재 시 제목 보정 (provisional + 실시간 메시지 병존 안내)
@@ -1200,6 +1406,36 @@ export function Result() {
           </>
         )}
 
+        {isWaitingForUserInput && messages.length > 0 && !error && (
+          <>
+            <Card className="border-emerald-200 bg-emerald-50">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-2 text-emerald-800 font-medium">
+                  <CheckCircle2 className="w-5 h-5" />
+                  {waitingStage === "final" ? "Round 2 토론이 끝났습니다." : "Round 1 검토가 끝났습니다."}
+                </div>
+                <p className="text-sm text-emerald-700 mt-2">
+                  {waitingStage === "final"
+                    ? "최종 라운드 전에 추가로 확인할 질문이나 조건이 있나요? 질문이 없다면 바로 최종 라운드를 진행할 수 있습니다."
+                    : "다음 라운드에 반영할 질문이나 추가 조건을 입력하세요. 질문이 없다면 바로 다음 라운드를 진행할 수 있습니다."}
+                </p>
+              </CardContent>
+            </Card>
+            <LiveDebateTimeline
+              messages={messages}
+              visibleCount={messages.length}
+              userFollowUps={userFollowUps}
+              isAnalyzing={false}
+              messagesEndRef={messagesEndRef}
+              attachmentsSummary={attachmentsSummary}
+              reanalyzeBadge={reanalyzeBadge}
+              liveStatus={liveStatus}
+              unseenCount={0}
+              onJumpToBottom={jumpToBottom}
+            />
+          </>
+        )}
+
         {/* ── 에러 (분석 실패) ── */}
         {!isAnalyzing && error && !isComplete && (
           <Card className="border-red-200 bg-red-50">
@@ -1271,12 +1507,12 @@ export function Result() {
                 {/* Phase 10.31/10.76 — 개입 선택지 명시 */}
                 {reanalyzeBadge
                   ? "최근 재검토 결과가 최종 리포트에 반영되었습니다. 아래 버튼으로 최종 판정을 확인하세요."
-                  : `에이전트별 검토 결과 ${messages.filter((m) => m.type !== "error").length}건이 정리되었습니다. 추가로 묻고 싶은 점이 있다면 아래에서 질문을 남기고 '다음 라운드에 반영' 을 누르세요. 그렇지 않으면 바로 최종 판단을 확인할 수 있습니다.`}
+                  : `에이전트별 검토 결과 ${messages.filter((m) => m.type !== "error").length}건이 정리되었습니다. 아래 버튼으로 최종 판정을 확인할 수 있습니다.`}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button variant="default" className="rounded-full bg-[#1E3A8A] hover:bg-[#1E3A8A]/90" onClick={() => navigate("/verdict")}>
                   {/* Phase 10.76 — 의도가 명확한 라벨 */}
-                  추가 질문 없이 최종 판단 보기 <ArrowRight className="w-4 h-4 ml-2" />
+                  최종 판정 보기 <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
                 <Button
                   variant="outline"
@@ -1291,7 +1527,7 @@ export function Result() {
         )}
 
         {/* Phase 10.20 — 토론 로그 상세 (완료 후 토글) — 동일한 타임라인 컴포넌트로 통합 */}
-        {showDetailedLogs && !isAnalyzing && messages.length > 0 && (
+        {showDetailedLogs && !isAnalyzing && !isWaitingForUserInput && messages.length > 0 && (
           <LiveDebateTimeline
             messages={messages}
             visibleCount={messages.length}
@@ -1307,26 +1543,27 @@ export function Result() {
         )}
 
         {/* Phase 10.11 — 사용자 추가 질문 말풍선 영역 */}
-        {userFollowUps.length > 0 && (
+        {!isAnalyzing && userFollowUps.some((q) => q.targetAgent !== "system") && (
           <Card className="border-slate-200 bg-white">
             <CardContent className="space-y-2 py-4">
               <div className="mb-1 text-sm font-semibold text-slate-700">
-                사용자 추가 질문 ({userFollowUps.length}건)
+                사용자 추가 질문 ({userFollowUps.filter((q) => q.targetAgent !== "system" && q.reanalyzeStatus !== "deleted").length}건)
               </div>
               {userFollowUps.map((q, originalIdx) => ({ q, originalIdx })).filter(({ q }) => q.targetAgent !== "system").map(({ q, originalIdx }) => {
                 // Phase 10.56 — 질문별 상태 chip (반영 완료 / 일부 반영 / 재검토 반영 대기 / 다시 시도 필요 / 재검토 중)
                 const rs = q.reanalyzeStatus;
                 const chip = (() => {
+                  if (rs === "deleted") return { label: "삭제됨", cls: "border-slate-200 bg-slate-50 text-slate-500" };
                   if (rs === "completed" || rs === "reflected") return { label: "반영 완료", cls: "border-emerald-200 bg-emerald-50 text-emerald-700" };
                   if (rs === "partial") return { label: "일부 반영", cls: "border-sky-200 bg-sky-50 text-sky-700" };
                   if (rs === "failed") return { label: "다시 시도 필요", cls: "border-red-200 bg-red-50 text-red-700" };
-                  if (rs === "in-progress") return { label: "재검토 중", cls: "border-blue-200 bg-blue-50 text-blue-700" };
-                  return { label: "다음 재검토 반영 대기", cls: "border-amber-200 bg-amber-50 text-amber-800" };
+                  if (rs === "in-progress") return { label: "반영 중", cls: "border-blue-200 bg-blue-50 text-blue-700" };
+                  return { label: q.updatedAt ? "수정됨 · 대기" : "대기", cls: "border-amber-200 bg-amber-50 text-amber-800" };
                 })();
                 // Phase 10.85 — 수정/삭제는 pending / failed 상태일 때만 가능 (반영 완료/진행 중 변경 차단).
-                const isEditable = !rs || rs === "pending" || rs === "failed";
+                const isEditable = !isAnalyzing && (!rs || rs === "pending" || rs === "failed");
                 return (
-                  <div key={originalIdx} className="space-y-1">
+                  <div key={originalIdx} className={`space-y-1 ${rs === "deleted" ? "opacity-60" : ""}`}>
                     <div className="flex justify-end">
                       <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-[#1E3A8A] px-3 py-2 text-sm text-white shadow-sm">
                         <div className="mb-0.5 text-[10px] opacity-80">
@@ -1347,6 +1584,16 @@ export function Result() {
                               if (next == null) return;
                               const trimmed = next.trim();
                               if (!trimmed || trimmed === q.message) return;
+                              const duplicate = userFollowUps.some((p, j) =>
+                                j !== originalIdx
+                                && p.targetAgent !== "system"
+                                && p.reanalyzeStatus !== "deleted"
+                                && p.message.trim() === trimmed,
+                              );
+                              if (duplicate) {
+                                alert("이미 같은 질문이 저장되어 있습니다.");
+                                return;
+                              }
                               const sessionId = sessionStorage.getItem("sessionId");
                               if (!sessionId) return;
                               try {
@@ -1356,7 +1603,13 @@ export function Result() {
                                   body: JSON.stringify({ index: originalIdx, message: trimmed }),
                                 });
                                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                                setUserFollowUps((prev) => prev.map((p, j) => j === originalIdx ? { ...p, message: trimmed } : p));
+                                setUserFollowUps((prev) => {
+                                  const nextList = prev.map((p, j) => j === originalIdx
+                                    ? { ...p, message: trimmed, updatedAt: new Date().toISOString(), reanalyzeStatus: "pending" as const }
+                                    : p);
+                                  try { sessionStorage.setItem("userFollowUps", JSON.stringify(nextList)); } catch { /* */ }
+                                  return nextList;
+                                });
                               } catch (e) {
                                 console.warn("[questions] edit failed", e);
                                 alert("질문 수정에 실패했습니다. 잠시 후 다시 시도해 주세요.");
@@ -1370,7 +1623,7 @@ export function Result() {
                             type="button"
                             className="rounded-md border border-red-200 bg-white px-2 py-0.5 text-[10.5px] text-red-600 hover:bg-red-50"
                             onClick={async () => {
-                              if (!window.confirm("이 질문을 삭제할까요? 재검토에 반영되지 않습니다.")) return;
+                              if (!window.confirm("이 질문을 삭제할까요? 다음 검토에 반영되지 않습니다.")) return;
                               const sessionId = sessionStorage.getItem("sessionId");
                               if (!sessionId) return;
                               try {
@@ -1380,7 +1633,13 @@ export function Result() {
                                   body: JSON.stringify({ index: originalIdx, message: null }),
                                 });
                                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                                setUserFollowUps((prev) => prev.filter((_, j) => j !== originalIdx));
+                                setUserFollowUps((prev) => {
+                                  const nextList = prev.map((p, j) => j === originalIdx
+                                    ? { ...p, reanalyzeStatus: "deleted" as const }
+                                    : p);
+                                  try { sessionStorage.setItem("userFollowUps", JSON.stringify(nextList)); } catch { /* */ }
+                                  return nextList;
+                                });
                               } catch (e) {
                                 console.warn("[questions] delete failed", e);
                                 alert("질문 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.");
@@ -1397,35 +1656,89 @@ export function Result() {
                 );
               })}
               <p className="mt-1 text-[11px] text-slate-500">
-                ※ 추가 질문을 남기고 <strong>다음 라운드에 반영</strong> 버튼을 누르면, 다음 라운드 토론과 최종 리포트에 반영됩니다.
-                기존 Round 1 토론은 그대로 유지되고, 새 라운드가 아래에 이어집니다.
+                {isComplete ? (
+                  <>
+                    ※ 완료 후 새 질문은 <strong>추가 재검토 요청</strong>에서 반영할 수 있습니다.
+                    기존 Round 1·2·3 토론과 최종 판단은 유지되고, 새 재검토 결과가 아래에 이어집니다.
+                  </>
+                ) : waitingStage === "final" ? (
+                  <>
+                    ※ 추가 질문을 남기고 <strong>최종 라운드 시작</strong> 버튼을 누르면, Round 3 토론과 최종 판정에 반영됩니다.
+                    기존 Round 1·2 토론은 그대로 유지됩니다.
+                  </>
+                ) : (
+                  <>
+                    ※ 추가 질문을 남기고 <strong>다음 라운드에 반영</strong> 버튼을 누르면, 다음 라운드 토론에 반영됩니다.
+                    기존 Round 1 토론은 그대로 유지됩니다.
+                  </>
+                )}
               </p>
             </CardContent>
           </Card>
         )}
 
         {/* Phase 10.6/10.11/10.31 — 라운드 사이 사용자 개입 영역. 분석 중/완료 상태 전달. */}
-        {messages.length > 0 && !error && (
+        {messages.length > 0 && !error && (isWaitingForUserInput || (!isAnalyzing && isComplete)) && (
           <RoundInterventionBlock
             startupContext={startupContext}
             lastRoundMessages={Object.values(groupedRounds).pop() ?? []}
             isAnalyzing={isAnalyzing}
-            onQuestionSaved={(q) => setUserFollowUps((prev) => [...prev, q])}
+            existingFollowUps={userFollowUps}
+            pendingFollowUpCount={userFollowUps.filter((q) =>
+              q.targetAgent !== "system"
+              && q.reanalyzeStatus !== "deleted"
+              && (!q.reanalyzeStatus || q.reanalyzeStatus === "pending" || q.reanalyzeStatus === "failed")
+            ).length}
+            allowContinueWithoutQuestions={isWaitingForUserInput}
+            mode={isComplete ? "completed" : waitingStage === "final" ? "final" : "round"}
+            onQuestionSaved={(q) => setUserFollowUps((prev) => {
+              const exists = prev.some((p) =>
+                p.targetAgent !== "system"
+                && p.reanalyzeStatus !== "deleted"
+                && p.message.trim() === q.message.trim()
+              );
+              const next = exists ? prev : [...prev, q];
+              try { sessionStorage.setItem("userFollowUps", JSON.stringify(next)); } catch { /* */ }
+              return next;
+            })}
             onReanalyzeStarted={(sessionId) => {
               // Phase 10.18 — 부모 스코프의 polling 재시작 (REANALYZING 상태 추적)
               isCompleteRef.current = false;
               setIsComplete(false);
               setIsAnalyzing(true);
-              // Phase 10.22 — 시스템 메시지로 "추가 질문 반영 재검토 시작" 즉시 표시.
+              setIsWaitingForUserInput(false);
+              const startingFinalRound = waitingStage === "final";
+              continuationModeRef.current = isComplete ? "reanalysis" : startingFinalRound ? "final" : "round2";
+              const appliedRound: number | string = isComplete ? "reanalysis" : startingFinalRound ? 3 : 2;
+              const hasPendingFollowUps = pendingFollowUpCount > 0;
+              // Phase 10.22 — 시스템 메시지로 "추가 질문 반영 시작" 즉시 표시.
               // 사용자 질문 버블과 구분되도록 user follow-up 영역에 시스템 항목으로 prepend.
-              setUserFollowUps((prev) => [
-                ...prev,
-                {
-                  targetAgent: "system",
-                  message: "🔁 추가 질문을 반영해 재검토를 시작합니다. 기존 토론 기록은 새 결과로 갱신됩니다.",
-                  createdAt: new Date().toISOString(),
-                },
-              ]);
+              setUserFollowUps((prev) => {
+                const marked = prev.map((q) =>
+                  q.targetAgent === "system"
+                    ? q
+                    : (!q.reanalyzeStatus || q.reanalyzeStatus === "pending" || q.reanalyzeStatus === "failed")
+                      ? { ...q, reanalyzeStatus: "in-progress" as const, appliedRound }
+                      : q,
+                );
+                return [
+                  ...marked,
+                  {
+                    targetAgent: "system",
+                    message: isWaitingForUserInput
+                      ? startingFinalRound
+                        ? hasPendingFollowUps
+                          ? "추가 질문을 반영해 최종 라운드를 시작합니다. 기존 Round 1·2 토론은 유지되고 최종 라운드가 아래에 이어집니다."
+                          : "추가 질문 없이 최종 라운드를 시작합니다. 기존 Round 1·2 토론을 바탕으로 최종 판단을 정리합니다."
+                        : hasPendingFollowUps
+                          ? "추가 질문을 반영해 다음 라운드를 시작합니다. 기존 Round 1 토론은 유지되고 새 라운드가 아래에 이어집니다."
+                          : "추가 질문 없이 다음 라운드를 시작합니다. 기존 Round 1 토론을 바탕으로 이어갑니다."
+                      : "추가 재검토를 시작합니다. 기존 토론 기록은 유지되고 새 결과가 아래에 이어집니다.",
+                    createdAt: new Date().toISOString(),
+                  },
+                ];
+              });
+              setWaitingStage(null);
               // staged reveal 다시 시작 — visibleCount 는 messages 가 0으로 cleanup 될 때 자동 0으로 동기화됨
               pollSessionStatus(sessionId);
             }}
@@ -1444,6 +1757,10 @@ function RoundInterventionBlock({
   startupContext,
   lastRoundMessages,
   isAnalyzing = false,
+  existingFollowUps,
+  pendingFollowUpCount,
+  allowContinueWithoutQuestions,
+  mode = "round",
   onQuestionSaved,
   onReanalyzeStarted,
 }: {
@@ -1456,7 +1773,11 @@ function RoundInterventionBlock({
     applyUrl?: string;
   } | null;
   isAnalyzing?: boolean;
-  onQuestionSaved?: (q: { targetAgent: string; message: string; createdAt: string }) => void;
+  existingFollowUps: FollowUpQuestion[];
+  pendingFollowUpCount: number;
+  allowContinueWithoutQuestions?: boolean;
+  mode?: "round" | "final" | "completed";
+  onQuestionSaved?: (q: FollowUpQuestion) => void;
   onReanalyzeStarted?: (sessionId: string) => void;
   lastRoundMessages: Message[];
 }) {
@@ -1468,14 +1789,35 @@ function RoundInterventionBlock({
     "idle" | "saving" | "saved" | "reanalyzing" | "reanalyzed" | "failed"
   >("idle");
   const [followUpStatusMsg, setFollowUpStatusMsg] = useState<string>("");
+  const isCompletedReview = mode === "completed";
+  const isFinalIntervention = mode === "final";
 
-  // Phase 10.17/10.18 — "재검토 실행" — 저장된 followUpQuestions 로 backend 재분석 트리거.
+  useEffect(() => {
+    setSubmitted(false);
+    setQuestion("");
+    setFollowUpStatus("idle");
+    setFollowUpStatusMsg("");
+  }, [mode]);
+
+  // Phase 10.17/10.18 — 저장된 followUpQuestions 로 backend 분석 트리거.
   // 단순 alert 대신 inline status 로 표시 + poll 재시작.
   const handleReanalyze = async () => {
     const sessionId = sessionStorage.getItem("sessionId");
     if (!sessionId) return;
+    if (isAnalyzing) {
+      setFollowUpStatus("failed");
+      setFollowUpStatusMsg("현재 토론이 진행 중입니다. 이번 라운드가 끝난 뒤 다시 시도해 주세요.");
+      return;
+    }
+    if (pendingFollowUpCount <= 0 && !allowContinueWithoutQuestions) {
+      setFollowUpStatus("failed");
+      setFollowUpStatusMsg(isCompletedReview
+        ? "재검토할 질문이 없습니다. 먼저 질문을 저장해 주세요."
+        : "반영할 추가 질문이 없습니다. 먼저 질문을 저장해 주세요.");
+      return;
+    }
     setFollowUpStatus("reanalyzing");
-    setFollowUpStatusMsg("재분석 요청 중...");
+    setFollowUpStatusMsg(isCompletedReview ? "재검토 요청 중..." : isFinalIntervention ? "최종 라운드 요청 중..." : "다음 라운드 요청 중...");
     try {
       const res = await fetch(`http://localhost:8080/api/sessions/${sessionId}/reanalyze`, {
         method: "POST",
@@ -1485,18 +1827,22 @@ function RoundInterventionBlock({
       if (res.ok) {
         setFollowUpStatus("reanalyzed");
         setFollowUpStatusMsg(
-          `재분석을 시작했습니다 (질문 ${data.followUpCount ?? "여러"}건 반영). 새 메시지가 도착하면 자동으로 표시됩니다.`,
+          (data.followUpCount ?? 0) > 0
+            ? isCompletedReview
+              ? `추가 재검토를 시작했습니다 (질문 ${data.followUpCount}건 반영). 새 메시지가 도착하면 자동으로 표시됩니다.`
+              : `${isFinalIntervention ? "최종 라운드" : "다음 라운드"}를 시작했습니다 (질문 ${data.followUpCount}건 반영). 새 메시지가 도착하면 자동으로 표시됩니다.`
+            : `질문 없이 ${isFinalIntervention ? "최종 라운드" : "다음 라운드"}를 시작했습니다. 새 메시지가 도착하면 자동으로 표시됩니다.`,
         );
         // polling 재시작 — 부모 콜백에 위임 (REANALYZING 상태 추적)
         onReanalyzeStarted?.(sessionId);
       } else {
         setFollowUpStatus("failed");
-        setFollowUpStatusMsg(data.error || "재검토 실행에 실패했습니다.");
+        setFollowUpStatusMsg(data.error || (isCompletedReview ? "재검토 실행에 실패했습니다." : isFinalIntervention ? "최종 라운드 시작에 실패했습니다." : "다음 라운드 시작에 실패했습니다."));
       }
     } catch (e) {
       console.error("[reanalyze] 실패", e);
       setFollowUpStatus("failed");
-      setFollowUpStatusMsg("재검토 요청 중 네트워크 오류가 발생했습니다.");
+      setFollowUpStatusMsg(isCompletedReview ? "재검토 요청 중 네트워크 오류가 발생했습니다." : isFinalIntervention ? "최종 라운드 요청 중 네트워크 오류가 발생했습니다." : "다음 라운드 요청 중 네트워크 오류가 발생했습니다.");
     }
   };
 
@@ -1561,6 +1907,11 @@ function RoundInterventionBlock({
         "지금까지 논의된 위험을 모두 줄이려면 어떤 조치가 먼저 필요한지 순서대로 알려주세요.",
         "현재 입력 정보와 첨부 자료만으로 결론을 내리기에 부족한 부분이 있다면 알려주세요.",
       ],
+      risk: [
+        "현재까지 토론에서 합의된 부분과 합의되지 않은 부분을 짧게 정리해 주세요.",
+        "비즈니스 측과 법률 측 주장 중 어느 쪽이 더 설득력 있는지 근거와 함께 알려주세요.",
+        "최종 결정 시 양보할 수 없는 핵심 원칙과 양보 가능한 부분을 구분해 주세요.",
+      ],
       ethics: [
         "현재까지 토론에서 합의된 부분과 합의되지 않은 부분을 짧게 정리해 주세요.",
         "비즈니스 측과 법률 측 주장 중 어느 쪽이 더 설득력 있는지 근거와 함께 알려주세요.",
@@ -1617,24 +1968,25 @@ function RoundInterventionBlock({
     { value: "all", label: "전체 에이전트" },
     { value: "business", label: "비즈니스 전략가" },
     { value: "legal", label: "법률 전문가" },
-    { value: "ethics", label: "리스크 검토자" },
+    { value: "risk", label: "리스크 검토자" },
     { value: "judge", label: "최종 판정관" },
   ];
 
   const handleSubmit = async () => {
     const trimmed = question.trim();
     if (!trimmed) return;
+    const duplicate = existingFollowUps.some((q) =>
+      q.targetAgent !== "system"
+      && q.reanalyzeStatus !== "deleted"
+      && q.message.trim() === trimmed
+    );
+    if (duplicate) {
+      setFollowUpStatus("failed");
+      setFollowUpStatusMsg("이미 같은 질문이 저장되어 있습니다.");
+      return;
+    }
     setFollowUpStatus("saving");
     setFollowUpStatusMsg("질문 저장 중...");
-    // sessionStorage (즉시 표시용)
-    try {
-      sessionStorage.setItem(
-        "recheckRequest",
-        JSON.stringify({ target, question: trimmed }),
-      );
-    } catch {
-      /* ignore */
-    }
     // Phase 10.9 — 백엔드에 영구 저장 시도 (sessionId 가 있을 때만)
     const createdAt = new Date().toISOString();
     const sessionId = sessionStorage.getItem("sessionId");
@@ -1658,9 +2010,13 @@ function RoundInterventionBlock({
     }
     if (saveOk) {
       setFollowUpStatus("saved");
-      // Phase 10.21 — 자동 reanalyze 제거. 사용자가 "질문 반영해 재검토" 를 직접 누르도록 분리.
+      // Phase 10.21 — 자동 실행 제거. 사용자가 직접 다음 단계를 시작하도록 분리.
       setFollowUpStatusMsg(
-        isAnalyzing
+        isCompletedReview
+          ? "✓ 질문이 저장되었습니다. '추가 재검토 시작' 버튼을 누르면 새 검토에 반영됩니다."
+          : isFinalIntervention
+            ? "✓ 질문이 저장되었습니다. '최종 라운드 시작' 버튼을 누르면 Round 3에 반영됩니다."
+          : isAnalyzing
           ? "✓ 질문이 저장되었습니다. 현재 토론이 끝난 뒤 '다음 라운드에 반영' 버튼을 눌러주세요."
           : "✓ 질문이 저장되었습니다. '다음 라운드에 반영' 버튼을 누르면 추가 질문을 반영해 다음 라운드를 시작합니다.",
       );
@@ -1670,7 +2026,7 @@ function RoundInterventionBlock({
     }
     // Phase 10.11 — 부모 컴포넌트에 알림 → 채팅 로그 말풍선으로 즉시 렌더
     if (onQuestionSaved) {
-      onQuestionSaved({ targetAgent: target, message: trimmed, createdAt });
+      onQuestionSaved({ targetAgent: target, message: trimmed, createdAt, reanalyzeStatus: "pending" });
     }
     setSubmitted(true);
     // 전송 후 textarea 비우기 (다음 질문 입력 가능)
@@ -1694,15 +2050,32 @@ function RoundInterventionBlock({
       <CardContent className="space-y-3 py-5">
         <div className="flex items-center gap-2 text-sm font-semibold text-[#1E3A8A]">
           <MessageSquare className="h-4 w-4" />
-          다음 라운드에 반영할 질문이나 추가 조건이 있나요?
+          {isCompletedReview
+            ? "추가 재검토 요청"
+            : isFinalIntervention
+              ? "최종 라운드 전에 추가로 확인할 질문이나 조건이 있나요?"
+              : "다음 라운드에 반영할 질문이나 추가 조건이 있나요?"}
         </div>
         <p className="text-xs text-slate-600">
-          {/* Phase 10.30/10.31/10.74 — 사용자 친화 + 개입형 토론 명확화 */}
-          질문을 남기지 않아도 최종 판정까지 그대로 진행됩니다. 추가 질문을 남기면 그 내용이
-          <strong> 다음 라운드 에이전트 검토에 직접 반영</strong>됩니다. 추천 질문을 클릭하거나 직접 작성한 뒤 전송하세요.
-          {isAnalyzing
-            ? " 검토가 진행되는 동안 질문을 저장하면 현재 검토가 끝난 뒤 재검토에 반영할 수 있습니다."
-            : " 질문을 저장한 뒤 '다음 라운드에 반영' 버튼을 누르면 기존 토론 아래에 새 라운드가 이어집니다."}
+          {isCompletedReview ? (
+            <>
+              전체 토론이 끝난 뒤 새로 확인하고 싶은 점이 있으면 재검토 요청으로 남길 수 있습니다.
+              기존 토론과 최종 판단은 유지되고, 새 재검토 결과가 아래에 이어집니다.
+            </>
+          ) : isFinalIntervention ? (
+            <>
+              Round 2 답변을 본 뒤 최종 판단 전에 더 확인할 질문이나 조건을 남길 수 있습니다.
+              질문을 남기지 않아도 최종 라운드로 바로 진행할 수 있고, 남긴 질문은 Round 3 에이전트 의견과 최종 판정에 반영됩니다.
+            </>
+          ) : (
+            <>
+              질문을 남기지 않아도 다음 라운드로 바로 진행할 수 있습니다. 추가 질문을 남기면 그 내용이
+              <strong> 다음 라운드 에이전트 검토에 직접 반영</strong>됩니다. 추천 질문을 클릭하거나 직접 작성한 뒤 전송하세요.
+              {isAnalyzing
+                ? " 검토가 진행되는 동안 질문을 저장하면 현재 라운드가 끝난 뒤 다음 라운드에 반영할 수 있습니다."
+                : " 질문을 저장한 뒤 '다음 라운드에 반영' 버튼을 누르면 기존 토론 아래에 새 라운드가 이어집니다."}
+            </>
+          )}
         </p>
 
         {/* Phase 10.30 — 비서 추천 질문 chips + 새로고침 버튼 */}
@@ -1746,7 +2119,11 @@ function RoundInterventionBlock({
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="다음 라운드에 반영할 질문이나 추가 조건을 입력하세요. (예: 개인정보를 이름과 연락처만 수집하는 경우도 위험한가요?)"
+            placeholder={isCompletedReview
+              ? "재검토할 질문을 입력하세요. (예: 정산 자료가 부족한 경우 환수 가능성이 있나요?)"
+              : isFinalIntervention
+                ? "최종 라운드 전에 반영할 질문이나 조건을 입력하세요. (예: IP 귀속 조항을 더 강하게 요구해야 하나요?)"
+              : "다음 라운드에 반영할 질문이나 추가 조건을 입력하세요. (예: 개인정보를 이름과 연락처만 수집하는 경우도 위험한가요?)"}
             rows={2}
             aria-label="추가 질문 입력"
             className="min-h-[64px] rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:border-[#1E3A8A] focus:outline-none"
@@ -1759,7 +2136,11 @@ function RoundInterventionBlock({
               ✓ 질문이 저장되었습니다 · 대상: {targetOptions.find((o) => o.value === target)?.label}
               <br />
               <span className="text-[10.5px] text-slate-500">
-                현재 저장 상태입니다. '다음 라운드에 반영' 버튼을 누르면 이 질문이 다음 라운드 AI 검토에 포함됩니다.
+                현재 저장 상태입니다. {isCompletedReview
+                  ? "'추가 재검토 시작' 버튼을 누르면 이 질문이 새 검토에 포함됩니다."
+                  : isFinalIntervention
+                    ? "'최종 라운드 시작' 버튼을 누르면 이 질문이 Round 3 AI 검토에 포함됩니다."
+                  : "'다음 라운드에 반영' 버튼을 누르면 이 질문이 다음 라운드 AI 검토에 포함됩니다."}
               </span>
             </span>
           )}
@@ -1781,19 +2162,27 @@ function RoundInterventionBlock({
             {submitted ? "💾 질문 수정 저장" : "💾 질문 저장"}
           </button>
           {/* Phase 10.21 — 질문 저장과 재검토를 명확히 분리. 저장 후에만 노출. */}
-          {submitted && (
+          {(submitted || pendingFollowUpCount > 0 || allowContinueWithoutQuestions) && (
             <button
               type="button"
               onClick={handleReanalyze}
-              disabled={followUpStatus === "reanalyzing"}
+              disabled={isAnalyzing || followUpStatus === "reanalyzing" || (pendingFollowUpCount <= 0 && !allowContinueWithoutQuestions)}
               className="rounded-md border border-[#1E3A8A] bg-[#1E3A8A] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#16306f] disabled:opacity-50"
-              title="저장된 질문을 즉시 AI 분석에 포함해 재검토를 시작합니다."
+              title={isCompletedReview ? "저장된 질문을 추가 재검토에 포함합니다." : isFinalIntervention ? "저장된 질문을 최종 라운드 AI 분석에 포함합니다." : "저장된 질문을 다음 라운드 AI 분석에 포함합니다."}
             >
               {followUpStatus === "reanalyzing"
-                ? "다음 라운드 시작 중..."
+                ? (isCompletedReview ? "재검토 시작 중..." : isFinalIntervention ? "최종 라운드 시작 중..." : "다음 라운드 시작 중...")
                 : followUpStatus === "reanalyzed"
-                ? "✓ 다음 라운드 진행 중 (자동 갱신)"
-                : "🔁 다음 라운드에 반영"}
+                ? (isCompletedReview ? "✓ 재검토 진행 중 (자동 갱신)" : isFinalIntervention ? "✓ 최종 라운드 진행 중 (자동 갱신)" : "✓ 다음 라운드 진행 중 (자동 갱신)")
+                : isCompletedReview
+                  ? "추가 재검토 시작"
+                  : isFinalIntervention
+                    ? pendingFollowUpCount > 0
+                      ? "최종 라운드 시작"
+                      : "질문 없이 최종 라운드 진행"
+                  : pendingFollowUpCount > 0
+                    ? "다음 라운드에 반영"
+                    : "질문 없이 다음 라운드 진행"}
             </button>
           )}
         </div>
@@ -1814,7 +2203,7 @@ function RoundInterventionBlock({
             {followUpStatus === "saving" && "💾 "}
             {followUpStatus === "saved" && "✓ "}
             {followUpStatus === "reanalyzing" && "⏳ "}
-            {followUpStatus === "reanalyzed" && "🔁 "}
+            {followUpStatus === "reanalyzed" && (isCompletedReview ? "🔁 " : "✓ ")}
             {followUpStatus === "failed" && "⚠ "}
             {followUpStatusMsg}
           </div>
@@ -1845,7 +2234,7 @@ function LiveDebateTimeline({
 }: {
   messages: Message[];
   visibleCount: number;
-  userFollowUps: Array<{ targetAgent?: string; message: string; createdAt?: string }>;
+  userFollowUps: FollowUpQuestion[];
   isAnalyzing: boolean;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   attachmentsSummary: { total: number; withBody: number; metaOnly: number; masked: number } | null;
@@ -1860,29 +2249,107 @@ function LiveDebateTimeline({
   unseenCount: number;
   onJumpToBottom: () => void;
 }) {
-  // Phase 10.21 — staged reveal: 부모가 계산한 visibleCount 만큼만 표시.
-  const visibleMessages = messages.slice(0, visibleCount);
   // 라운드 + 시간순으로 메시지/유저질문을 통합한 타임라인 항목 만들기
   type Item =
     | { kind: "agent"; msg: Message; idx: number }
-    | { kind: "user"; q: { targetAgent?: string; message: string; createdAt?: string }; idx: number };
-  const items: Item[] = [
-    ...visibleMessages.map((m, i) => ({ kind: "agent" as const, msg: m, idx: i })),
-    ...userFollowUps.map((q, i) => ({ kind: "user" as const, q, idx: i })),
-  ];
-  // 사용자 질문은 createdAt 이 있는 경우만 정렬에 사용; 없으면 끝에 배치.
-  items.sort((a, b) => {
-    const ta = a.kind === "user" ? (a.q.createdAt ? Date.parse(a.q.createdAt) : Infinity) : a.idx;
-    const tb = b.kind === "user" ? (b.q.createdAt ? Date.parse(b.q.createdAt) : Infinity) : b.idx;
-    // agent 메시지는 항상 순서대로, user 질문은 시간 기준으로 끼워넣기
-    if (a.kind === "agent" && b.kind === "agent") return a.idx - b.idx;
-    return ta < tb ? -1 : 1;
+    | { kind: "user"; q: FollowUpQuestion; idx: number }
+    | { kind: "userGroup"; questions: FollowUpQuestion[]; idx: number; label: string };
+  type TimelineStage = "initial" | "intervention" | "recheck" | "final" | "general";
+  const stageLabel = (stage: TimelineStage) => {
+    switch (stage) {
+      case "initial": return "Round 1 · 초기 검토";
+      case "intervention": return "사용자 추가 질문";
+      case "recheck": return "Round 2 · 사용자 질문 반영 토론";
+      case "final": return "Round 3 · 최종 토론 및 판단";
+      default: return "검토 의견";
+    }
+  };
+  const activeFollowUps = userFollowUps.filter((q) =>
+    q.targetAgent !== "system" && q.reanalyzeStatus !== "deleted" && q.message.trim(),
+  );
+  const round2FollowUps = activeFollowUps.filter((q) =>
+    String(q.appliedRound ?? "") === "2"
+    || (!q.appliedRound && q.reanalyzeStatus !== "pending")
+  );
+  const round3FollowUps = activeFollowUps.filter((q) => String(q.appliedRound ?? "") === "3");
+  // Phase 10.21 — staged reveal: 부모가 계산한 visibleCount 만큼만 표시.
+  // 재검토 세션에서는 이전 최종 판정관의 긴 결론은 타임라인에서 숨기고, 최신 최종 판단만 Round 3에 표시한다.
+  const rawVisibleMessages = messages.slice(0, visibleCount);
+  const judgeIndexes = rawVisibleMessages
+    .map((m, idx) => (resolveAgentKey(m.agentId, m.agentName, m.type) === "judge" && m.type === "recommendation") ? idx : -1)
+    .filter((idx) => idx >= 0);
+  const firstJudgeIndex = judgeIndexes.length > 0 ? judgeIndexes[0] : -1;
+  const lastJudgeIndex = judgeIndexes.length > 0 ? judgeIndexes[judgeIndexes.length - 1] : -1;
+  const visibleMessageItems = (activeFollowUps.length > 0 && judgeIndexes.length > 1
+    ? rawVisibleMessages.map((m, idx) => ({ msg: m, originalIdx: idx })).filter(({ msg: m, originalIdx: idx }) => {
+        const isJudge = resolveAgentKey(m.agentId, m.agentName, m.type) === "judge" && m.type === "recommendation";
+        return !isJudge || idx === lastJudgeIndex;
+      })
+    : rawVisibleMessages.map((m, idx) => ({ msg: m, originalIdx: idx })));
+  const visibleMessages = visibleMessageItems.map((item) => item.msg);
+  const systemFollowUps = userFollowUps.filter((q) => q.targetAgent === "system");
+  const items: Item[] = [];
+  let insertedRound2QuestionBlock = false;
+  let insertedRound3QuestionBlock = false;
+  let prevAgentRound = 0;
+  let prevAgentWasJudge = false;
+  visibleMessageItems.forEach(({ msg: m, originalIdx }, i) => {
+    const agKey = resolveAgentKey(m.agentId, m.agentName, m.type);
+    const isSystem = m.agentId === "system" || m.type === "system" || m.type === "error";
+    const isJudge = agKey === "judge";
+    const firstRound2Message = round2FollowUps.length > 0 && !isSystem && Number(m.round) === 2;
+    const firstRound3Message = round3FollowUps.length > 0 && !isSystem && Number(m.round) === 3;
+    const afterInitialJudge = activeFollowUps.length > 0
+      && firstJudgeIndex >= 0
+      && originalIdx > firstJudgeIndex
+      && !isSystem
+      && !isJudge;
+    const roundReset = !isSystem && i > 0 && (firstRound2Message || firstRound3Message || afterInitialJudge || m.round < prevAgentRound || (prevAgentWasJudge && !isJudge));
+    if (roundReset && firstRound2Message && !insertedRound2QuestionBlock) {
+      items.push({ kind: "userGroup", questions: round2FollowUps, idx: i, label: "사용자 추가 질문 1차" });
+      insertedRound2QuestionBlock = true;
+    }
+    if (roundReset && firstRound3Message && !insertedRound3QuestionBlock) {
+      items.push({ kind: "userGroup", questions: round3FollowUps, idx: i, label: "사용자 추가 질문 2차" });
+      insertedRound3QuestionBlock = true;
+    }
+    items.push({ kind: "agent", msg: m, idx: i });
+    if (!isSystem) {
+      prevAgentRound = m.round;
+      prevAgentWasJudge = isJudge;
+    }
   });
+  if (!insertedRound2QuestionBlock && round2FollowUps.length > 0) {
+    const hasInProgress = round2FollowUps.some((q) =>
+      q.reanalyzeStatus === "in-progress"
+      || q.reanalyzeStatus === "completed"
+      || q.reanalyzeStatus === "reflected"
+      || q.reanalyzeStatus === "partial"
+      || q.reanalyzeStatus === "failed"
+    );
+    if (hasInProgress || visibleMessages.length === 0) {
+      items.push({ kind: "userGroup", questions: round2FollowUps, idx: visibleMessages.length, label: "사용자 추가 질문 1차" });
+      insertedRound2QuestionBlock = true;
+    }
+  }
+  if (!insertedRound3QuestionBlock && round3FollowUps.length > 0) {
+    const hasInProgress = round3FollowUps.some((q) =>
+      q.reanalyzeStatus === "in-progress"
+      || q.reanalyzeStatus === "completed"
+      || q.reanalyzeStatus === "reflected"
+      || q.reanalyzeStatus === "partial"
+      || q.reanalyzeStatus === "failed"
+    );
+    if (hasInProgress || visibleMessages.some((m) => Number(m.round) >= 2)) {
+      items.push({ kind: "userGroup", questions: round3FollowUps, idx: visibleMessages.length, label: "사용자 추가 질문 2차" });
+      insertedRound3QuestionBlock = true;
+    }
+  }
+  systemFollowUps.forEach((q, i) => items.push({ kind: "user", q, idx: visibleMessages.length + i }));
 
-  let lastRound = -1;
-  let lastAgKey: string | null = null; // Phase 10.75 — judge 진입 boundary 감지용
   // Phase 10.27 — 재검토 시점 추적. system 메시지 등장 후의 라운드는 "재검토 · 라운드 N" 로 표시.
   let inReanalyzeSegment = false;
+  let lastStage: TimelineStage | null = null;
   const agentLabel = (k?: AgentKey) => (k ? (agentMap[k]?.name ?? "") : "");
 
   return (
@@ -1939,7 +2406,7 @@ function LiveDebateTimeline({
             role="status"
             className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800"
           >
-            🔁 이번 재검토에는 사용자 추가 질문 {reanalyzeBadge.count}건이 반영되었습니다 ·{" "}
+            이번 추가 검토에는 사용자 추가 질문 {reanalyzeBadge.count}건이 반영되었습니다 ·{" "}
             {new Date(reanalyzeBadge.at).toLocaleTimeString("ko-KR")}
           </div>
         )}
@@ -1947,26 +2414,55 @@ function LiveDebateTimeline({
         {attachmentsSummary && (
           <div className="rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-[12px] text-sky-900">
             📎 첨부자료 {attachmentsSummary.total}건을 함께 검토합니다 — 본문 반영 {attachmentsSummary.withBody}건, 메타데이터만 {attachmentsSummary.metaOnly}건
+            {attachmentsSummary.partial > 0 && ` · 일부 반영 ${attachmentsSummary.partial}건`}
+            {attachmentsSummary.limited > 0 && ` · 본문 확인 제한 ${attachmentsSummary.limited}건`}
             {attachmentsSummary.masked > 0 && ` · 민감정보 자동 마스킹 ${attachmentsSummary.masked}건`}
             <span className="ml-1 text-[10.5px] text-slate-600">
-              (PDF/DOCX 본문 일부도 추출해 검토에 반영합니다 — 본문 분석이 어려운 항목은 파일명·유형만 참고)
+              (PDF/DOCX 본문도 가능한 범위에서 추출해 반영하며, 이미지 중심 파일은 제한될 수 있습니다)
             </span>
           </div>
         )}
 
         {items.map((item, i) => {
+          if (item.kind === "userGroup") {
+            inReanalyzeSegment = true;
+            lastStage = "intervention";
+            return (
+              <div key={`ug-${i}`} className="space-y-2 pt-2 animate-in fade-in slide-in-from-bottom-2 duration-400">
+                <div className="flex items-center gap-2">
+                  <div className="h-px flex-1 bg-emerald-200" />
+                  <span className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-[11.5px] font-semibold text-emerald-800">
+                    {item.label || stageLabel("intervention")}
+                  </span>
+                  <div className="h-px flex-1 bg-emerald-200" />
+                </div>
+                <div className="ml-auto max-w-[86%] rounded-2xl rounded-tr-sm bg-[#1E3A8A] px-4 py-3 text-sm text-white shadow-sm">
+                  <div className="mb-1 text-[10.5px] opacity-80">
+                    다음 라운드에 반영합니다 · {item.questions.length}건
+                  </div>
+                  <ol className="list-decimal space-y-1 pl-4">
+                    {item.questions.map((q, qi) => (
+                      <li key={`${q.createdAt || qi}-${q.message}`} className="break-keep whitespace-pre-wrap">
+                        <span className="opacity-80">[{targetAgentLabel(q.targetAgent)}] </span>
+                        {q.message}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            );
+          }
           if (item.kind === "user") {
             // Phase 10.22/10.45 — system 메시지는 시각적으로 명확한 divider 로 표시
             if (item.q.targetAgent === "system") {
               const msg = item.q.message || "";
               // 재검토 시작 / 재검토 완료 / 재검토 실패 / 부분 완료 분기
-              const isStart = /시작|REANALYZING|재검토를 시작/.test(msg);
+              const isStart = /시작|REANALYZING|다음 라운드|재검토를 시작/.test(msg);
               const isFail = /실패|FAILED|문제가 발생/.test(msg);
               const isPartial = /일부|부분|partial/i.test(msg);
               const isDone = /완료|COMPLETED|반영되었습니다/.test(msg) && !isPartial;
               if (isStart) {
                 inReanalyzeSegment = true;
-                lastRound = -1;
               }
               const tone = isFail
                 ? { line: "bg-red-300", chip: "border-red-300 bg-red-50 text-red-800", icon: "⚠" }
@@ -2016,8 +2512,8 @@ function LiveDebateTimeline({
             const isFail = msg.type === "error" || /실패|FAILED|문제가 발생|연결에 실패/.test(text);
             const isPartial = /일부|부분|partial/i.test(text);
             const isDone = /완료|COMPLETED|반영되었습니다/.test(text) && !isPartial && !isFail;
-            const isStart = /시작|REANALYZING|재검토를 시작/.test(text);
-            if (isStart) { inReanalyzeSegment = true; lastRound = -1; }
+            const isStart = /시작|REANALYZING|다음 라운드|재검토를 시작/.test(text);
+            if (isStart) { inReanalyzeSegment = true; }
             const tone = isFail
               ? { line: "bg-red-300", chip: "border-red-300 bg-red-50 text-red-800", icon: "⚠" }
               : isPartial
@@ -2036,44 +2532,42 @@ function LiveDebateTimeline({
               </div>
             );
           }
-          const agKey = (msg.agentId === "ethics" || msg.agentId === "judge") ? "judge" : (msg.agentId as AgentKey);
+          const agKey = resolveAgentKey(msg.agentId, msg.agentName, msg.type);
           const agent = agentMap[agKey] ?? agentMap["legal"];
           const Icon = agent.icon;
           const isJudge = agKey === "judge";
-          // Phase 10.75 — judge 메시지는 round 가 같아도 별도 "최종 종합 판단" 헤더로 강제 표시
-          //   → 사용자에게 "이제 결론 단계" 라는 시각적 boundary 제공.
-          const prevWasJudge = lastAgKey === "judge";
-          const showRoundHeader = msg.round !== lastRound || (isJudge && !prevWasJudge);
-          lastRound = msg.round;
-          lastAgKey = agKey;
+          const roundNo = Number(msg.round || 0);
+          const stage: TimelineStage = roundNo === 1
+            ? "initial"
+            : roundNo === 2
+              ? "recheck"
+              : roundNo === 3
+                ? "final"
+                : isJudge
+                  ? "final"
+                  : inReanalyzeSegment
+                    ? "recheck"
+                    : "general";
+          const showRoundHeader = stage !== lastStage;
+          lastStage = stage;
 
           return (
             <div key={`a-${i}`} className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-400">
               {showRoundHeader && (
                 <div className="flex items-center gap-2 pt-1">
-                  <div className={`h-px flex-1 ${inReanalyzeSegment ? "bg-emerald-200" : "bg-slate-200"}`} />
+                  <div className={`h-px flex-1 ${stage === "recheck" ? "bg-emerald-200" : "bg-slate-200"}`} />
                   <span className={`rounded-full border px-2 py-0.5 text-[10px] ${
-                    inReanalyzeSegment
+                    stage === "recheck"
                       ? "border-emerald-300 bg-emerald-50 text-emerald-700"
                       : "border-slate-200 bg-slate-50 text-slate-600"
                   }`}>
-                    {/* Phase 10.75 — Round 의미 명시: Round 1=초기 검토, Round 2=사용자 질문 반영, Round 3+=후속 보강.
-                        재검토 segment 는 emerald "사용자 질문 반영 검토" 톤. JUDGE 는 항상 "최종 종합 판단". */}
-                    {(() => {
-                      if (isJudge) return inReanalyzeSegment ? "최종 종합 판단 · 사용자 질문 반영" : "최종 종합 판단";
-                      const baseLabel =
-                        msg.round === 1 ? `Round ${msg.round} · 초기 검토` :
-                        msg.round === 2 ? `Round ${msg.round} · 쟁점 조율` :
-                        msg.round === 3 ? `Round ${msg.round} · 최종 입장 정리` :
-                        `Round ${msg.round}`;
-                      return inReanalyzeSegment ? `${baseLabel} · 사용자 질문 반영` : baseLabel;
-                    })()}
+                    {stageLabel(stage)}
                   </span>
-                  <div className={`h-px flex-1 ${inReanalyzeSegment ? "bg-emerald-200" : "bg-slate-200"}`} />
+                  <div className={`h-px flex-1 ${stage === "recheck" ? "bg-emerald-200" : "bg-slate-200"}`} />
                 </div>
               )}
               <div className="flex justify-start">
-                <div className={`max-w-[88%] rounded-2xl rounded-tl-sm border px-3 py-2 ${agent.bg} ${agent.border} shadow-sm`}>
+                <div className={`max-w-[78%] rounded-2xl rounded-tl-sm border px-3 py-2 ${agent.bg} ${agent.border} shadow-sm`}>
                   <div className={`text-xs font-medium flex flex-wrap items-center gap-1.5 ${agent.color}`}>
                     <Icon className="w-3.5 h-3.5" />
                     <span>{msg.agentName || agent.name}</span>
@@ -2093,10 +2587,13 @@ function LiveDebateTimeline({
                         <Badge variant="outline" className="text-[9px] py-0">{tLabel}</Badge>
                       ) : null;
                     })()}
+                    <Badge variant="outline" className="text-[9px] py-0">
+                      {msg.type === "error" ? "오류 안내" : "완료"}
+                    </Badge>
                     <span className="ml-auto text-[10px] text-slate-400">#{i + 1}</span>
                   </div>
-                  <div className="mt-1.5 text-sm text-slate-800">
-                    {isJudge ? renderJudgeContent(msg.content) : renderAgentContent(msg.content)}
+                  <div className="mt-1.5">
+                    <BubbleContent content={msg.content} isJudge={isJudge} />
                   </div>
                 </div>
               </div>
@@ -2175,4 +2672,3 @@ function StreamStatusBadge({
     </div>
   );
 }
-

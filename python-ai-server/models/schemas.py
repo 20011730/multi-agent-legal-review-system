@@ -26,6 +26,8 @@ class AnalyzeRequest(BaseModel):
     startupExtras: Optional[dict[str, Any]] = None
     attachments: Optional[list[dict[str, Any]]] = Field(default=None)
     followUpQuestions: Optional[list[dict[str, Any]]] = Field(default=None)
+    analysisMode: Optional[str] = None
+    priorMessages: Optional[list[dict[str, Any]]] = Field(default=None)
 
     # pydantic v2: 알 수 없는 필드 무시 (관용 모드)
     model_config = {"extra": "ignore"}
@@ -72,7 +74,7 @@ class FinalDecision(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     messages: list[AgentMessage]
-    finalDecision: FinalDecision
+    finalDecision: Optional[FinalDecision] = None
     evidences: list[EvidenceItem] = []
     # ── 분석 출처 표시 (fallback 구분용, optional) ──
     # "LANGGRAPH_OLLAMA": 정상 LLM 토론 결과
@@ -84,3 +86,28 @@ class AnalyzeResponse(BaseModel):
     # priorityKeywords / selectedParagraphCount / originalLength / extractionStatus / fileType
     # 등이 포함되며, bodyBase64 와 bodyText 는 응답에 포함하지 않음 (보안/용량).
     enrichedAttachments: list[dict[str, Any]] | None = None
+
+
+class AssistantRequest(BaseModel):
+    sessionId: int
+    message: str
+    status: Optional[str] = None
+    companyName: Optional[str] = None
+    industry: Optional[str] = None
+    reviewType: Optional[str] = None
+    situation: Optional[str] = None
+    content: Optional[str] = None
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    finalDecision: Optional[dict[str, Any]] = None
+    evidences: list[dict[str, Any]] = Field(default_factory=list)
+    followUpQuestions: list[dict[str, Any]] = Field(default_factory=list)
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
+
+    model_config = {"extra": "ignore"}
+
+
+class AssistantResponse(BaseModel):
+    sessionId: int
+    role: str = "assistant"
+    message: str
+    createdAt: str

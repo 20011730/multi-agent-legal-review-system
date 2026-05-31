@@ -23,61 +23,114 @@ import {
   Loader2,
   Shield,
   Gavel,
+  MessageCircle,
+  FolderOpen,
 } from "lucide-react";
 import { EvidenceCardList } from "../components/EvidenceCard";
 import { normalizeEvidences } from "../utils/normalizeEvidence";
 
 /* ── 메시지 렌더링 유틸 (Result.tsx와 동일한 로직) ── */
-function renderAgentContent(content: string) {
-  return content.split("\n").map((line, i) => {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("## ")) {
-      return <h4 key={i} className="font-semibold text-slate-800 mt-3 mb-1 text-sm">{trimmed.replace(/^##\s*/, "")}</h4>;
+function sanitizeAgentContent(content: string): string {
+  if (!content) return content;
+  const errorPatterns = [
+    /Ollama\s+HTTP\s+\d+[^\n]*/gi,
+    /HTTP\s+(4\d\d|5\d\d)[^\n]*/g,
+    /Connection\s+refused[^\n]*/gi,
+    /Connect(?:ion)?\s+timed?\s*out[^\n]*/gi,
+    /설정\/요청\s*오류[^\n]*/g,
+    /SocketTimeoutException[^\n]*/g,
+    /ResourceAccessException[^\n]*/g,
+    /RuntimeException[^\n]*/g,
+    /stack trace[^\n]*/gi,
+    /raw exception[^\n]*/gi,
+    /catastrophic[^\n]*/gi,
+    /fallback[^\n]*/gi,
+    /API payload[^\n]*/gi,
+    /CASE_SEARCH_MODE[^\n]*/g,
+    /dataSource[^\n]*/g,
+    /vector[^\n]*/gi,
+    /similarity[^\n]*/gi,
+    /distance[^\n]*/gi,
+    /\bscore\s*[:=]?\s*[0-9.]+/gi,
+    /판정\s*생성\s*실패[^\n]*/g,
+    /AI\s*판정\s*(원문|결과)[^\n]*/g,
+    /기본\s*판정[^\n]*/g,
+    /파싱(?:에)?\s*실패[^\n]*/g,
+  ];
+  let sanitized = content;
+  let replaced = false;
+  for (const pat of errorPatterns) {
+    if (pat.test(sanitized)) {
+      sanitized = sanitized.replace(pat, "");
+      replaced = true;
     }
-    if (trimmed === "") return <div key={i} className="h-2" />;
-    return <p key={i} className="text-sm text-slate-700 leading-relaxed">{line}</p>;
-  });
+  }
+  if (replaced) {
+    sanitized = "일부 AI 응답을 불러오지 못했습니다. 다시 시도하거나 관리자에게 문의해 주세요.";
+  }
+  return sanitized;
+}
+
+function cleanMarkdownForBubble(content: string): string {
+  const safe = sanitizeAgentContent(content || "");
+  return safe
+    .replace(/```[\s\S]*?```/g, "")
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (/^\|.*\|$/.test(trimmed)) return false;
+      if (/^[-:| ]{3,}$/.test(trimmed)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/\[(?:라운드|Round)\s*\d+[^\]]*\]/gi, "")
+    .replace(/\bCSO\s*입장\s*:\s*/gi, "")
+    .replace(/최종\s*입장\s*정리/gi, "")
+    .replace(/실제\s*수정\s*표현\s*제시\s*\+?\s*합의\s*정리/gi, "")
+    .replace(/\bVerdict\s*:\s*\w+/gi, "")
+    .replace(/\b(MEDIUM|HIGH|LOW)\b/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function compactBubbleText(content: string, isJudge = false): { preview: string; detail: string; collapsed: boolean } {
+  const cleaned = cleanMarkdownForBubble(content);
+  if (!cleaned) return { preview: "일부 AI 응답을 불러오지 못했습니다. 다시 시도하거나 관리자에게 문의해 주세요.", detail: "", collapsed: false };
+  const parts = cleaned
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?。！？다요니다까])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const maxChars = isJudge ? 180 : 260;
+  const seed = parts.slice(0, isJudge ? 2 : 3).join(" ") || cleaned;
+  const preview = seed.length > maxChars ? seed.slice(0, maxChars).trim() + "..." : seed;
+  return { preview, detail: cleaned, collapsed: cleaned.length > preview.length + 20 };
+}
+
+function renderAgentContent(content: string) {
+  const { preview, detail, collapsed } = compactBubbleText(content);
+  return (
+    <div className="text-sm leading-relaxed text-slate-700">
+      <p className="whitespace-pre-wrap break-keep">{preview}</p>
+      {collapsed && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-[11px] font-medium text-[#1E3A8A] hover:underline">자세히 보기</summary>
+          <p className="mt-1 whitespace-pre-wrap break-keep text-[12.5px] leading-relaxed text-slate-600">{detail}</p>
+        </details>
+      )}
+    </div>
+  );
 }
 
 function renderJudgeContent(content: string) {
-  if (content.includes("## ")) {
-    return (
-      <div className="space-y-1">
-        {content.split("\n").map((line, i) => {
-          const trimmed = line.trim();
-          if (trimmed.startsWith("## "))
-            return <h4 key={i} className="font-semibold text-violet-800 mt-2 mb-1 text-sm">{trimmed.replace(/^##\s*/, "")}</h4>;
-          if (trimmed === "") return <div key={i} className="h-1" />;
-          return <p key={i} className="text-sm text-slate-700 leading-relaxed">{line}</p>;
-        })}
-      </div>
-    );
-  }
-  try {
-    let json = content.trim();
-    if (json.includes("```json")) {
-      json = json.substring(json.indexOf("```json") + 7, json.indexOf("```", json.indexOf("```json") + 7)).trim();
-    }
-    if (json.startsWith("{")) {
-      const parsed = JSON.parse(json) as Record<string, unknown>;
-      const summary = typeof parsed.summary === "string" ? parsed.summary : "";
-      const recommendation = typeof parsed.recommendation === "string" ? parsed.recommendation : "";
-      const revisedContent = typeof parsed.revisedContent === "string" ? parsed.revisedContent : "";
-      return (
-        <div className="space-y-2 text-sm text-slate-700">
-          {summary && <p className="leading-relaxed">📋 {summary}</p>}
-          {recommendation && <p className="leading-relaxed mt-1">💡 {recommendation}</p>}
-          {revisedContent && (
-            <div className="mt-2 p-3 bg-violet-50 rounded-lg border border-violet-200">
-              <p className="text-xs font-semibold text-violet-700 mb-1">수정 문안 제안</p>
-              <p className="text-violet-800">{revisedContent}</p>
-            </div>
-          )}
-        </div>
-      );
-    }
-  } catch { /* fallback */ }
-  return <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{content}</p>;
+  return renderAgentContent(content);
 }
 
 interface AgentMessage {
@@ -115,6 +168,29 @@ interface EvidenceItem {
   relevanceReason?: string;
 }
 
+interface FollowUpQuestion {
+  targetAgent?: string;
+  message?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  reanalyzeStatus?: string;
+  appliedRound?: number | string;
+}
+
+interface AttachmentMeta {
+  name?: string;
+  mimeType?: string;
+  fileType?: string;
+  size?: number;
+  extractionStatus?: string;
+  bodyTruncated?: boolean;
+  characterCount?: number;
+  originalLength?: number;
+  hasBodyText?: boolean;
+  priorityKeywords?: string[];
+  selectedParagraphCount?: number;
+}
+
 interface ReviewDetail {
   sessionId: number;
   companyName: string;
@@ -128,7 +204,14 @@ interface ReviewDetail {
   messages: AgentMessage[];
   finalDecision: FinalDecision | null;
   evidences?: EvidenceItem[];
+  followUpQuestions?: FollowUpQuestion[];
+  attachments?: AttachmentMeta[];
+  assistantMessageCount?: number;
 }
+
+type TimelineItem =
+  | { kind: "messages"; key: string; label: string; messages: AgentMessage[] }
+  | { kind: "questions"; key: string; label: string; questions: FollowUpQuestion[] };
 
 const reviewTypeLabels: Record<string, string> = {
   marketing: "마케팅·광고 문구",
@@ -140,11 +223,20 @@ const reviewTypeLabels: Record<string, string> = {
 };
 
 const agentConfig: Record<string, { icon: typeof Shield; color: string; bg: string }> = {
+  business: { icon: Shield, color: "text-amber-700",  bg: "bg-amber-50 border-amber-200" },
   legal:  { icon: Scale,  color: "text-blue-700",   bg: "bg-blue-50 border-blue-200" },
-  risk:   { icon: Shield, color: "text-amber-700",  bg: "bg-amber-50 border-amber-200" },
+  risk:   { icon: Shield, color: "text-rose-700",   bg: "bg-rose-50 border-rose-200" },
   ethics: { icon: Gavel,  color: "text-violet-700", bg: "bg-violet-50 border-violet-200" },
   judge:  { icon: Gavel,  color: "text-violet-700", bg: "bg-violet-50 border-violet-200" },
 };
+
+function resolveAgentId(agentId?: string, agentName?: string, type?: string): string {
+  if ((agentId === "judge" || agentId === "ethics") && type === "recommendation") return "judge";
+  if (agentId === "risk" && /비즈니스|사업/.test(agentName || "")) return "business";
+  if (agentId === "business" || agentId === "risk" || agentId === "legal" || agentId === "judge") return agentId;
+  if (agentId === "ethics") return "judge";
+  return "legal";
+}
 
 const verdictConfig: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
   approved: { label: "승인", color: "text-green-700", icon: CheckCircle2 },
@@ -157,6 +249,140 @@ const riskLevelIcon: Record<string, typeof TrendingUp> = {
   MEDIUM: Minus,
   LOW: TrendingDown,
 };
+
+function messageTypeLabel(type?: string): string {
+  switch ((type || "").toLowerCase()) {
+    case "analysis":
+      return "초기 검토";
+    case "concern":
+      return "보완 의견";
+    case "recommendation":
+      return "최종 판정";
+    case "system":
+      return "시스템 안내";
+    case "error":
+      return "응답 지연";
+    default:
+      return type || "";
+  }
+}
+
+function stanceLabel(stance?: string): string {
+  switch ((stance || "").toUpperCase()) {
+    case "PRO":
+      return "긍정";
+    case "CON":
+      return "우려";
+    case "NEUTRAL":
+      return "중립";
+    default:
+      return stance || "";
+  }
+}
+
+function safeDisplayText(text?: string): string {
+  const t = (text || "").trim();
+  if (!t) return "";
+  if (/파싱\s*오류|파싱(?:에)?\s*실패|판정\s*결과\s*파싱|판정\s*생성\s*실패|AI\s*판정\s*(원문|결과)|기본\s*판정/.test(t)) {
+    return "일부 분석 정보를 불러오지 못했습니다. 잠시 후 다시 시도하거나 전문가 검토와 함께 확인해 주세요.";
+  }
+  return t.replace(/폴백\s*응답/g, "보조 검토 결과");
+}
+
+function statusDisplay(status: string): { label: string; tone: string; description: string } {
+  switch (status) {
+    case "COMPLETED":
+      return { label: "최종 판정 완료", tone: "bg-emerald-100 text-emerald-700", description: "최종 판정과 근거, 상담 기록을 확인할 수 있습니다." };
+    case "WAITING_FOR_USER_INPUT":
+    case "WAITING_FOR_ROUND2_INPUT":
+      return { label: "Round 1 완료 · 사용자 입력 대기", tone: "bg-indigo-100 text-indigo-700", description: "Round 1 토론까지 저장되었습니다. 실시간 결과 화면에서 다음 라운드 질문을 입력할 수 있습니다." };
+    case "WAITING_FOR_FINAL_INPUT":
+      return { label: "Round 2 완료 · 최종 라운드 입력 대기", tone: "bg-violet-100 text-violet-700", description: "최종 라운드 전 추가 질문을 입력할 수 있는 상태입니다." };
+    case "ANALYZING":
+    case "REANALYZING":
+      return { label: status === "REANALYZING" ? "추가 재검토 진행 중" : "검토 진행 중", tone: "bg-blue-100 text-blue-700", description: "현재까지 생성된 토론 로그를 확인할 수 있습니다." };
+    case "FAILED":
+      return { label: "검토 중단", tone: "bg-red-100 text-red-700", description: "분석이 정상 완료되지 않았습니다. 저장된 내용만 표시합니다." };
+    default:
+      return { label: "상태 확인 중", tone: "bg-slate-100 text-slate-700", description: "저장된 세션 상태를 확인하고 있습니다." };
+  }
+}
+
+function activeFollowUps(questions?: FollowUpQuestion[]) {
+  return (questions || []).filter((q) => q.message?.trim() && q.reanalyzeStatus !== "deleted");
+}
+
+function followUpsFor(questions: FollowUpQuestion[], appliedRound: string) {
+  return questions.filter((q) => String(q.appliedRound ?? "") === appliedRound);
+}
+
+function attachmentStatusInfo(att: AttachmentMeta): { label: string; tone: string; detail: string } {
+  const status = String(att.extractionStatus || "").toLowerCase();
+  const count = typeof att.characterCount === "number" && att.characterCount > 0
+    ? `약 ${att.characterCount.toLocaleString("ko-KR")}자`
+    : "";
+  if (status === "ok" || status === "extracted") {
+    return { label: "본문 추출 완료", tone: "bg-emerald-50 text-emerald-700 border-emerald-200", detail: count || "본문이 검토 context에 반영되었습니다." };
+  }
+  if (status === "partial" || att.bodyTruncated) {
+    return { label: "본문 일부 반영", tone: "bg-amber-50 text-amber-700 border-amber-200", detail: count || "긴 문서 중 핵심 부분만 반영되었습니다." };
+  }
+  if (status === "pending-server-extract") {
+    return { label: "본문 추출 대기", tone: "bg-sky-50 text-sky-700 border-sky-200", detail: "분석 중 서버에서 본문 추출을 시도합니다." };
+  }
+  if (status === "failed-image-or-empty") {
+    return { label: "본문 확인 제한", tone: "bg-rose-50 text-rose-700 border-rose-200", detail: "이미지 중심 PDF이거나 읽을 수 있는 텍스트가 부족했습니다." };
+  }
+  if (status === "failed" || status === "error") {
+    return { label: "본문을 충분히 읽지 못했습니다", tone: "bg-rose-50 text-rose-700 border-rose-200", detail: "파일 상태를 확인한 뒤 텍스트가 포함된 문서로 다시 업로드해 주세요." };
+  }
+  return { label: "메타데이터만 반영", tone: "bg-slate-50 text-slate-600 border-slate-200", detail: "파일명과 형식만 참고되었으며, 본문 내용은 별도 확인이 필요합니다." };
+}
+
+function attachmentTypeLabel(att: AttachmentMeta): string {
+  const raw = `${att.fileType || ""} ${att.mimeType || ""} ${att.name || ""}`.toLowerCase();
+  if (raw.includes("pdf")) return "PDF";
+  if (raw.includes("docx") || raw.includes("word")) return "DOCX";
+  if (raw.includes("text") || raw.endsWith(".txt")) return "TEXT";
+  return "첨부자료";
+}
+
+function collapseRepeatedText(text?: string): string {
+  const raw = (text || "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return "";
+
+  const paragraphs = raw
+    .split(/\n{2,}|(?=상황 설명\s*)/)
+    .map((part) => part.replace(/^상황 설명\s*/g, "").trim())
+    .filter(Boolean);
+
+  if (paragraphs.length > 1) {
+    const seen = new Set<string>();
+    return paragraphs
+      .filter((part) => {
+        const key = part.replace(/\s+/g, " ");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .join("\n\n");
+  }
+
+  const cleaned = raw.replace(/상황 설명\s*/g, "").trim();
+  const sentences = cleaned.match(/[^.!?。！？]+[.!?。！？]?/g)?.map((part) => part.trim()).filter(Boolean) ?? [];
+
+  if (sentences.length <= 1) return cleaned;
+
+  const seen = new Set<string>();
+  const unique = sentences.filter((part) => {
+      const key = part.replace(/[.!?。！？]+$/g, "").replace(/\s+/g, " ");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  return unique.length === sentences.length ? cleaned : unique.join(" ");
+}
 
 export function ReviewDetailPage() {
   const navigate = useNavigate();
@@ -213,13 +439,40 @@ export function ReviewDetailPage() {
   const fd = detail.finalDecision;
   const vc = fd ? verdictConfig[fd.verdict] : null;
   const VerdictIcon = vc?.icon;
+  const displaySituation = collapseRepeatedText(detail.situation);
+  const displayContent = collapseRepeatedText(detail.content);
+  const showContent = displayContent && displayContent.replace(/\s+/g, " ") !== displaySituation.replace(/\s+/g, " ");
 
-  // 라운드별 그룹화
-  const rounds: Record<number, AgentMessage[]> = {};
-  detail.messages.forEach((m) => {
-    if (!rounds[m.round]) rounds[m.round] = [];
-    rounds[m.round].push(m);
+  const followUps = activeFollowUps(detail.followUpQuestions);
+  const round2Questions = followUpsFor(followUps, "2");
+  const round3Questions = followUpsFor(followUps, "3");
+  const reanalysisQuestions = followUpsFor(followUps, "reanalysis");
+  const messagesByRound = (round: number) => detail.messages.filter((msg) => Number(msg.round) === round);
+  const reanalysisMessages = detail.messages.filter((msg) => Number(msg.round) > 3);
+  const attachments = Array.isArray(detail.attachments) ? detail.attachments : [];
+  const reflectedAttachments = attachments.filter((att) => {
+    const status = String(att.extractionStatus || "").toLowerCase();
+    return Boolean(att.hasBodyText || status === "ok" || status === "extracted" || status === "partial");
   });
+  const limitedAttachments = attachments.filter((att) => {
+    const status = String(att.extractionStatus || "").toLowerCase();
+    return status === "failed" || status === "error" || status === "failed-image-or-empty" || status === "skipped-unsupported";
+  });
+  const timelineItems: TimelineItem[] = [];
+  const pushMessages = (key: string, label: string, messages: AgentMessage[]) => {
+    if (messages.length > 0) timelineItems.push({ kind: "messages", key, label, messages });
+  };
+  const pushQuestions = (key: string, label: string, questions: FollowUpQuestion[]) => {
+    if (questions.length > 0) timelineItems.push({ kind: "questions", key, label, questions });
+  };
+  pushMessages("round1", "Round 1 · 초기 검토", messagesByRound(1));
+  pushQuestions("user-round2", "사용자 추가 질문 1차", round2Questions);
+  pushMessages("round2", "Round 2 · 사용자 질문 반영 토론", messagesByRound(2));
+  pushQuestions("user-round3", "사용자 추가 질문 2차", round3Questions);
+  pushMessages("round3", "Round 3 · 최종 토론 및 판단", messagesByRound(3));
+  pushQuestions("user-reanalysis", "추가 재검토 요청", reanalysisQuestions);
+  pushMessages("reanalysis", "추가 재검토 결과", reanalysisMessages);
+  const statusInfo = statusDisplay(detail.status);
 
   return (
     <div className="min-h-screen bg-[#F2F2F2] text-slate-900 flex flex-col">
@@ -299,16 +552,96 @@ export function ReviewDetailPage() {
             </div>
             <div className="mb-4">
               <p className="text-xs text-slate-500 mb-1">상황 설명</p>
-              <p className="text-sm text-slate-700">{detail.situation}</p>
+              <p className="text-sm text-slate-700 whitespace-pre-wrap">{displaySituation}</p>
             </div>
-            <div>
-              <p className="text-xs text-slate-500 mb-1">검토 원문</p>
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                <p className="text-sm text-slate-800 whitespace-pre-wrap">{detail.content}</p>
+            {showContent && (
+              <div>
+                <p className="text-xs text-slate-500 mb-1">검토 원문</p>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <p className="text-sm text-slate-800 whitespace-pre-wrap">{displayContent}</p>
+                </div>
               </div>
+            )}
+            <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+              <Badge className={statusInfo.tone}>{statusInfo.label}</Badge>
+              {followUps.length > 0 && <Badge variant="outline" className="bg-indigo-50 text-indigo-700">사용자 추가 질문 {followUps.length}건</Badge>}
+              {reanalysisQuestions.length > 0 && <Badge variant="outline" className="bg-amber-50 text-amber-700">추가 재검토 요청 {reanalysisQuestions.length}건</Badge>}
+              {attachments.length > 0 && (
+                <Badge variant="outline" className="bg-sky-50 text-sky-700">
+                  첨부자료 {attachments.length}건 · 본문 반영 {reflectedAttachments.length}건
+                </Badge>
+              )}
+              {(detail.evidences?.length || 0) > 0 && <Badge variant="outline" className="bg-emerald-50 text-emerald-700">근거 {detail.evidences?.length}건</Badge>}
+              {(detail.assistantMessageCount || 0) > 0 && (
+                <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                  <MessageCircle className="mr-1 h-3 w-3" />비서 상담 기록 있음
+                </Badge>
+              )}
+              <p className="basis-full text-xs text-slate-500">{statusInfo.description}</p>
+              {detail.status !== "COMPLETED" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-1 rounded-full"
+                  onClick={() => {
+                    sessionStorage.setItem("sessionId", String(detail.sessionId));
+                    sessionStorage.setItem("currentSessionId", String(detail.sessionId));
+                    navigate("/result");
+                  }}
+                >
+                  실시간 검토 화면으로 이동
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
+
+        {attachments.length > 0 && (
+          <Card className="border-slate-200 bg-white shadow-sm rounded-3xl mb-6 overflow-hidden">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FolderOpen className="w-5 h-5 text-sky-700" />
+                첨부자료 반영 상태
+              </CardTitle>
+              <CardDescription>
+                사용자가 올린 파일의 본문 처리 상태입니다. 법령·판례 근거 카드와는 별도로 표시됩니다.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap gap-2 text-xs">
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-700">본문 반영 {reflectedAttachments.length}건</Badge>
+                {limitedAttachments.length > 0 && (
+                  <Badge variant="outline" className="bg-rose-50 text-rose-700">확인 제한 {limitedAttachments.length}건</Badge>
+                )}
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {attachments.map((att, idx) => {
+                  const status = attachmentStatusInfo(att);
+                  const keywords = Array.isArray(att.priorityKeywords) ? att.priorityKeywords.slice(0, 5) : [];
+                  return (
+                    <div key={`${att.name || "attachment"}-${idx}`} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="bg-white text-slate-700">{attachmentTypeLabel(att)}</Badge>
+                        <Badge variant="outline" className={status.tone}>{status.label}</Badge>
+                      </div>
+                      <p className="break-all text-sm font-medium text-slate-900">{safeDisplayText(att.name || `첨부자료 ${idx + 1}`)}</p>
+                      <p className="mt-1 text-xs text-slate-600">{status.detail}</p>
+                      {keywords.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {keywords.map((keyword) => (
+                            <span key={keyword} className="rounded-full bg-white px-2 py-0.5 text-[11px] text-slate-600">
+                              {safeDisplayText(keyword)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="flex gap-2 mb-6">
           <Button
@@ -337,17 +670,36 @@ export function ReviewDetailPage() {
 
         {activeTab === "debate" && (
           <div className="space-y-6">
-            {Object.entries(rounds).map(([roundNum, msgs]) => (
-              <Card key={roundNum} className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
+            {timelineItems.length === 0 && (
+              <Card className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
+                <CardContent className="py-10 text-center text-sm text-slate-500">
+                  아직 표시할 토론 로그가 없습니다.
+                </CardContent>
+              </Card>
+            )}
+            {timelineItems.map((section) => (
+              <Card key={section.key} className="border-slate-200 bg-white shadow-sm rounded-3xl overflow-hidden">
                 <CardHeader>
                   <CardTitle className="text-lg">
-                    라운드 {roundNum}
+                    {section.label}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {msgs.map((msg, idx) => {
-                    // ethics → judge 호환 처리
-                    const resolvedId = msg.agentId === "ethics" ? "judge" : msg.agentId;
+                  {section.kind === "questions" && section.questions.map((question, idx) => (
+                    <div key={idx} className="ml-auto max-w-[760px] rounded-2xl rounded-br-sm border border-[#1E3A8A]/20 bg-[#1E3A8A]/5 p-4">
+                      <div className="mb-2 flex items-center justify-end gap-2">
+                        <Badge variant="outline" className="border-[#1E3A8A]/30 text-[#1E3A8A]">사용자 추가 질문</Badge>
+                        {question.targetAgent && question.targetAgent !== "all" && (
+                          <Badge variant="outline" className="text-xs">대상: {question.targetAgent}</Badge>
+                        )}
+                      </div>
+                      <p className="whitespace-pre-wrap break-keep text-sm leading-relaxed text-slate-800">
+                        {safeDisplayText(question.message)}
+                      </p>
+                    </div>
+                  ))}
+                  {section.kind === "messages" && section.messages.map((msg, idx) => {
+                    const resolvedId = resolveAgentId(msg.agentId, msg.agentName, msg.type);
                     const ac = agentConfig[resolvedId] || agentConfig.legal;
                     const AgentIcon = ac.icon;
                     const isJudge = resolvedId === "judge";
@@ -358,21 +710,23 @@ export function ReviewDetailPage() {
                           <span className={`font-medium text-sm ${ac.color}`}>
                             {msg.agentName}
                           </span>
-                          {msg.stance && (
+                          {stanceLabel(msg.stance) && (
                             <Badge variant="outline" className="text-xs">
-                              {msg.stance}
+                              {stanceLabel(msg.stance)}
                             </Badge>
                           )}
-                          <Badge variant="outline" className="text-xs">
-                            {msg.type}
-                          </Badge>
+                          {messageTypeLabel(msg.type) && (
+                            <Badge variant="outline" className="text-xs">
+                              {messageTypeLabel(msg.type)}
+                            </Badge>
+                          )}
                         </div>
                         <div className="mt-1">
                           {isJudge ? renderJudgeContent(msg.content) : renderAgentContent(msg.content)}
                         </div>
                         {msg.evidenceSummary && (
                           <p className="text-xs text-slate-500 mt-2">
-                            근거: {msg.evidenceSummary}
+                            근거: {safeDisplayText(msg.evidenceSummary)}
                           </p>
                         )}
                       </div>
@@ -443,7 +797,7 @@ export function ReviewDetailPage() {
                   )}
                 </div>
                 {fd.summary
-                  ? <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">{fd.summary}</p>
+                  ? <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">{safeDisplayText(fd.summary)}</p>
                   : <p className="text-sm text-slate-400">요약이 제공되지 않았습니다.</p>}
               </CardContent>
             </Card>
@@ -466,8 +820,8 @@ export function ReviewDetailPage() {
                             "text-green-600"
                           }`} />
                           <div>
-                            <p className="font-medium text-sm text-slate-900">{risk.category}</p>
-                            <p className="text-sm text-slate-600">{risk.description}</p>
+                            <p className="font-medium text-sm text-slate-900">{safeDisplayText(risk.category)}</p>
+                            <p className="text-sm text-slate-600">{safeDisplayText(risk.description)}</p>
                           </div>
                         </div>
                       );
@@ -484,7 +838,7 @@ export function ReviewDetailPage() {
                 </CardHeader>
                 <CardContent>
                   {fd.recommendation && (
-                    <p className="text-slate-700 whitespace-pre-wrap leading-relaxed mb-4">{fd.recommendation}</p>
+                    <p className="text-slate-700 whitespace-pre-wrap leading-relaxed mb-4">{safeDisplayText(fd.recommendation)}</p>
                   )}
                   {fd.revisedContent && (
                     <>

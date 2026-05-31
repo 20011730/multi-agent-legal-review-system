@@ -63,6 +63,12 @@ public class AiAnalysisClient {
         body.put("situation", request.getSituation());
         body.put("content", request.getContent());
         body.put("participationMode", request.getParticipationMode());
+        if (request.getAnalysisMode() != null && !request.getAnalysisMode().isBlank()) {
+            body.put("analysisMode", request.getAnalysisMode());
+        }
+        if (request.getPriorMessages() != null && !request.getPriorMessages().isEmpty()) {
+            body.put("priorMessages", request.getPriorMessages());
+        }
         // 지원사업 컨텍스트가 있으면 구조화된 맵으로 전달 (Python AI 가 구조 활용 가능, 모르면 무시)
         StartupContextDto sc = request.getStartupContext();
         if (sc != null) {
@@ -137,6 +143,30 @@ public class AiAnalysisClient {
                 (List<Map<String, Object>>) response.get("enrichedAttachments");
 
         return new AiAnalysisResponse(messages, finalDecision, evidences, enrichedAttachments);
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> askSessionAssistant(Long sessionId, Map<String, Object> context) {
+        String url = aiBaseUrl + "/assistant";
+        Map<String, Object> body = new java.util.LinkedHashMap<>(context);
+        body.put("sessionId", sessionId);
+
+        try {
+            Map<String, Object> response = restTemplate.postForObject(url, body, Map.class);
+            if (response == null) {
+                return Map.of(
+                        "message", "현재 검토 내용을 설명하는 중 문제가 발생했습니다. 잠시 후 다시 질문해 주세요.",
+                        "createdAt", java.time.Instant.now().toString()
+                );
+            }
+            return response;
+        } catch (Exception ex) {
+            log.warn("[assistant] AI 서버 응답 생성 실패 (sessionId={}): {}", sessionId, ex.getClass().getSimpleName());
+            return Map.of(
+                    "message", "현재 검토 내용을 설명하는 중 문제가 발생했습니다. 잠시 후 다시 질문해 주세요.",
+                    "createdAt", java.time.Instant.now().toString()
+            );
+        }
     }
 
     /**

@@ -166,7 +166,7 @@ def _is_docx(att: dict[str, Any]) -> bool:
 
 
 def _extract_pdf_text(data: bytes) -> str:
-    """pypdf 가 없거나 파일이 손상돼 파싱 실패하면 빈 문자열 반환 (호출 측에서 failed 처리)."""
+    """PDF 텍스트 레이어를 읽는다. 실패하거나 텍스트가 거의 없으면 빈 문자열을 반환한다."""
     try:
         from pypdf import PdfReader
     except Exception as e:
@@ -189,11 +189,40 @@ def _extract_pdf_text(data: bytes) -> str:
                 break
     except Exception as e:
         logger.warning("[attach-extract] PDF 페이지 순회 실패: %s", type(e).__name__)
-    return "\n\n".join(parts).strip()
+    text = "\n\n".join(parts).strip()
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def _iter_docx_blocks(doc: Any) -> list[str]:
+    parts: list[str] = []
+    try:
+        from docx.table import Table  # type: ignore
+        from docx.text.paragraph import Paragraph  # type: ignore
+    except Exception:
+        return parts
+
+    for child in doc.element.body.iterchildren():
+        tag = str(child.tag)
+        if tag.endswith("}p"):
+            text = Paragraph(child, doc).text.strip()
+            if text:
+                parts.append(text)
+        elif tag.endswith("}tbl"):
+            table = Table(child, doc)
+            rows: list[str] = []
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells if c.text and c.text.strip()]
+                if cells:
+                    rows.append(" | ".join(cells))
+            if rows:
+                parts.append("\n".join(rows))
+        if sum(len(s) for s in parts) >= RAW_EXTRACT_MAX_CHARS:
+            break
+    return parts
 
 
 def _extract_docx_text(data: bytes) -> str:
-    """python-docx 가 없거나 파싱 실패면 빈 문자열 반환."""
+    """DOCX 문단과 표 텍스트를 가능한 문서 순서대로 읽는다."""
     try:
         from docx import Document  # type: ignore
     except Exception as e:
@@ -204,16 +233,15 @@ def _extract_docx_text(data: bytes) -> str:
     except Exception as e:
         logger.warning("[attach-extract] DOCX 파싱 실패 — 손상/비표준 파일 가능성: %s", type(e).__name__)
         return ""
-    # Phase 10.54 — 더 많은 본문을 읽고 (RAW_EXTRACT_MAX_CHARS) 키워드 기반 선별은 호출 측에서.
     parts: list[str] = []
     try:
-        for p in doc.paragraphs:
-            if p.text:
-                parts.append(p.text)
-            if sum(len(s) for s in parts) >= RAW_EXTRACT_MAX_CHARS:
-                break
-        else:
-            # 표 텍스트 추가 (있는 경우)
+        parts = _iter_docx_blocks(doc)
+        if not parts:
+            for p in doc.paragraphs:
+                if p.text:
+                    parts.append(p.text)
+                if sum(len(s) for s in parts) >= RAW_EXTRACT_MAX_CHARS:
+                    break
             for table in doc.tables:
                 for row in table.rows:
                     cells = [c.text for c in row.cells if c.text]
@@ -225,7 +253,8 @@ def _extract_docx_text(data: bytes) -> str:
                     break
     except Exception as e:
         logger.warning("[attach-extract] DOCX 본문 순회 실패: %s", type(e).__name__)
-    return "\n\n".join(parts).strip()
+    text = "\n\n".join(parts).strip()
+    return re.sub(r"\n{3,}", "\n\n", text)
 
 
 def enrich_attachments_with_extracted_text(
@@ -276,9 +305,10 @@ def enrich_attachments_with_extracted_text(
             out.append(new)
             continue
 
-        if not extracted:
-            new["extractionStatus"] = "failed"
+        if not extracted or len(extracted.strip()) < 30:
+            new["extractionStatus"] = "failed-image-or-empty" if kind == "pdf" else "failed"
             new["fileType"] = kind
+            new["characterCount"] = len(extracted.strip())
             # bodyBase64 는 LLM 컨텍스트에 넘기지 않음 → 제거
             new.pop("bodyBase64", None)
             new.pop("contentBase64", None)

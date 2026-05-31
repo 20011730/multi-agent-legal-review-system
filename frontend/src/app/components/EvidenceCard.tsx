@@ -598,7 +598,7 @@ export function EvidenceCardList({
             <div className="text-sm text-gray-600">
               <p>이 검토 건에 매칭된 법령·판례 근거가 없습니다.</p>
               <p className="mt-1 text-xs text-gray-400">
-                법제처 OPEN API 키가 미설정이거나, 본문에서 추출한 키워드의 검색 결과가 0건인 경우입니다.
+                입력 내용에서 확인 가능한 법령·판례 근거가 충분하지 않은 경우입니다.
               </p>
             </div>
           </div>

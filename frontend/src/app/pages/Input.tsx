@@ -718,19 +718,22 @@ export function InputPage() {
     }
 
     // Phase 10.19 — 첨부 메타데이터 + 본문 추출 결과 동봉
+    const attachmentPayload = extractedAttachments.length > 0
+      ? attachmentsToPayload(extractedAttachments)
+      : attachedFiles.map((file) => ({
+          name: file.name,
+          size: file.size,
+          mimeType: file.type || "application/octet-stream",
+          uploadedAt: new Date().toISOString(),
+          extractionStatus: "skipped-unsupported",
+          bodyTruncated: false,
+          sensitivityFlags: [],
+        }));
     if (extractedAttachments.length > 0) {
-      payloadForSession.attachments = attachmentsToPayload(extractedAttachments);
+      payloadForSession.attachments = attachmentPayload;
     } else if (attachedFiles.length > 0) {
       // 추출이 아직 완료되지 않은 fallback — 최소 메타데이터만
-      payloadForSession.attachments = attachedFiles.map((file) => ({
-        name: file.name,
-        size: file.size,
-        mimeType: file.type || "application/octet-stream",
-        uploadedAt: new Date().toISOString(),
-        extractionStatus: "skipped-unsupported",
-        bodyTruncated: false,
-        sensitivityFlags: [],
-      }));
+      payloadForSession.attachments = attachmentPayload;
     }
 
     sessionStorage.setItem(
@@ -739,11 +742,7 @@ export function InputPage() {
         ...formData,
         scenarioCategory,
         attachedFileNames: attachedFiles.map((file) => file.name),
-        attachments: attachedFiles.map((file) => ({
-          name: file.name,
-          size: file.size,
-          mimeType: file.type || "application/octet-stream",
-        })),
+        attachments: attachmentPayload,
         ...(startupContext ? { startupContext } : {}),
       }),
     );
@@ -760,6 +759,11 @@ export function InputPage() {
       });
       const data = await res.json();
       sessionStorage.setItem("sessionId", String(data.sessionId));
+      sessionStorage.removeItem("recheckRequest");
+      sessionStorage.removeItem("userFollowUps");
+      sessionStorage.removeItem("finalDecision");
+      sessionStorage.removeItem("evidences");
+      sessionStorage.removeItem("verdictResultSource");
     } catch (err) {
       console.error("Session creation failed:", err);
     }
@@ -1310,7 +1314,7 @@ export function InputPage() {
                     <Upload className="w-5 h-5 text-[#1E3A8A]" />
                     관련 문서 업로드
                   </CardTitle>
-                  <CardDescription>계약서(PDF), 공문, 협약서 등 — 현재 데모 단계는 파일명/메타데이터 중심으로 분석에 반영됩니다.</CardDescription>
+                  <CardDescription>계약서(PDF), 공문, 협약서 등 — 가능한 경우 본문을 추출해 검토에 함께 반영합니다.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <label className="block cursor-pointer rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
@@ -1327,9 +1331,8 @@ export function InputPage() {
                       const sizeKb = (file.size / 1024).toFixed(1);
                       const statusLabel = (() => {
                         if (!ex) return "대기 중";
-                        if (ex.extractionStatus === "ok") return ex.bodyTruncated ? "본문 일부 반영" : "본문 반영";
-                        // Phase 10.51 — PDF/DOCX 는 서버에서 본문 추출 → 분석 시작 시 결과 확정
-                        if (ex.extractionStatus === "pending-server-extract") return "본문 분석 가능 (PDF/DOCX)";
+                        if (ex.extractionStatus === "ok") return ex.bodyTruncated ? "본문 일부 반영" : "본문 추출 완료";
+                        if (ex.extractionStatus === "pending-server-extract") return "서버에서 본문 추출 예정";
                         if (ex.extractionStatus === "skipped-unsupported") return "메타데이터만 반영";
                         if (ex.extractionStatus === "skipped-too-large") return "용량 초과 — 메타만";
                         return "추출 실패";
@@ -1386,7 +1389,7 @@ export function InputPage() {
                     <p className="font-medium">⚠ 첨부자료 보안 안내</p>
                     <ul className="ml-4 mt-1 list-disc space-y-0.5">
                       <li>주민등록번호, 계좌번호, API Key, 비밀번호, 영업비밀 원문은 필요한 범위만 가리고 첨부해 주세요.</li>
-                      <li>현재 데모 단계는 파일명·메타데이터·붙여넣은 핵심 내용 중심으로 분석에 반영됩니다. 본문 자동 파싱은 운영 단계 TODO 입니다.</li>
+                      <li>PDF/DOCX는 분석 시작 후 서버에서 본문을 읽고, 읽기 어려운 파일은 제한 사항을 결과에서 안내합니다.</li>
                       <li>업로드 자료는 법률 리스크 진단 맥락 파악에만 사용되도록 설계됩니다. 첨부 전 사내 승인/비식별 처리를 권장합니다.</li>
                     </ul>
                   </div>

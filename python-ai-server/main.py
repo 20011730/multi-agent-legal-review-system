@@ -1,11 +1,12 @@
 import logging
 import os
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from schemas import AnalyzeRequest, AnalyzeResponse
+from schemas import AnalyzeRequest, AnalyzeResponse, AssistantRequest, AssistantResponse
 from analyzer import analyze as rule_based_analyze
 
 # 환경변수 로드 (.env 파일)
@@ -17,6 +18,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # LangGraph 엔진 사용 여부 (환경변수 USE_LANGGRAPH=true 로 활성화)
 USE_LANGGRAPH = os.getenv("USE_LANGGRAPH", "false").lower() == "true"
@@ -126,6 +128,21 @@ def analyze_endpoint(request: AnalyzeRequest):
     except Exception:
         pass
     return response
+
+
+@app.post("/assistant", response_model=AssistantResponse)
+def assistant_endpoint(request: AssistantRequest):
+    from agents.assistant_agent import run_session_assistant
+
+    message = (request.message or "").strip()
+    if not message:
+        return AssistantResponse(
+            sessionId=request.sessionId,
+            role="assistant",
+            message="질문을 입력해 주세요.",
+            createdAt=datetime.now(timezone.utc).isoformat(),
+        )
+    return run_session_assistant(request)
 
 
 def _wrap_fallback(response, error_message: str):

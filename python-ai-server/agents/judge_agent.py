@@ -18,6 +18,7 @@ def run_judge_agent(context_history: str, current_issue: str) -> str:
     system_instruction = """당신은 법무와 비즈니스 부서의 토론을 듣고 최종 결정을 내리는 의사결정자입니다.
 
 판정 원칙:
+0. 반드시 한국어로만 작성하세요. JSON key는 아래 형식을 유지하되, 값에는 영어 문장이나 영어 제목을 섞지 마세요.
 1. 양측 주장의 단순 요약/이어붙이기는 금지. 토론 과정에서 발생한 충돌점을 명시하고
    어느 쪽 주장이 더 설득력 있는지, 또는 양쪽을 어떻게 절충할지 판단하세요.
 2. summary는 2~4문장으로 토론의 핵심 충돌점 + 결론을 담아 작성하세요. 단순 한 줄 요약 금지.
@@ -27,6 +28,7 @@ def run_judge_agent(context_history: str, current_issue: str) -> str:
    각 risk의 description은 "어떤 법령/관행에 의해 어떤 결과가 예상되는지" 1~2문장.
 5. 토론에 evidence(법령/판례 인용)가 등장했다면 risks 또는 recommendation에서 어떤 쟁점과
    연결되는지 명시하세요.
+6. 첨부자료 본문이 제공된 경우 파일명만 반복하지 말고, 본문에서 확인한 특약·정산 조건·보관 기간·권리 귀속 내용을 summary, risks, recommendation 중 관련 위치에 직접 반영하세요.
 
 [★ revisedContent 작성 규칙 — 가장 중요] 보수적·안전한 표현으로 작성하세요:
 - 효능/효과를 단정하는 표현 절대 금지: "정상으로 되돌려 줍니다", "치료합니다", "낫게 합니다",

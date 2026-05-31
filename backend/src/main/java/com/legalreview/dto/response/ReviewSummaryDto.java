@@ -16,14 +16,38 @@ public class ReviewSummaryDto {
     private String createdAt;
     private String verdict;
     private String riskLevel;
+    private String riskSummary;
+    private long messageCount;
+    private long evidenceCount;
+    private long followUpQuestionCount;
+    private long reanalysisQuestionCount;
+    private long assistantMessageCount;
 
     public static ReviewSummaryDto from(ReviewSession session) {
+        return from(session, 0, 0, 0, 0, 0);
+    }
+
+    public static ReviewSummaryDto from(
+            ReviewSession session,
+            long messageCount,
+            long evidenceCount,
+            long followUpQuestionCount,
+            long reanalysisQuestionCount,
+            long assistantMessageCount
+    ) {
         String verdict = null;
         String riskLevel = null;
+        String riskSummary = null;
 
         if (session.getFinalDecision() != null) {
             verdict = session.getFinalDecision().getVerdict();
             riskLevel = session.getFinalDecision().getRiskLevel();
+            if (session.getFinalDecision().getRisks() != null && !session.getFinalDecision().getRisks().isEmpty()) {
+                riskSummary = session.getFinalDecision().getRisks().get(0).getDescription();
+                if (riskSummary != null && riskSummary.length() > 90) {
+                    riskSummary = riskSummary.substring(0, 90) + "...";
+                }
+            }
         }
 
         // situation 요약: 최대 80자
@@ -40,7 +64,13 @@ public class ReviewSummaryDto {
                 session.getStatus(),
                 session.getCreatedAt().toString(),
                 verdict,
-                riskLevel
+                riskLevel,
+                riskSummary,
+                messageCount,
+                evidenceCount,
+                followUpQuestionCount,
+                reanalysisQuestionCount,
+                assistantMessageCount
         );
     }
 }
