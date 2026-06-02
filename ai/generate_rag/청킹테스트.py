@@ -1,6 +1,7 @@
 """
 Law Chunking Inspector  (dry-run, NO embedding, NO Chroma writes)
 =================================================================
+법 조항 크로마 db에 넣기 전에 잘 청킹되는지 확인하는 코드
 Shows exactly how `embed_laws_hierarchical.py` (v3) turns raw_content into chunks,
 so you can eyeball section split (MAIN/부칙), article parsing, and 512-token
 splitting BEFORE running the real embedder.

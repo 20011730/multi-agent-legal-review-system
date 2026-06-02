@@ -1,3 +1,28 @@
+
+from __future__ import annotations
+
+"""
+법령(法令) 임베딩 파이프라인 — 계층 구조 + 512토큰 + 본문 정리   [v5]
+====================================================================
+v4 → v5 변경점 (조문 누락 버그 수정)
+-----------------------------------
+원인: split_sections()의 별표/부칙 헤더 정규식이 '본문 속 평범한 단어'에 오탐하여
+      본문(MAIN)을 앞부분에서 통째로 잘라냈다.
+  - BYEOLPYO  : '별' + '표/지' 만 보던 패턴이 "특별지방", "개별지역"의 '별지'에 매칭(!)
+                 예: 지방자치법이 508자에서 잘려 조문 214개 중 2개만 임베딩됨.
+  - ADDENDA_HDR 도 '종전의 부칙 제2조' 같은 본문 참조에 오탐할 위험.
+수정:
+  - BYEOLPYO  : 줄 시작(또는 '[') + '별표/별지' + 번호/서식/'제N호' 가 따라오는
+                '진짜 첨부 헤더'만 인식. 본문 단어("특별지방" 등) 제외.
+  - ADDENDA_HDR: 줄 시작 + '부칙' + <...> 또는 (…시행…/법률 제…호) 메타가
+                '반드시' 있는 경우만. 본문 속 '부칙' 단어 참조 제외.
+  - ART_HEADING: '제N조(...)' 중 괄호 안이 편제(제M장/절/관/편)면 제외하여
+                "제1조 제1장 총강(總綱)" 같은 편제 표기를 조문으로 오인하지 않음.
+그 외(clean_text, 청킹, chunk_id, 부칙 ordn, metadata)는 v4와 동일.
+
+※ 재임베딩 전 확인: 이 버그로 corpus 전체가 부분 임베딩(과거 chunk≈13만)되었으므로
+   반드시 reset 후 전체 재임베딩한다.
+"""
 """
 법령(法令) 임베딩 파이프라인 — 계층 구조 + 512토큰 + 본문 정리   [v4]
 ====================================================================
@@ -31,7 +56,7 @@ chunk_id:  본문    → law_{ref}_제3조[#pN]
            (혹시 모를 중복은 unique_id가 _2/_3로 자동 분기)
 """
 
-from __future__ import annotations
+
 
 import re
 import logging
@@ -49,16 +74,16 @@ DB_CONFIG = {
     "dbname": "legalreview", "user": "legalreview", "password": "legalreview",
     "host": "localhost", "port": "5432",
 }
-CHROMA_PATH     = "./chroma_data"           # 판례 컬렉션과 폴더를 공유해도 laws만 건드림
+CHROMA_PATH     = "./chroma_data"
 COLLECTION_NAME = "laws"
 MODEL_NAME      = "intfloat/multilingual-e5-base"
 
-MAX_TOKENS     = 512                         # 모델 한도
-SAFETY         = 12                          # 여유분(특수토큰 + "passage: " 등)
+MAX_TOKENS     = 512
+SAFETY         = 12
 TOKEN_BUDGET   = MAX_TOKENS - SAFETY
-WINDOW_OVERLAP = 40                          # 최후 수단인 윈도우 분할 시 토큰 겹침
-ENCODE_BATCH   = 32                          # model.encode 미니배치(MPS 진행 표시 안정화)
-UPSERT_BATCH   = 128                         # Chroma upsert/커밋 단위 chunk 수
+WINDOW_OVERLAP = 40
+ENCODE_BATCH   = 32
+UPSERT_BATCH   = 128
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-7s | %(message)s",
@@ -66,7 +91,7 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("law_embed")
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 임베딩 함수 (E5, passage 접두사) — 판례 corpus와 동일한 임베딩 공간
+# 임베딩 함수 (E5, passage 접두사)
 # ═════════════════════════════════════════════════════════════════════════════
 class E5EmbeddingFunction(EmbeddingFunction):
     def __init__(self, model_name: str = MODEL_NAME):
@@ -77,59 +102,55 @@ class E5EmbeddingFunction(EmbeddingFunction):
         self.model.max_seq_length = MAX_TOKENS
 
     def __call__(self, input: Documents) -> Embeddings:
-        # 적재 문서에는 'passage: ' 접두사를 붙여야 E5 성능이 극대화됨
         return self.model.encode([f"passage: {d}" for d in input],
                                  normalize_embeddings=True,
                                  batch_size=ENCODE_BATCH).tolist()
 
     def n_tokens(self, text: str) -> int:
-        # 실제로 임베딩되는 문자열('passage: '+text)의 토큰 수
         return len(self.model.tokenizer.encode(f"passage: {text}"))
 
     def truncate_to_budget(self, text: str) -> str:
-        # 혹시 한도를 넘는 chunk가 있으면 토큰 단위로 잘라 반드시 한도 내로 맞춤
         if self.n_tokens(text) <= TOKEN_BUDGET:
             return text
         tok = self.model.tokenizer
         prefix_cost = len(tok.encode("passage: ", add_special_tokens=False)) + 2
         ids = tok.encode(text, add_special_tokens=False)[: TOKEN_BUDGET - prefix_cost]
         out = tok.decode(ids).strip()
-        # decode→encode 과정에서 토큰이 약간 늘 수 있으니 한도 내로 들어올 때까지 줄임
         while out and self.n_tokens(out) > TOKEN_BUDGET:
             ids = ids[:-8]; out = tok.decode(ids).strip()
         return out
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 본문 정리(clean_text) — 이미지 태그·과도한 공백 제거
+# 본문 정리(clean_text)
 # ═════════════════════════════════════════════════════════════════════════════
 def clean_text(s: str) -> str:
-    """조문 body 정리.
-    - <img ...> / </img> 는 제거하되 내부 설명 텍스트(수식 말풍선)는 보존
-    - <개정 ...>, <br> 등 나머지 <...> 태그·주석 제거
-    - 과도한 공백/탭/줄바꿈을 한 칸으로 정리
-    ※ 반드시 구역 분리·조문 파싱 이후 body에만 적용할 것."""
-    s = re.sub(r"</?img[^>]*>", " ", s)   # <img src=...> 와 </img> 제거(내부 텍스트 유지)
-    s = re.sub(r"<[^>]*>", " ", s)         # <개정 ...> 등 나머지 태그/주석 제거
-    s = re.sub(r"\s+", " ", s).strip()     # 공백 정리
+    s = re.sub(r"</?img[^>]*>", " ", s)
+    s = re.sub(r"<[^>]*>", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
     return s
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 구역 분리 + 조문 파싱
+# 구역 분리 + 조문 파싱  [v5: 헤더 정규식 엄격화]
 # ═════════════════════════════════════════════════════════════════════════════
-# 진짜 조문 제목 = 제N조[의M] 바로 뒤에 '(' 또는 ' 삭제'가 오는 것
-# (이렇게 해야 줄바꿈이 없어도 잡히고, '「형법」 제127조' 같은 인라인 참조를 오인하지 않음)
-ART_HEADING         = re.compile(r"제\d+조(?:의\d+)?(?=\(|\s*삭제)")
-# 제목 없는 옛 법령(제1조 본문...)용 보조 패턴: strict가 0건일 때만 사용
+# [v5] '제N조(...)' 헤더 — 괄호 안이 편제(제M장/절/관/편)면 조문으로 보지 않음
+#      예: "제1조 제1장 총강(總綱)"의 '제1조'는 제외, "제1조(목적)"만 인식.
+ART_HEADING         = re.compile(r"제\d+조(?:의\d+)?(?=\((?!\s*제?\s*\d+\s*[장절관편])|\s*삭제)")
 ART_HEADING_LENIENT = re.compile(r"(?<![\d조항호의])제\d+조(?:의\d+)?(?=\s)")
 ART_TITLE           = re.compile(r"제\d+조(?:의\d+)?\(([^)]*)\)")
-# 부칙 섹션 헤더: '부칙' 뒤에 <...> 또는 제1조 또는 (시행 이 오는 경우만(본문 내 '부칙 제2조' 참조와 구분)
-ADDENDA_HDR         = re.compile(r"부\s*칙\s*(<[^>]*>|\([^)]*시행[^)]*\))?")
-BYEOLPYO            = re.compile(r"별\s*[표지]")
-HANG_SPLIT          = re.compile(r"(?=[\u2460-\u2473])")   # 항 기호 ①..⑳
-HO_SPLIT            = re.compile(r"(?=\s+\d+\.\s)")          # 호 ' 1. ' ' 2. '
+
+# [v5] 부칙 헤더 — 줄 시작 + '부칙' + (<...> | (…시행…/법률 제…호)) 메타가 '반드시' 있을 때만
+#      본문 속 '부칙 제2조' 같은 단순 참조는 제외.
+ADDENDA_HDR         = re.compile(
+    r"(?:^|\n)\s*부\s*칙\s*(<[^>]*>|\([^)]*(?:시행|법률\s*제)[^)]*\))")
+
+# [v5] 별표/별지 헤더 — 줄 시작(또는 '[') + '별표/별지' + 번호/서식/'제N호'
+#      본문 속 "특별지방", "개별지역" 등의 '별지/별표' 오탐 제거.
+BYEOLPYO            = re.compile(r"(?:^|\n)\s*\[?\s*별\s*(?:표|지)\s*(?:\d|제\s*\d+\s*호|서식)")
+
+HANG_SPLIT          = re.compile(r"(?=[\u2460-\u2473])")
+HO_SPLIT            = re.compile(r"(?=\s+\d+\.\s)")
 
 def _addenda_id(h: str) -> str:
-    # 부칙 헤더에서 공포번호(제NNNN호) 추출
     m = re.search(r"제\s*\d+\s*호", h)
     return re.sub(r"\s+", "", m.group(0)) if m else ""
 
@@ -148,7 +169,6 @@ def split_sections(raw: str):
     return out
 
 def _parse_with(text: str, pattern):
-    # 주어진 헤더 패턴으로 조문을 끊어 [{articleNo, title, body}] 반환
     heads = [(m.start(), m.group(0)) for m in pattern.finditer(text)]
     out = []
     for i, (pos, no) in enumerate(heads):
@@ -157,7 +177,7 @@ def _parse_with(text: str, pattern):
         mt = ART_TITLE.match(seg)
         if mt:
             title, body = mt.group(1).strip(), seg[mt.end():].strip()
-        else:                                   # 예: "제4조 삭제 <2016.2.3>"
+        else:
             title, body = "", seg[len(no):].strip()
         out.append({"articleNo": no, "title": title, "body": body})
     return out
@@ -167,17 +187,16 @@ def parse_law(raw: str):
     result = []
     for sec, aid, ordn, text in split_sections(raw):
         arts = _parse_with(text, ART_HEADING)
-        if not arts and sec == "MAIN":          # 제목 없는 옛 법령 보조 파싱
+        if not arts and sec == "MAIN":
             arts = _parse_with(text, ART_HEADING_LENIENT)
         for a in arts:
             result.append((sec, aid, ordn, a["articleNo"], a["title"], a["body"]))
     return result
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 청킹 (조문 → 512토큰 이하 chunk; 항 → 호 → 토큰 윈도우 순으로 분할)
+# 청킹
 # ═════════════════════════════════════════════════════════════════════════════
 def _window_split(ef, head, text):
-    # 구조가 없어 더 못 쪼개는 경우의 최후 수단: 토큰 윈도우로 분할(머리말 반복)
     tok = ef.model.tokenizer
     head_cost = len(tok.encode(f"passage: {head} ", add_special_tokens=False))
     budget = max(TOKEN_BUDGET - head_cost, 64)
@@ -191,7 +210,6 @@ def _window_split(ef, head, text):
     return chunks
 
 def _pack(ef, head, pieces):
-    # 조각(항/호)들을 한도 내에서 탐욕적으로 묶음. 각 chunk는 머리말(head)로 시작
     chunks, cur = [], head
     for p in pieces:
         cand = f"{cur} {p}".strip()
@@ -202,7 +220,7 @@ def _pack(ef, head, pieces):
         start = f"{head} {p}".strip()
         if ef.n_tokens(start) <= TOKEN_BUDGET:
             cur = start
-        else:                                   # 조각 하나가 한도를 넘으면 윈도우 분할
+        else:
             chunks.extend(_window_split(ef, head, p)); cur = head
     if cur != head:
         chunks.append(cur)
@@ -211,21 +229,20 @@ def _pack(ef, head, pieces):
 def chunk_article(ef, no, title, body):
     head = f"{no}({title})" if title else no
     whole = f"{head} {body}".strip() if body else head
-    if ef.n_tokens(whole) <= TOKEN_BUDGET:      # 한도 이내면 한 chunk
+    if ef.n_tokens(whole) <= TOKEN_BUDGET:
         return [whole]
     hangs = [h.strip() for h in HANG_SPLIT.split(body) if h.strip()]
-    if len(hangs) > 1:                          # 1순위: 항(①②) 경계
+    if len(hangs) > 1:
         return _pack(ef, head, hangs)
     hos = [h.strip() for h in HO_SPLIT.split(body) if h.strip()]
-    if len(hos) > 1:                            # 2순위: 호(1.) 경계
+    if len(hos) > 1:
         return _pack(ef, head, hos)
-    return _window_split(ef, head, body)        # 3순위: 토큰 윈도우
+    return _window_split(ef, head, body)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ChromaDB 준비
 # ═════════════════════════════════════════════════════════════════════════════
 def reset_collection(ef):
-    # 기존 laws 컬렉션을 지우고 새로 만듦(판례 등 다른 컬렉션은 보존)
     client = chromadb.PersistentClient(path=CHROMA_PATH)
     try:
         client.delete_collection(COLLECTION_NAME)
@@ -257,7 +274,6 @@ def run():
     n_laws = n_main = n_add = n_chunks = n_empty = n_dup = 0
 
     def unique_id(base):
-        # chunk_id 유일성 보장(혹시 모를 중복은 _2/_3로 분기)
         nonlocal n_dup
         if base not in used_ids:
             used_ids.add(base); return base
@@ -280,7 +296,7 @@ def run():
             continue
 
         for sec, aid, ordn, no, atitle, body in parsed:
-            body = clean_text(body)              # ★ 이미지 태그·과도한 공백 정리
+            body = clean_text(body)
             if sec == "MAIN":
                 parent = f"law_{reference_id}_{no}"; n_main += 1
             else:
@@ -288,7 +304,7 @@ def run():
             chunks = chunk_article(ef, no, atitle, body)
             n_parts = len(chunks)
             for pi, text in enumerate(chunks):
-                text = ef.truncate_to_budget(text)   # 512 한도 강제 보장
+                text = ef.truncate_to_budget(text)
                 base = parent if n_parts == 1 else f"{parent}#p{pi+1}"
                 buf_ids.append(unique_id(base))
                 buf_docs.append(text)
@@ -297,7 +313,7 @@ def run():
                     "sourceType": "LAW",
                     "title": title or "", "shortName": short_name or "",
                     "articleNo": no, "articleTitle": atitle,
-                    "section": sec,                  # MAIN | ADDENDA  ← 매칭 키
+                    "section": sec,
                     "addendaId": aid, "addendaOrd": ordn,
                     "parentId": parent, "partIndex": pi + 1, "nParts": n_parts,
                     "department": department or "",

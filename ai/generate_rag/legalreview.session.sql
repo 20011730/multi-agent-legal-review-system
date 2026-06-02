@@ -1,6 +1,11 @@
-select *
-from case_documents
-limit 10;
+SELECT folder, count(*)
+FROM eval_sample
+group by folder;
+  -- 아까 메타에서 본 db_id 하나로 확인
+
+--limit 10;
+--where id= 42041955
+--where id = 19908001
 --ALTER TABLE case_documents ALTER COLUMN case_number TYPE TEXT;
 --ALTER TABLE case_documents ALTER COLUMN case_type TYPE TEXT;
 --TRUNCATE TABLE case_documents RESTART IDENTITY CASCADE;
@@ -23,7 +28,7 @@ limit 10;
 --테이블 구조 확인
 --SELECT column_name, data_type, character_maximum_length, is_nullable
 --FROM information_schema.columns
---WHERE table_name = 'precedent_list'
+--WHERE table_name = 'case_documents'
 --ORDER BY ordinal_position;
 
 
