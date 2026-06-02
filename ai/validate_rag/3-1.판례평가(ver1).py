@@ -3,8 +3,6 @@ RAG Retrieval Evaluation Pipeline
 =================================
 Corpus: ChromaDB(legal_case_chunks) embedded with intfloat/multilingual-e5-base
 Eval set: AI Hub 상황별 판례 데이터 → eval_dataset (PostgreSQL)
-기존 카테고리 불균형 문제를 해결안된 코드. 그냥 전체적으로 평가하는 코드
-evaluation_2.py 에 카테고리 불균형 문제 해소한 코드 있으니 그걸로 돌리면 된다.
 
 Query types compared (paired design):
   - summ_pass     : 쟁점 요지 (1-2 sentence summary)

@@ -3,6 +3,18 @@ Stratified Sub-sampling of the RAG Evaluation Set
 =================================================
 기존 카테고리 불균형 문제를 해결하기 위해 작성된 코드
 Purpose
+
+eval_dataset에서 층화 표본 2,000건을 뽑아 eval_sample 테이블을 만드는 것. 
+판례·법령 검색을 돌리지도, 채점하지도 않습니다. 그냥 "어떤 질문 2,000개로 평가할지" 명단을 만드는 준비 작업이다.
+
+결과물 
+모든 카테고리가 155~499건 범위 안으로 들어옴
+design_weight가 카테고리마다 1.08 ~ 23.92로 크게 다르게 나온다.
+
+TL_01(민사): 표본 1건이 모집단 23.92건을 대표.
+TL_10(개인정보): 표본 1건이 1.08건만 대표
+
+따라서 전체 지표는 반드시 weight로 가중평균해야 합니다
 -------
 The full evaluation pool (`eval_dataset`, PostgreSQL) contains 27,400 query rows,
 each linked to a single gold case (`corpus_id`) and its referenced statutes
