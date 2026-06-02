@@ -4,7 +4,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { AlertCircle, CheckCircle2, LogOut, User2, History, UserX } from "lucide-react";
+import { AlertCircle, CheckCircle2, LogOut, User2, History, UserX, Bookmark } from "lucide-react";
 
 export function CompanyProfile() {
   const navigate = useNavigate();
@@ -176,6 +176,21 @@ export function CompanyProfile() {
           <CardContent>
             <Button variant="outline" onClick={() => navigate("/reviews")}>
               히스토리 열람
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="border-slate-200 bg-white">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Bookmark className="w-5 h-5 text-[#1E3A8A]" />
+              저장한 지원사업
+            </CardTitle>
+            <CardDescription>관심 공고와 마감 일정을 다시 확인하고 법률 리스크 진단으로 이어갑니다.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" onClick={() => navigate("/startup-support?saved=1")}>
+              관심 공고 보기
             </Button>
           </CardContent>
         </Card>

@@ -82,7 +82,7 @@ public class ChromaSearchService {
         try {
             return query(coll, "CASE_EXTENDED", queryText, topK);
         } catch (Exception e) {
-            log.warn("[RAG] 확장 판례 검색 실패 — 기존 결과만 사용 (collection={}, msg={})",
+            log.warn("[RAG] 확장 판례 검색 실패 — 해당 컬렉션 결과 제외 (collection={}, msg={})",
                     coll, e.getMessage());
             return List.of();
         }
@@ -135,7 +135,7 @@ public class ChromaSearchService {
         if (!ragProperties.isEnabled()) return 0;
         if (chunks == null || chunks.isEmpty()) return 0;
 
-        String collectionId = resolveCollectionId(collection);
+        String collectionId = resolveCollectionId(collection, true);
         if (collectionId == null) {
             log.warn("[RAG] upsert 중단 — collection UUID 미해석: name={}", collection);
             return 0;
@@ -191,7 +191,7 @@ public class ChromaSearchService {
      */
     public int countCollection(String collection) {
         if (!ragProperties.isEnabled()) return -1;
-        String collectionId = resolveCollectionId(collection);
+        String collectionId = resolveCollectionId(collection, false);
         if (collectionId == null) {
             log.debug("[RAG] countCollection — collection 미해석 (Chroma 다운 또는 미생성): {}", collection);
             return -1;
@@ -211,7 +211,7 @@ public class ChromaSearchService {
     private List<RetrievedChunk> query(String collection, String sourceType, String queryText, int topK) {
         if (queryText == null || queryText.isBlank() || topK <= 0) return List.of();
 
-        String collectionId = resolveCollectionId(collection);
+        String collectionId = resolveCollectionId(collection, false);
         if (collectionId == null) {
             log.debug("[RAG] query 중단 — collection 미해석: {}", collection);
             return List.of();
@@ -248,16 +248,15 @@ public class ChromaSearchService {
 
     /**
      * 캐시 hit 시 즉시 반환, 미스 시 GET /api/v1/collections로 보강.
-     * 그래도 못 찾으면 ensureCollection 호출 (자동 생성 + 캐시).
+     * ingestion 경로에서만 allowCreate=true 로 자동 생성을 허용한다.
      */
-    private String resolveCollectionId(String collection) {
+    private String resolveCollectionId(String collection, boolean allowCreate) {
         String cached = collectionIdByName.get(collection);
         if (cached != null) return cached;
         refreshCollectionListCache();
         cached = collectionIdByName.get(collection);
         if (cached != null) return cached;
-        // 마지막 fallback: 자동 생성
-        if (ensureCollection(collection)) {
+        if (allowCreate && ensureCollection(collection)) {
             return collectionIdByName.get(collection);
         }
         return null;
@@ -350,7 +349,7 @@ public class ChromaSearchService {
     @SuppressWarnings("unchecked")
     public List<Map<String, Object>> dumpSample(String collection, int limit) {
         if (!ragProperties.isEnabled()) return List.of();
-        String collectionId = resolveCollectionId(collection);
+        String collectionId = resolveCollectionId(collection, false);
         if (collectionId == null) return List.of();
 
         String url = ragProperties.getChroma().getBaseUrl()

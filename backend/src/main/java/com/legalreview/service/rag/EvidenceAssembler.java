@@ -63,10 +63,10 @@ public class EvidenceAssembler {
             //     case_name / case_number / court / decision_date / source_url / referenced_laws / text_type
             //   향후 backend 측 ingestion이 camelCase로 적재할 경우도 함께 지원.
             String caseTitle = c.metaFirstOf("case_name", "caseName", "title");
-            String section   = c.metaFirstOf("text_type", "section");
+            String section   = c.metaFirstOf("text_type", "section", "section_type", "subsection_label");
             String sectionLabel = sectionLabel(section);
 
-            // 1) title fallback chain: caseName → caseName+sectionLabel → caseNumber → "(판례)"
+            // 1) title fallback chain: caseName → caseName+sectionLabel → caseNumber → "판례 근거"
             if (caseTitle == null || caseTitle.isBlank()) {
                 String caseNumber = c.metaFirstOf("case_number", "caseNumber");
                 String court = c.metaFirstOf("court");
@@ -76,7 +76,7 @@ public class EvidenceAssembler {
                 } else if (!court.isBlank() || !date.isBlank()) {
                     caseTitle = (court + " " + date).trim();
                 } else {
-                    caseTitle = "(판례)";
+                    caseTitle = "판례 근거";
                 }
             }
             title = caseTitle + (sectionLabel.isEmpty() ? "" : " · " + sectionLabel);
@@ -88,6 +88,9 @@ public class EvidenceAssembler {
         String summary = chunkText.length() > SUMMARY_MAX_CHARS
                 ? chunkText.substring(0, SUMMARY_MAX_CHARS) + "..."
                 : chunkText;
+        if (!isLaw && summary.isBlank()) {
+            summary = "원문 추가 확인이 필요한 참고용 근거입니다.";
+        }
 
         // url fallback: camelCase 'url' → snake_case 'source_url'
         // source_url 에 외부 API의 OC 값이 들어 있을 가능성을 차단하기 위해 마스킹.
@@ -106,7 +109,7 @@ public class EvidenceAssembler {
         );
 
         // Phase 10.70 — RAG 출처 collection 을 dataSource 로 태그.
-        //   LegalRetrievalService 가 확장 collection 결과에 "extended_case_sample" 로 overwrite 하므로
+        //   LegalRetrievalService 가 확장 collection 결과에 "extended_case..." 로 overwrite 하므로
         //   여기서는 default 로 운영 collection 명을 세팅 (이후 overwrite 안전).
         if (isLaw) {
             dto.setDataSource("laws_e5");
@@ -142,15 +145,16 @@ public class EvidenceAssembler {
                     "deptName", "deptCode", "enforceDate", "promulgateDate",
                     "articleNo", "articleTitle",
                     // CASE (camelCase + snake_case 둘 다 노출 — adapter 차이 대응)
-                    "section", "text_type",
+                    "section", "text_type", "section_type", "subsection_label",
                     "caseNumber", "case_number",
                     "caseName", "case_name",
                     "court",
                     "judgmentDate", "decision_date",
                     "caseType",
-                    "referenced_laws", "summary",
+                    "referenced_laws", "ref_statutes", "ref_cases", "summary",
                     // 본문 부재 case 진단용 (5-1/5-3/5-2 흐름이 넣어주는 메타)
                     "body_status", "detail_root", "data_source", "case_type_name",
+                    "db_id",
                     // 공통
                     "chunkIndex", "chunk_index", "chunkingStrategy",
                     "embeddingProvider", "embeddingModel",
@@ -181,7 +185,12 @@ public class EvidenceAssembler {
             case "summary", "holding" -> "판결요지";
             case "reasoning" -> "판단이유";
             case "referenced_laws" -> "참조조문";
-            case "body" -> "판례본문";
+            case "referenced_cases" -> "참조판례";
+            case "body", "main", "본문" -> "판례본문";
+            case "이유" -> "판단이유";
+            case "주문" -> "주문";
+            case "결론" -> "결론";
+            case "인정근거" -> "인정근거";
             case "meta" -> "메타정보";
             default -> "";
         };

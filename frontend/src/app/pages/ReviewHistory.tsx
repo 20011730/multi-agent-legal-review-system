@@ -46,7 +46,10 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   REANALYZING: { label: "추가 재검토 진행 중", color: "bg-amber-100 text-amber-700" },
   WAITING_FOR_USER_INPUT: { label: "Round 1 완료 · 사용자 입력 대기", color: "bg-indigo-100 text-indigo-700" },
   WAITING_FOR_ROUND2_INPUT: { label: "Round 1 완료 · 사용자 입력 대기", color: "bg-indigo-100 text-indigo-700" },
-  WAITING_FOR_FINAL_INPUT: { label: "Round 2 완료 · 최종 라운드 입력 대기", color: "bg-violet-100 text-violet-700" },
+  WAITING_FOR_FINAL_INPUT: { label: "Round 2 완료 · 사용자 입력 대기", color: "bg-violet-100 text-violet-700" },
+  WAITING_FOR_ROUND3_INPUT: { label: "Round 2 완료 · 사용자 입력 대기", color: "bg-violet-100 text-violet-700" },
+  WAITING_FOR_ROUND4_INPUT: { label: "Round 3 완료 · 사용자 입력 대기", color: "bg-sky-100 text-sky-700" },
+  WAITING_FOR_ROUND5_INPUT: { label: "Round 4 완료 · 사용자 입력 대기", color: "bg-amber-100 text-amber-700" },
   FAILED: { label: "검토 중단", color: "bg-red-100 text-red-700" },
 };
 

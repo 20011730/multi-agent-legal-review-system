@@ -2,17 +2,24 @@ package com.legalreview.controller;
 
 import com.legalreview.dto.startup.StartupSupportItem;
 import com.legalreview.dto.startup.StartupSupportListResponse;
+import com.legalreview.dto.startup.SavedSupportProgramDto;
 import com.legalreview.service.startup.StartupSupportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * 스타트업 지원사업 mock API (Phase 2).
@@ -29,6 +36,10 @@ import org.springframework.web.bind.annotation.RestController;
 public class StartupSupportController {
 
     private final StartupSupportService startupSupportService;
+
+    private static Long normalizeUserId(Long userId) {
+        return userId == null || userId <= 0 ? 1L : userId;
+    }
 
     @Operation(
             summary = "전체 지원사업 목록 (선택적 필터링, envelope 응답)",
@@ -54,6 +65,57 @@ public class StartupSupportController {
             @RequestParam(value = "size", required = false) Integer size) {
         return ResponseEntity.ok(
                 startupSupportService.findAllEnvelope(category, status, region, keyword, sort, page, size));
+    }
+
+    @Operation(summary = "저장한 지원사업 목록 조회", description = "사용자별 관심 공고를 저장 최신순 또는 마감 임박순으로 반환합니다.")
+    @GetMapping("/saved")
+    public ResponseEntity<List<SavedSupportProgramDto>> findSaved(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @RequestParam(value = "sort", required = false) String sort) {
+        return ResponseEntity.ok(startupSupportService.findSavedPrograms(normalizeUserId(userId), sort));
+    }
+
+    @Operation(summary = "마감 임박 관심 공고 조회", description = "저장한 공고 중 7일 이내 마감 예정 항목을 반환합니다.")
+    @GetMapping("/saved/upcoming")
+    public ResponseEntity<List<SavedSupportProgramDto>> findUpcomingSaved(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        return ResponseEntity.ok(startupSupportService.findUpcomingSavedPrograms(normalizeUserId(userId)));
+    }
+
+    @Operation(summary = "관심 공고 저장 상태 조회", description = "현재 사용자가 저장한 공고 ID 맵을 반환합니다.")
+    @GetMapping("/saved/status")
+    public ResponseEntity<Map<String, Boolean>> savedStatus(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        return ResponseEntity.ok(startupSupportService.savedStatus(normalizeUserId(userId)));
+    }
+
+    @Operation(summary = "관심 공고 저장", description = "원본 공고는 수정하지 않고 사용자별 저장 정보만 추가합니다.")
+    @PostMapping("/{id}/saved")
+    public ResponseEntity<?> saveProgram(
+            @Parameter(description = "지원사업 ID", required = true) @PathVariable("id") String id,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        try {
+            return ResponseEntity.ok(startupSupportService.saveProgram(normalizeUserId(userId), id));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "관심 공고 저장에 실패했습니다."));
+        }
+    }
+
+    @Operation(summary = "관심 공고 저장 취소", description = "사용자별 저장 정보만 삭제합니다.")
+    @DeleteMapping("/{id}/saved")
+    public ResponseEntity<Map<String, Object>> deleteSavedProgram(
+            @Parameter(description = "지원사업 ID", required = true) @PathVariable("id") String id,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        try {
+            boolean removed = startupSupportService.deleteSavedProgram(normalizeUserId(userId), id);
+            return ResponseEntity.ok(Map.of("programId", id, "removed", removed));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "관심 공고 제거에 실패했습니다."));
+        }
     }
 
     @Operation(summary = "지원사업 단건 조회", description = "id 에 해당하는 지원사업 1건을 반환. 없으면 404.")

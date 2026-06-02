@@ -35,7 +35,7 @@ export interface EvidenceItem {
   score?: number;
   /** 백엔드 EvidenceDto.metadata — RAG chunk 풍부화 정보 (있을 때만). */
   metadata?: EvidenceMetadata;
-  /** Phase 10.64 — 검색 source 태그 ("cases_e5" / "laws_e5" / "extended_case_sample" / undefined). */
+  /** 검색 source 태그 ("cases_e5" / "laws_e5" / "extended_case..." / undefined). */
   dataSource?: string;
 }
 
@@ -61,6 +61,11 @@ export interface EvidenceMetadata {
   judgmentDate?: string;
   caseType?: string;
   section?: string;
+  section_type?: string;
+  subsection_label?: string;
+  ref_statutes?: string;
+  ref_cases?: string;
+  db_id?: string | number;
   // CASE: snake_case alias (Python adapter)
   case_number?: string;
   case_name?: string;
@@ -117,6 +122,9 @@ function humanizeTextType(textType: string): string {
   const t = textType.replace(/\s+/g, "");
   switch (t) {
     case "body": return "판례 본문";
+    case "main":
+    case "본문":
+      return "판례 본문";
     case "holding":
     case "summary":
     case "판결요지":
@@ -192,7 +200,7 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
   // Phase 10.85 — scoreLabel (벡터 유사도 %) 은 사용자 화면에서 노출하지 않음.
 
   // CASE 전용 상태 라벨 (카드 요약 행에 한눈에 보이도록 표시) — 닫힌 상태에서도 본문 vs 메타 구분
-  const caseTextType = !isLaw ? metaStrAny(ev.metadata, "text_type", "section") : "";
+  const caseTextType = !isLaw ? metaStrAny(ev.metadata, "text_type", "section", "section_type", "subsection_label") : "";
   const caseBodyStatus = !isLaw ? metaStrAny(ev.metadata, "body_status") : "";
   const caseDataSource = !isLaw ? metaStrAny(ev.metadata, "data_source") : "";
   // "참고용 메타" 판정 — 데이터 출처가 빈값('') 이거나 '대법원' 같은 법제처 직영이면 정상 본문 case.
@@ -203,6 +211,7 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
   const caseFromExternalSystem = caseDataSource !== "" && EXTERNAL_DATA_SOURCES.has(caseDataSource);
   const caseIsReferenceOnly = !isLaw && (caseBodyMissing || caseFromExternalSystem);
   const caseTextTypeLabel = !isLaw && !caseIsReferenceOnly ? humanizeTextType(caseTextType) : "";
+  const isExtendedCaseSource = !isLaw && Boolean(ev.dataSource?.toLowerCase().startsWith("extended_case"));
 
   const articleLabel = articleNo
     ? `제${articleNo}조${articleTitle ? `(${articleTitle})` : ""}`
@@ -258,16 +267,16 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
           {isLaw ? "법령" : "판례"}
         </Badge>
         {/* Phase 10.64 — 검색 source 구분 chip (운영 vs 확장). 내부 collection 명은 노출하지 않음. */}
-        {ev.dataSource === "extended_case_sample" && (
+        {isExtendedCaseSource && (
           <Badge
             variant="outline"
             className="text-[10px] flex-shrink-0 border-indigo-300 bg-indigo-50 text-indigo-700"
-            title="확장 판례 DB — 보조 참고 자료"
+            title="확장 판례 DB"
           >
             확장 판례 DB
           </Badge>
         )}
-        {ev.dataSource && ev.dataSource !== "extended_case_sample" && !isLaw && (
+        {ev.dataSource && !isExtendedCaseSource && !isLaw && (
           <Badge
             variant="outline"
             className="text-[10px] flex-shrink-0 border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -420,8 +429,9 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
           {/* CASE 전용: 선고일 + 참조조문 (snake_case/camelCase 양쪽 fallback) */}
           {!isLaw && (() => {
             const decisionDate = metaStrAny(ev.metadata, "decision_date", "judgmentDate");
-            const referencedLaws = metaStrAny(ev.metadata, "referenced_laws");
-            const textType = metaStrAny(ev.metadata, "text_type", "section");
+            const referencedLaws = metaStrAny(ev.metadata, "referenced_laws", "ref_statutes");
+            const referencedCases = metaStrAny(ev.metadata, "ref_cases");
+            const textType = metaStrAny(ev.metadata, "text_type", "section", "section_type", "subsection_label");
             const bodyStatus = metaStrAny(ev.metadata, "body_status");
             const dataSource = metaStrAny(ev.metadata, "data_source");
             // "참고용 메타" 판정 — 카드 요약 행과 동일 정책 유지.
@@ -432,7 +442,7 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
             const bodyMissing = bodyStatus !== "" && bodyStatus !== "ok";
             const fromExternal = dataSource !== "" && EXTERNAL_DATA_SOURCES_INNER.has(dataSource);
             const isReferenceOnly = bodyMissing || fromExternal;
-            if (!decisionDate && !referencedLaws && !textType && !isReferenceOnly) return null;
+            if (!decisionDate && !referencedLaws && !referencedCases && !textType && !isReferenceOnly) return null;
             return (
               <div className="space-y-1">
                 {decisionDate && (
@@ -461,6 +471,15 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
                     <div>
                       <span className="text-gray-500">참조조문:</span>
                       <p className="text-gray-700 mt-0.5 leading-relaxed">{referencedLaws}</p>
+                    </div>
+                  </div>
+                )}
+                {referencedCases && (
+                  <div className="flex items-start gap-2 text-xs">
+                    <BookOpen className="w-3.5 h-3.5 text-gray-400 mt-0.5" />
+                    <div>
+                      <span className="text-gray-500">참조판례:</span>
+                      <p className="text-gray-700 mt-0.5 leading-relaxed">{referencedCases}</p>
                     </div>
                   </div>
                 )}

@@ -41,6 +41,50 @@ interface FollowUpQuestion {
   appliedRound?: number | string;
 }
 
+type WaitingStage = "round2" | "round3" | "round4" | "round5";
+type InterventionMode = WaitingStage | "completed";
+
+const ROUND_TITLES: Record<number, string> = {
+  1: "사안 접수 및 초기 쟁점 식별",
+  2: "사실관계 및 증빙자료 보완",
+  3: "법령·판례 근거 검토",
+  4: "반론 검증 및 리스크 시나리오 분석",
+  5: "종합 의견 및 실행 체크리스트",
+};
+
+const WAITING_STATUS_TO_STAGE: Record<string, WaitingStage> = {
+  WAITING_FOR_USER_INPUT: "round2",
+  WAITING_FOR_ROUND2_INPUT: "round2",
+  WAITING_FOR_FINAL_INPUT: "round3",
+  WAITING_FOR_ROUND3_INPUT: "round3",
+  WAITING_FOR_ROUND4_INPUT: "round4",
+  WAITING_FOR_ROUND5_INPUT: "round5",
+};
+
+function roundTitle(round: number): string {
+  return ROUND_TITLES[round] || `Round ${round} 검토`;
+}
+
+function stageTargetRound(stage: WaitingStage): number {
+  return Number(stage.replace("round", ""));
+}
+
+function waitingStatusLabel(stage: WaitingStage): string {
+  const completedRound = stageTargetRound(stage) - 1;
+  return `Round ${completedRound} ${roundTitle(completedRound)}가 끝났습니다.`;
+}
+
+function waitingStatusDescription(stage: WaitingStage): string {
+  if (stage === "round5") {
+    return "종합 의견 및 실행 체크리스트 전에 마지막으로 확인할 질문이나 조건이 있나요? 질문이 없다면 바로 종합 라운드를 진행할 수 있습니다.";
+  }
+  return `Round ${stageTargetRound(stage)} ${roundTitle(stageTargetRound(stage))}에 반영할 질문이나 추가 조건을 입력하세요. 질문이 없다면 바로 다음 라운드를 진행할 수 있습니다.`;
+}
+
+function waitingProgress(stage: WaitingStage): number {
+  return ({ round2: 35, round3: 55, round4: 70, round5: 82 } as Record<WaitingStage, number>)[stage];
+}
+
 /* ── 에이전트 맵 (judge 추가, ethics 호환) ── */
 type AgentKey = "business" | "legal" | "risk" | "ethics" | "judge";
 
@@ -101,72 +145,114 @@ interface PhaseInfo {
 
 const phaseMap: Record<string, PhaseInfo> = {
   ROUND1_BIZ: {
-    label: "라운드 1 — 비즈니스 전략가 분석 중",
-    description: "사업적 가치와 실행 가능성을 분석하고 있습니다.",
+    label: "Round 1 — 사안 접수 및 초기 쟁점 식별",
+    description: "사업 상황을 이해하고 초기 쟁점과 확인할 자료를 정리하고 있습니다.",
     progress: 15,
     activeAgent: "business",
     humourLabel: "AI 에이전트가 공고와 입력 자료를 검토하고 있습니다.",
   },
   ROUND1_LEGAL: {
-    label: "라운드 1 — 법률 전문가 검토 중",
-    description: "법적 리스크와 규정 위반 가능성을 검토하고 있습니다.",
+    label: "Round 1 — 사안 접수 및 초기 쟁점 식별",
+    description: "핵심 법률 쟁점과 초기 위험 신호를 확인하고 있습니다.",
     progress: 30,
     activeAgent: "legal",
     humourLabel: "AI 에이전트가 공고와 입력 자료를 검토하고 있습니다.",
   },
   ROUND1_RISK: {
-    label: "라운드 1 — 리스크 검토자 분석 중",
-    description: "사업·법률 의견을 종합해 우선순위 리스크를 확인하고 있습니다.",
+    label: "Round 1 — 사안 접수 및 초기 쟁점 식별",
+    description: "누락된 사실관계와 먼저 확인할 자료를 정리하고 있습니다.",
     progress: 34,
     activeAgent: "risk",
     humourLabel: "AI 에이전트가 공고와 입력 자료를 검토하고 있습니다.",
   },
   ROUND2_BIZ: {
-    label: "라운드 2 — 비즈니스 전략가 보완 의견 작성 중",
-    description: "사용자 질문과 1차 의견을 반영해 사업 관점 보완 의견을 준비하고 있습니다.",
+    label: "Round 2 — 사실관계 및 증빙자료 보완",
+    description: "사용자 질문과 첨부자료를 반영해 사실관계를 보완하고 있습니다.",
     progress: 40,
     activeAgent: "business",
     humourLabel: "에이전트 간 쟁점이 교차 검증되고 있습니다.",
   },
   ROUND2_LEGAL: {
-    label: "라운드 2 — 법률 전문가 보완 의견 작성 중",
-    description: "사용자 질문과 1차 의견을 반영해 법률 관점 보완 의견을 준비하고 있습니다.",
+    label: "Round 2 — 사실관계 및 증빙자료 보완",
+    description: "보완된 자료의 법률상 의미를 검토하고 있습니다.",
     progress: 55,
     activeAgent: "legal",
     humourLabel: "에이전트 간 쟁점이 교차 검증되고 있습니다.",
   },
   ROUND2_RISK: {
-    label: "라운드 2 — 리스크 검토자 보완 의견 작성 중",
-    description: "사용자 질문 반영 후 남는 실행 리스크와 우선순위를 점검하고 있습니다.",
+    label: "Round 2 — 사실관계 및 증빙자료 보완",
+    description: "아직 부족한 사실관계와 추가 자료 요청 사항을 정리하고 있습니다.",
     progress: 62,
     activeAgent: "risk",
     humourLabel: "에이전트 간 쟁점이 교차 검증되고 있습니다.",
   },
   ROUND3_BIZ: {
-    label: "라운드 3 — 비즈니스 전략가 최종 입장 정리 중",
-    description: "지금까지의 논점을 종합하여 최선의 실행 방안을 도출하고 있습니다.",
+    label: "Round 3 — 법령·판례 근거 검토",
+    description: "검색된 근거가 사업 실행에 미치는 영향을 확인하고 있습니다.",
     progress: 68,
     activeAgent: "business",
     humourLabel: "세 번의 논쟁 끝에 합의점에 가까워졌습니다!",
   },
   ROUND3_LEGAL: {
-    label: "라운드 3 — 법률 전문가 최종 권고 정리 중",
-    description: "법적 리스크를 최소화하는 최종 권고안을 준비하고 있습니다.",
+    label: "Round 3 — 법령·판례 근거 검토",
+    description: "관련 법령·판례와 첨부자료 근거를 검토하고 있습니다.",
     progress: 80,
     activeAgent: "legal",
     humourLabel: "세 번의 논쟁 끝에 합의점에 가까워졌습니다!",
   },
   ROUND3_RISK: {
-    label: "라운드 3 — 리스크 검토자 최종 우선순위 정리 중",
-    description: "최종 판단 전에 남은 위험과 먼저 조치할 항목을 정리하고 있습니다.",
+    label: "Round 3 — 법령·판례 근거 검토",
+    description: "근거가 부족하거나 추가 확인이 필요한 부분을 정리하고 있습니다.",
     progress: 84,
     activeAgent: "risk",
     humourLabel: "세 번의 논쟁 끝에 합의점에 가까워졌습니다!",
   },
+  ROUND4_BIZ: {
+    label: "Round 4 — 반론 검증 및 리스크 시나리오 분석",
+    description: "낙관적 실행 시나리오와 보수적 반론을 비교하고 있습니다.",
+    progress: 72,
+    activeAgent: "business",
+    humourLabel: "에이전트들이 서로의 빈틈을 점검하고 있습니다.",
+  },
+  ROUND4_LEGAL: {
+    label: "Round 4 — 반론 검증 및 리스크 시나리오 분석",
+    description: "문제가 될 수 있는 반론과 보수적 법률 해석을 검토하고 있습니다.",
+    progress: 76,
+    activeAgent: "legal",
+    humourLabel: "에이전트들이 서로의 빈틈을 점검하고 있습니다.",
+  },
+  ROUND4_RISK: {
+    label: "Round 4 — 반론 검증 및 리스크 시나리오 분석",
+    description: "최악의 상황과 대응 가능성, 우선순위를 분석하고 있습니다.",
+    progress: 80,
+    activeAgent: "risk",
+    humourLabel: "에이전트들이 서로의 빈틈을 점검하고 있습니다.",
+  },
+  ROUND5_BIZ: {
+    label: "Round 5 — 종합 의견 및 실행 체크리스트",
+    description: "사업 관점의 실행 가능 조건과 체크리스트를 정리하고 있습니다.",
+    progress: 86,
+    activeAgent: "business",
+    humourLabel: "최종 리포트를 만들기 전 마지막 정리 단계입니다.",
+  },
+  ROUND5_LEGAL: {
+    label: "Round 5 — 종합 의견 및 실행 체크리스트",
+    description: "최종 법률 조건과 확인할 문서·조항을 정리하고 있습니다.",
+    progress: 90,
+    activeAgent: "legal",
+    humourLabel: "최종 리포트를 만들기 전 마지막 정리 단계입니다.",
+  },
+  ROUND5_RISK: {
+    label: "Round 5 — 종합 의견 및 실행 체크리스트",
+    description: "남은 리스크와 즉시 실행할 우선순위를 정리하고 있습니다.",
+    progress: 94,
+    activeAgent: "risk",
+    humourLabel: "최종 리포트를 만들기 전 마지막 정리 단계입니다.",
+  },
   JUDGING: {
     label: "최종 판정 생성 중",
-    description: "양측 토론을 종합하여 최종 판정문을 작성하고 있습니다.",
-    progress: 88,
+    description: "5개 라운드와 사용자 의견을 종합하여 최종 리포트를 작성하고 있습니다.",
+    progress: 97,
     activeAgent: "judge",
     humourLabel: "세 명의 전문가를 설득하는 데 성공했습니다!",
   },
@@ -401,7 +487,7 @@ export function Result() {
   const [messages, setMessages]               = useState<Message[]>([]);
   const [isComplete, setIsComplete]           = useState(false);
   const [isWaitingForUserInput, setIsWaitingForUserInput] = useState(false);
-  const [waitingStage, setWaitingStage] = useState<"round2" | "final" | null>(null);
+  const [waitingStage, setWaitingStage] = useState<WaitingStage | null>(null);
   const [showDetailedLogs, setShowDetailedLogs] = useState(true);
   const [error, setError]                     = useState("");
   const [recheckRequest, setRecheckRequest]   = useState<{ target: string; question: string } | null>(null);
@@ -424,7 +510,7 @@ export function Result() {
   // Phase 10.20 — 재분석 완료 후 1회성 안내 배너 ("이번 재검토에는 사용자 추가 질문 N건이 반영되었습니다")
   const [reanalyzeBadge, setReanalyzeBadge] = useState<{ count: number; at: string } | null>(null);
   const wasReanalyzingRef = useRef(false);
-  const continuationModeRef = useRef<"round2" | "final" | "reanalysis" | null>(null);
+  const continuationModeRef = useRef<InterventionMode | "reanalysis" | null>(null);
 
   // Phase 10.21 — staged reveal. messages 가 한꺼번에 도착해도 화면엔 1개씩 ~350ms 간격으로 등장.
   const [visibleCount, setVisibleCount] = useState(0);
@@ -566,9 +652,7 @@ export function Result() {
       if (result.finalDecision) {
         sessionStorage.setItem("finalDecision", JSON.stringify(result.finalDecision));
       } else if (
-        result.status === "WAITING_FOR_USER_INPUT"
-        || result.status === "WAITING_FOR_ROUND2_INPUT"
-        || result.status === "WAITING_FOR_FINAL_INPUT"
+        WAITING_STATUS_TO_STAGE[result.status]
       ) {
         sessionStorage.removeItem("finalDecision");
       }
@@ -649,13 +733,9 @@ export function Result() {
         // 단계별 라벨이 5%/12% 에 멈춘 것처럼 보이지 않도록 구체적 메시지 매핑.
         if (status.analysisPhase && phaseMap[status.analysisPhase]) {
           setCurrentPhase(phaseMap[status.analysisPhase]);
-        } else if (
-          status.status === "WAITING_FOR_USER_INPUT"
-          || status.status === "WAITING_FOR_ROUND2_INPUT"
-          || status.status === "WAITING_FOR_FINAL_INPUT"
-        ) {
+        } else if (WAITING_STATUS_TO_STAGE[status.status]) {
           cleanup();
-          const nextWaitingStage = status.status === "WAITING_FOR_FINAL_INPUT" ? "final" : "round2";
+          const nextWaitingStage = WAITING_STATUS_TO_STAGE[status.status];
           isCompleteRef.current = false;
           setIsComplete(false);
           setIsAnalyzing(false);
@@ -663,11 +743,9 @@ export function Result() {
           setWaitingStage(nextWaitingStage);
           await fetchDebateResult(sessionId, false);
           setCurrentPhase({
-            label: nextWaitingStage === "final" ? "Round 2 토론 완료" : "Round 1 검토 완료",
-            description: nextWaitingStage === "final"
-              ? "최종 라운드 전에 추가 질문이나 조건을 입력할 수 있습니다."
-              : "다음 라운드에 반영할 질문이나 조건을 입력할 수 있습니다.",
-            progress: nextWaitingStage === "final" ? 65 : 35,
+            label: waitingStatusLabel(nextWaitingStage),
+            description: waitingStatusDescription(nextWaitingStage),
+            progress: waitingProgress(nextWaitingStage),
             humourLabel: "AI 검토팀이 사용자 의견을 기다리고 있습니다.",
           });
         } else if (typeof status.messageCount === "number" && status.messageCount > 0) {
@@ -702,17 +780,17 @@ export function Result() {
         } else if (status.status === "REANALYZING") {
           const mode = continuationModeRef.current;
           const phaseLabel =
-            mode === "final"
-              ? "최종 라운드 진행 중"
-              : mode === "round2"
-                ? "다음 라운드 진행 중"
-                : "추가 재검토 진행 중";
+            mode === "completed" || mode === "reanalysis"
+              ? "추가 재검토 진행 중"
+              : mode === "round5"
+                ? "종합 라운드 진행 중"
+                : "다음 라운드 진행 중";
           const phaseDescription =
-            mode === "final"
-              ? "최종 라운드 에이전트들이 앞선 토론과 추가 질문을 종합하고 있습니다."
-              : mode === "round2"
-                ? "사용자 추가 질문과 조건을 포함해 다음 라운드 토론을 진행하고 있습니다."
-                : "완료된 검토에 새 질문을 더해 추가 재검토를 진행하고 있습니다.";
+            mode === "completed" || mode === "reanalysis"
+              ? "완료된 검토에 새 질문을 더해 추가 재검토를 진행하고 있습니다."
+              : mode === "round5"
+                ? "에이전트들이 앞선 토론과 추가 질문을 종합해 최종 리포트를 준비하고 있습니다."
+                : "사용자 추가 질문과 조건을 포함해 다음 라운드 토론을 진행하고 있습니다.";
           setCurrentPhase((prev) => ({
             ...prev,
             label: phaseLabel,
@@ -925,12 +1003,8 @@ export function Result() {
           setIsWaitingForUserInput(false);
           setWaitingStage(null);
           wasReanalyzingRef.current = true;
-        } else if (
-          e.status === "WAITING_FOR_USER_INPUT"
-          || e.status === "WAITING_FOR_ROUND2_INPUT"
-          || e.status === "WAITING_FOR_FINAL_INPUT"
-        ) {
-          const nextWaitingStage = e.status === "WAITING_FOR_FINAL_INPUT" ? "final" : "round2";
+        } else if (WAITING_STATUS_TO_STAGE[e.status]) {
+          const nextWaitingStage = WAITING_STATUS_TO_STAGE[e.status];
           isCompleteRef.current = false;
           setIsComplete(false);
           setIsAnalyzing(false);
@@ -1112,6 +1186,9 @@ export function Result() {
       } else if (lastAg === "judge") {
         speakingNow = undefined;
         nextUp = undefined;
+      } else if (lastAg === "risk" && currentRound < 5) {
+        speakingNow = undefined;
+        nextUp = undefined;
       } else {
         speakingNow = nextSpeakerOrder[idx + 1];
         nextUp = nextSpeakerOrder[idx + 2];
@@ -1126,9 +1203,8 @@ export function Result() {
     const roundLabel = (() => {
       if (!isAnalyzing) return null;
       if (visible.length === 0) return "분석 준비 중";
-      if (currentRound >= 3) return "Round 3 · 최종 토론 및 판단";
-      if (currentRound === 2) return "Round 2 · 사용자 질문 반영 토론";
-      if (visible.length >= 2) return "Round 1 · 초기 분석";
+      if (currentRound >= 1) return `Round ${currentRound} · ${roundTitle(currentRound)}`;
+      if (visible.length >= 2) return "Round 1 · 사안 접수 및 초기 쟁점 식별";
       return `Round ${currentRound}`;
     })();
 
@@ -1412,12 +1488,10 @@ export function Result() {
               <CardContent className="pt-6">
                 <div className="flex items-center gap-2 text-emerald-800 font-medium">
                   <CheckCircle2 className="w-5 h-5" />
-                  {waitingStage === "final" ? "Round 2 토론이 끝났습니다." : "Round 1 검토가 끝났습니다."}
+                  {waitingStage ? waitingStatusLabel(waitingStage) : "이번 라운드 검토가 끝났습니다."}
                 </div>
                 <p className="text-sm text-emerald-700 mt-2">
-                  {waitingStage === "final"
-                    ? "최종 라운드 전에 추가로 확인할 질문이나 조건이 있나요? 질문이 없다면 바로 최종 라운드를 진행할 수 있습니다."
-                    : "다음 라운드에 반영할 질문이나 추가 조건을 입력하세요. 질문이 없다면 바로 다음 라운드를 진행할 수 있습니다."}
+                  {waitingStage ? waitingStatusDescription(waitingStage) : "추가 질문이나 조건을 입력해 검토 방향을 보완해 주세요."}
                 </p>
               </CardContent>
             </Card>
@@ -1659,12 +1733,13 @@ export function Result() {
                 {isComplete ? (
                   <>
                     ※ 완료 후 새 질문은 <strong>추가 재검토 요청</strong>에서 반영할 수 있습니다.
-                    기존 Round 1·2·3 토론과 최종 판단은 유지되고, 새 재검토 결과가 아래에 이어집니다.
+                    기존 Round 1~5 토론과 최종 판단은 유지되고, 새 재검토 결과가 아래에 이어집니다.
                   </>
-                ) : waitingStage === "final" ? (
+                ) : waitingStage ? (
                   <>
-                    ※ 추가 질문을 남기고 <strong>최종 라운드 시작</strong> 버튼을 누르면, Round 3 토론과 최종 판정에 반영됩니다.
-                    기존 Round 1·2 토론은 그대로 유지됩니다.
+                    ※ 추가 질문을 남기고 <strong>{waitingStage === "round5" ? "종합 라운드 시작" : "다음 라운드에 반영"}</strong> 버튼을 누르면,
+                    Round {stageTargetRound(waitingStage)} {roundTitle(stageTargetRound(waitingStage))}에 반영됩니다.
+                    기존 Round 1~{stageTargetRound(waitingStage) - 1} 토론은 그대로 유지됩니다.
                   </>
                 ) : (
                   <>
@@ -1690,7 +1765,7 @@ export function Result() {
               && (!q.reanalyzeStatus || q.reanalyzeStatus === "pending" || q.reanalyzeStatus === "failed")
             ).length}
             allowContinueWithoutQuestions={isWaitingForUserInput}
-            mode={isComplete ? "completed" : waitingStage === "final" ? "final" : "round"}
+            mode={isComplete ? "completed" : waitingStage ?? "round2"}
             onQuestionSaved={(q) => setUserFollowUps((prev) => {
               const exists = prev.some((p) =>
                 p.targetAgent !== "system"
@@ -1707,9 +1782,9 @@ export function Result() {
               setIsComplete(false);
               setIsAnalyzing(true);
               setIsWaitingForUserInput(false);
-              const startingFinalRound = waitingStage === "final";
-              continuationModeRef.current = isComplete ? "reanalysis" : startingFinalRound ? "final" : "round2";
-              const appliedRound: number | string = isComplete ? "reanalysis" : startingFinalRound ? 3 : 2;
+              const nextStage = waitingStage ?? "round2";
+              continuationModeRef.current = isComplete ? "reanalysis" : nextStage;
+              const appliedRound: number | string = isComplete ? "reanalysis" : stageTargetRound(nextStage);
               const hasPendingFollowUps = pendingFollowUpCount > 0;
               // Phase 10.22 — 시스템 메시지로 "추가 질문 반영 시작" 즉시 표시.
               // 사용자 질문 버블과 구분되도록 user follow-up 영역에 시스템 항목으로 prepend.
@@ -1726,13 +1801,13 @@ export function Result() {
                   {
                     targetAgent: "system",
                     message: isWaitingForUserInput
-                      ? startingFinalRound
+                      ? nextStage === "round5"
                         ? hasPendingFollowUps
-                          ? "추가 질문을 반영해 최종 라운드를 시작합니다. 기존 Round 1·2 토론은 유지되고 최종 라운드가 아래에 이어집니다."
-                          : "추가 질문 없이 최종 라운드를 시작합니다. 기존 Round 1·2 토론을 바탕으로 최종 판단을 정리합니다."
+                          ? "추가 질문을 반영해 종합 라운드를 시작합니다. 기존 Round 1~4 토론은 유지되고 최종 리포트가 아래에 이어집니다."
+                          : "추가 질문 없이 종합 라운드를 시작합니다. 기존 Round 1~4 토론을 바탕으로 최종 리포트를 정리합니다."
                         : hasPendingFollowUps
-                          ? "추가 질문을 반영해 다음 라운드를 시작합니다. 기존 Round 1 토론은 유지되고 새 라운드가 아래에 이어집니다."
-                          : "추가 질문 없이 다음 라운드를 시작합니다. 기존 Round 1 토론을 바탕으로 이어갑니다."
+                          ? `추가 질문을 반영해 Round ${stageTargetRound(nextStage)} ${roundTitle(stageTargetRound(nextStage))}를 시작합니다. 기존 토론은 유지되고 새 라운드가 아래에 이어집니다.`
+                          : `추가 질문 없이 Round ${stageTargetRound(nextStage)} ${roundTitle(stageTargetRound(nextStage))}를 시작합니다. 기존 검토 내용을 바탕으로 이어갑니다.`
                       : "추가 재검토를 시작합니다. 기존 토론 기록은 유지되고 새 결과가 아래에 이어집니다.",
                     createdAt: new Date().toISOString(),
                   },
@@ -1760,7 +1835,7 @@ function RoundInterventionBlock({
   existingFollowUps,
   pendingFollowUpCount,
   allowContinueWithoutQuestions,
-  mode = "round",
+  mode = "round2",
   onQuestionSaved,
   onReanalyzeStarted,
 }: {
@@ -1776,7 +1851,7 @@ function RoundInterventionBlock({
   existingFollowUps: FollowUpQuestion[];
   pendingFollowUpCount: number;
   allowContinueWithoutQuestions?: boolean;
-  mode?: "round" | "final" | "completed";
+  mode?: InterventionMode;
   onQuestionSaved?: (q: FollowUpQuestion) => void;
   onReanalyzeStarted?: (sessionId: string) => void;
   lastRoundMessages: Message[];
@@ -1790,7 +1865,8 @@ function RoundInterventionBlock({
   >("idle");
   const [followUpStatusMsg, setFollowUpStatusMsg] = useState<string>("");
   const isCompletedReview = mode === "completed";
-  const isFinalIntervention = mode === "final";
+  const isFinalIntervention = mode === "round5";
+  const targetRound = mode === "completed" ? null : stageTargetRound(mode);
 
   useEffect(() => {
     setSubmitted(false);
@@ -1817,7 +1893,7 @@ function RoundInterventionBlock({
       return;
     }
     setFollowUpStatus("reanalyzing");
-    setFollowUpStatusMsg(isCompletedReview ? "재검토 요청 중..." : isFinalIntervention ? "최종 라운드 요청 중..." : "다음 라운드 요청 중...");
+    setFollowUpStatusMsg(isCompletedReview ? "재검토 요청 중..." : isFinalIntervention ? "종합 라운드 요청 중..." : "다음 라운드 요청 중...");
     try {
       const res = await fetch(`http://localhost:8080/api/sessions/${sessionId}/reanalyze`, {
         method: "POST",
@@ -1830,19 +1906,19 @@ function RoundInterventionBlock({
           (data.followUpCount ?? 0) > 0
             ? isCompletedReview
               ? `추가 재검토를 시작했습니다 (질문 ${data.followUpCount}건 반영). 새 메시지가 도착하면 자동으로 표시됩니다.`
-              : `${isFinalIntervention ? "최종 라운드" : "다음 라운드"}를 시작했습니다 (질문 ${data.followUpCount}건 반영). 새 메시지가 도착하면 자동으로 표시됩니다.`
-            : `질문 없이 ${isFinalIntervention ? "최종 라운드" : "다음 라운드"}를 시작했습니다. 새 메시지가 도착하면 자동으로 표시됩니다.`,
+              : `${isFinalIntervention ? "종합 라운드" : `Round ${targetRound} ${roundTitle(targetRound || 0)}`}를 시작했습니다 (질문 ${data.followUpCount}건 반영). 새 메시지가 도착하면 자동으로 표시됩니다.`
+            : `질문 없이 ${isFinalIntervention ? "종합 라운드" : `Round ${targetRound} ${roundTitle(targetRound || 0)}`}를 시작했습니다. 새 메시지가 도착하면 자동으로 표시됩니다.`,
         );
         // polling 재시작 — 부모 콜백에 위임 (REANALYZING 상태 추적)
         onReanalyzeStarted?.(sessionId);
       } else {
         setFollowUpStatus("failed");
-        setFollowUpStatusMsg(data.error || (isCompletedReview ? "재검토 실행에 실패했습니다." : isFinalIntervention ? "최종 라운드 시작에 실패했습니다." : "다음 라운드 시작에 실패했습니다."));
+        setFollowUpStatusMsg(data.error || (isCompletedReview ? "재검토 실행에 실패했습니다." : isFinalIntervention ? "종합 라운드 시작에 실패했습니다." : "다음 라운드 시작에 실패했습니다."));
       }
     } catch (e) {
       console.error("[reanalyze] 실패", e);
       setFollowUpStatus("failed");
-      setFollowUpStatusMsg(isCompletedReview ? "재검토 요청 중 네트워크 오류가 발생했습니다." : isFinalIntervention ? "최종 라운드 요청 중 네트워크 오류가 발생했습니다." : "다음 라운드 요청 중 네트워크 오류가 발생했습니다.");
+      setFollowUpStatusMsg(isCompletedReview ? "재검토 요청 중 네트워크 오류가 발생했습니다." : isFinalIntervention ? "종합 라운드 요청 중 네트워크 오류가 발생했습니다." : "다음 라운드 요청 중 네트워크 오류가 발생했습니다.");
     }
   };
 
@@ -2015,7 +2091,7 @@ function RoundInterventionBlock({
         isCompletedReview
           ? "✓ 질문이 저장되었습니다. '추가 재검토 시작' 버튼을 누르면 새 검토에 반영됩니다."
           : isFinalIntervention
-            ? "✓ 질문이 저장되었습니다. '최종 라운드 시작' 버튼을 누르면 Round 3에 반영됩니다."
+            ? "✓ 질문이 저장되었습니다. '종합 라운드 시작' 버튼을 누르면 Round 5에 반영됩니다."
           : isAnalyzing
           ? "✓ 질문이 저장되었습니다. 현재 토론이 끝난 뒤 '다음 라운드에 반영' 버튼을 눌러주세요."
           : "✓ 질문이 저장되었습니다. '다음 라운드에 반영' 버튼을 누르면 추가 질문을 반영해 다음 라운드를 시작합니다.",
@@ -2053,8 +2129,8 @@ function RoundInterventionBlock({
           {isCompletedReview
             ? "추가 재검토 요청"
             : isFinalIntervention
-              ? "최종 라운드 전에 추가로 확인할 질문이나 조건이 있나요?"
-              : "다음 라운드에 반영할 질문이나 추가 조건이 있나요?"}
+              ? "종합 라운드 전에 추가로 확인할 마지막 질문이나 조건이 있나요?"
+              : `Round ${targetRound} ${roundTitle(targetRound || 0)}에 반영할 질문이나 추가 조건이 있나요?`}
         </div>
         <p className="text-xs text-slate-600">
           {isCompletedReview ? (
@@ -2064,8 +2140,8 @@ function RoundInterventionBlock({
             </>
           ) : isFinalIntervention ? (
             <>
-              Round 2 답변을 본 뒤 최종 판단 전에 더 확인할 질문이나 조건을 남길 수 있습니다.
-              질문을 남기지 않아도 최종 라운드로 바로 진행할 수 있고, 남긴 질문은 Round 3 에이전트 의견과 최종 판정에 반영됩니다.
+              Round 4 답변을 본 뒤 최종 리포트 전에 더 확인할 질문이나 조건을 남길 수 있습니다.
+              질문을 남기지 않아도 종합 라운드로 바로 진행할 수 있고, 남긴 질문은 Round 5 에이전트 의견과 최종 판정에 반영됩니다.
             </>
           ) : (
             <>
@@ -2122,8 +2198,8 @@ function RoundInterventionBlock({
             placeholder={isCompletedReview
               ? "재검토할 질문을 입력하세요. (예: 정산 자료가 부족한 경우 환수 가능성이 있나요?)"
               : isFinalIntervention
-                ? "최종 라운드 전에 반영할 질문이나 조건을 입력하세요. (예: IP 귀속 조항을 더 강하게 요구해야 하나요?)"
-              : "다음 라운드에 반영할 질문이나 추가 조건을 입력하세요. (예: 개인정보를 이름과 연락처만 수집하는 경우도 위험한가요?)"}
+                ? "종합 라운드 전에 반영할 마지막 질문이나 조건을 입력하세요. (예: IP 귀속 조항을 더 강하게 요구해야 하나요?)"
+              : `Round ${targetRound}에 반영할 질문이나 추가 조건을 입력하세요. (예: 개인정보를 이름과 연락처만 수집하는 경우도 위험한가요?)`}
             rows={2}
             aria-label="추가 질문 입력"
             className="min-h-[64px] rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:border-[#1E3A8A] focus:outline-none"
@@ -2139,7 +2215,7 @@ function RoundInterventionBlock({
                 현재 저장 상태입니다. {isCompletedReview
                   ? "'추가 재검토 시작' 버튼을 누르면 이 질문이 새 검토에 포함됩니다."
                   : isFinalIntervention
-                    ? "'최종 라운드 시작' 버튼을 누르면 이 질문이 Round 3 AI 검토에 포함됩니다."
+                    ? "'종합 라운드 시작' 버튼을 누르면 이 질문이 Round 5 AI 검토에 포함됩니다."
                   : "'다음 라운드에 반영' 버튼을 누르면 이 질문이 다음 라운드 AI 검토에 포함됩니다."}
               </span>
             </span>
@@ -2168,18 +2244,18 @@ function RoundInterventionBlock({
               onClick={handleReanalyze}
               disabled={isAnalyzing || followUpStatus === "reanalyzing" || (pendingFollowUpCount <= 0 && !allowContinueWithoutQuestions)}
               className="rounded-md border border-[#1E3A8A] bg-[#1E3A8A] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#16306f] disabled:opacity-50"
-              title={isCompletedReview ? "저장된 질문을 추가 재검토에 포함합니다." : isFinalIntervention ? "저장된 질문을 최종 라운드 AI 분석에 포함합니다." : "저장된 질문을 다음 라운드 AI 분석에 포함합니다."}
+              title={isCompletedReview ? "저장된 질문을 추가 재검토에 포함합니다." : isFinalIntervention ? "저장된 질문을 종합 라운드 AI 분석에 포함합니다." : "저장된 질문을 다음 라운드 AI 분석에 포함합니다."}
             >
               {followUpStatus === "reanalyzing"
-                ? (isCompletedReview ? "재검토 시작 중..." : isFinalIntervention ? "최종 라운드 시작 중..." : "다음 라운드 시작 중...")
+                ? (isCompletedReview ? "재검토 시작 중..." : isFinalIntervention ? "종합 라운드 시작 중..." : "다음 라운드 시작 중...")
                 : followUpStatus === "reanalyzed"
-                ? (isCompletedReview ? "✓ 재검토 진행 중 (자동 갱신)" : isFinalIntervention ? "✓ 최종 라운드 진행 중 (자동 갱신)" : "✓ 다음 라운드 진행 중 (자동 갱신)")
+                ? (isCompletedReview ? "✓ 재검토 진행 중 (자동 갱신)" : isFinalIntervention ? "✓ 종합 라운드 진행 중 (자동 갱신)" : "✓ 다음 라운드 진행 중 (자동 갱신)")
                 : isCompletedReview
                   ? "추가 재검토 시작"
                   : isFinalIntervention
                     ? pendingFollowUpCount > 0
-                      ? "최종 라운드 시작"
-                      : "질문 없이 최종 라운드 진행"
+                    ? "종합 라운드 시작"
+                    : "질문 없이 종합 라운드 진행"
                   : pendingFollowUpCount > 0
                     ? "다음 라운드에 반영"
                     : "질문 없이 다음 라운드 진행"}
@@ -2254,24 +2330,25 @@ function LiveDebateTimeline({
     | { kind: "agent"; msg: Message; idx: number }
     | { kind: "user"; q: FollowUpQuestion; idx: number }
     | { kind: "userGroup"; questions: FollowUpQuestion[]; idx: number; label: string };
-  type TimelineStage = "initial" | "intervention" | "recheck" | "final" | "general";
+  type TimelineStage = number | "intervention" | "reanalysis" | "general";
   const stageLabel = (stage: TimelineStage) => {
+    if (typeof stage === "number") return `Round ${stage} · ${roundTitle(stage)}`;
     switch (stage) {
-      case "initial": return "Round 1 · 초기 검토";
       case "intervention": return "사용자 추가 질문";
-      case "recheck": return "Round 2 · 사용자 질문 반영 토론";
-      case "final": return "Round 3 · 최종 토론 및 판단";
+      case "reanalysis": return "추가 재검토 결과";
       default: return "검토 의견";
     }
   };
   const activeFollowUps = userFollowUps.filter((q) =>
     q.targetAgent !== "system" && q.reanalyzeStatus !== "deleted" && q.message.trim(),
   );
-  const round2FollowUps = activeFollowUps.filter((q) =>
-    String(q.appliedRound ?? "") === "2"
-    || (!q.appliedRound && q.reanalyzeStatus !== "pending")
-  );
-  const round3FollowUps = activeFollowUps.filter((q) => String(q.appliedRound ?? "") === "3");
+  const followUpsByRound = new Map<number, FollowUpQuestion[]>();
+  for (const round of [2, 3, 4, 5]) {
+    followUpsByRound.set(round, activeFollowUps.filter((q) =>
+      String(q.appliedRound ?? "") === String(round)
+      || (round === 2 && !q.appliedRound && q.reanalyzeStatus !== "pending")
+    ));
+  }
   // Phase 10.21 — staged reveal: 부모가 계산한 visibleCount 만큼만 표시.
   // 재검토 세션에서는 이전 최종 판정관의 긴 결론은 타임라인에서 숨기고, 최신 최종 판단만 Round 3에 표시한다.
   const rawVisibleMessages = messages.slice(0, visibleCount);
@@ -2289,29 +2366,25 @@ function LiveDebateTimeline({
   const visibleMessages = visibleMessageItems.map((item) => item.msg);
   const systemFollowUps = userFollowUps.filter((q) => q.targetAgent === "system");
   const items: Item[] = [];
-  let insertedRound2QuestionBlock = false;
-  let insertedRound3QuestionBlock = false;
+  const insertedQuestionBlocks = new Set<number>();
   let prevAgentRound = 0;
   let prevAgentWasJudge = false;
   visibleMessageItems.forEach(({ msg: m, originalIdx }, i) => {
     const agKey = resolveAgentKey(m.agentId, m.agentName, m.type);
     const isSystem = m.agentId === "system" || m.type === "system" || m.type === "error";
     const isJudge = agKey === "judge";
-    const firstRound2Message = round2FollowUps.length > 0 && !isSystem && Number(m.round) === 2;
-    const firstRound3Message = round3FollowUps.length > 0 && !isSystem && Number(m.round) === 3;
+    const msgRound = Number(m.round || 0);
+    const roundQuestions = followUpsByRound.get(msgRound) || [];
+    const firstRoundMessageWithQuestions = msgRound >= 2 && roundQuestions.length > 0 && !isSystem;
     const afterInitialJudge = activeFollowUps.length > 0
       && firstJudgeIndex >= 0
       && originalIdx > firstJudgeIndex
       && !isSystem
       && !isJudge;
-    const roundReset = !isSystem && i > 0 && (firstRound2Message || firstRound3Message || afterInitialJudge || m.round < prevAgentRound || (prevAgentWasJudge && !isJudge));
-    if (roundReset && firstRound2Message && !insertedRound2QuestionBlock) {
-      items.push({ kind: "userGroup", questions: round2FollowUps, idx: i, label: "사용자 추가 질문 1차" });
-      insertedRound2QuestionBlock = true;
-    }
-    if (roundReset && firstRound3Message && !insertedRound3QuestionBlock) {
-      items.push({ kind: "userGroup", questions: round3FollowUps, idx: i, label: "사용자 추가 질문 2차" });
-      insertedRound3QuestionBlock = true;
+    const roundReset = !isSystem && i > 0 && (firstRoundMessageWithQuestions || afterInitialJudge || m.round < prevAgentRound || (prevAgentWasJudge && !isJudge));
+    if (roundReset && firstRoundMessageWithQuestions && !insertedQuestionBlocks.has(msgRound)) {
+      items.push({ kind: "userGroup", questions: roundQuestions, idx: i, label: `사용자 추가 질문 ${msgRound - 1}차` });
+      insertedQuestionBlocks.add(msgRound);
     }
     items.push({ kind: "agent", msg: m, idx: i });
     if (!isSystem) {
@@ -2319,30 +2392,19 @@ function LiveDebateTimeline({
       prevAgentWasJudge = isJudge;
     }
   });
-  if (!insertedRound2QuestionBlock && round2FollowUps.length > 0) {
-    const hasInProgress = round2FollowUps.some((q) =>
+  for (const round of [2, 3, 4, 5]) {
+    const questions = followUpsByRound.get(round) || [];
+    if (insertedQuestionBlocks.has(round) || questions.length === 0) continue;
+    const hasApplied = questions.some((q) =>
       q.reanalyzeStatus === "in-progress"
       || q.reanalyzeStatus === "completed"
       || q.reanalyzeStatus === "reflected"
       || q.reanalyzeStatus === "partial"
       || q.reanalyzeStatus === "failed"
     );
-    if (hasInProgress || visibleMessages.length === 0) {
-      items.push({ kind: "userGroup", questions: round2FollowUps, idx: visibleMessages.length, label: "사용자 추가 질문 1차" });
-      insertedRound2QuestionBlock = true;
-    }
-  }
-  if (!insertedRound3QuestionBlock && round3FollowUps.length > 0) {
-    const hasInProgress = round3FollowUps.some((q) =>
-      q.reanalyzeStatus === "in-progress"
-      || q.reanalyzeStatus === "completed"
-      || q.reanalyzeStatus === "reflected"
-      || q.reanalyzeStatus === "partial"
-      || q.reanalyzeStatus === "failed"
-    );
-    if (hasInProgress || visibleMessages.some((m) => Number(m.round) >= 2)) {
-      items.push({ kind: "userGroup", questions: round3FollowUps, idx: visibleMessages.length, label: "사용자 추가 질문 2차" });
-      insertedRound3QuestionBlock = true;
+    if (hasApplied || visibleMessages.some((m) => Number(m.round) >= round - 1)) {
+      items.push({ kind: "userGroup", questions, idx: visibleMessages.length, label: `사용자 추가 질문 ${round - 1}차` });
+      insertedQuestionBlocks.add(round);
     }
   }
   systemFollowUps.forEach((q, i) => items.push({ kind: "user", q, idx: visibleMessages.length + i }));
@@ -2438,7 +2500,7 @@ function LiveDebateTimeline({
                 </div>
                 <div className="ml-auto max-w-[86%] rounded-2xl rounded-tr-sm bg-[#1E3A8A] px-4 py-3 text-sm text-white shadow-sm">
                   <div className="mb-1 text-[10.5px] opacity-80">
-                    다음 라운드에 반영합니다 · {item.questions.length}건
+                    {item.label.includes("4차") ? "종합 라운드에 반영합니다" : "다음 라운드에 반영합니다"} · {item.questions.length}건
                   </div>
                   <ol className="list-decimal space-y-1 pl-4">
                     {item.questions.map((q, qi) => (
@@ -2457,7 +2519,7 @@ function LiveDebateTimeline({
             if (item.q.targetAgent === "system") {
               const msg = item.q.message || "";
               // 재검토 시작 / 재검토 완료 / 재검토 실패 / 부분 완료 분기
-              const isStart = /시작|REANALYZING|다음 라운드|재검토를 시작/.test(msg);
+              const isStart = /시작|REANALYZING|다음 라운드|종합 라운드|재검토를 시작/.test(msg);
               const isFail = /실패|FAILED|문제가 발생/.test(msg);
               const isPartial = /일부|부분|partial/i.test(msg);
               const isDone = /완료|COMPLETED|반영되었습니다/.test(msg) && !isPartial;
@@ -2512,7 +2574,7 @@ function LiveDebateTimeline({
             const isFail = msg.type === "error" || /실패|FAILED|문제가 발생|연결에 실패/.test(text);
             const isPartial = /일부|부분|partial/i.test(text);
             const isDone = /완료|COMPLETED|반영되었습니다/.test(text) && !isPartial && !isFail;
-            const isStart = /시작|REANALYZING|다음 라운드|재검토를 시작/.test(text);
+            const isStart = /시작|REANALYZING|다음 라운드|종합 라운드|재검토를 시작/.test(text);
             if (isStart) { inReanalyzeSegment = true; }
             const tone = isFail
               ? { line: "bg-red-300", chip: "border-red-300 bg-red-50 text-red-800", icon: "⚠" }
@@ -2537,17 +2599,11 @@ function LiveDebateTimeline({
           const Icon = agent.icon;
           const isJudge = agKey === "judge";
           const roundNo = Number(msg.round || 0);
-          const stage: TimelineStage = roundNo === 1
-            ? "initial"
-            : roundNo === 2
-              ? "recheck"
-              : roundNo === 3
-                ? "final"
-                : isJudge
-                  ? "final"
-                  : inReanalyzeSegment
-                    ? "recheck"
-                    : "general";
+          const stage: TimelineStage = roundNo >= 1 && roundNo <= 5
+            ? roundNo
+            : inReanalyzeSegment
+              ? "reanalysis"
+              : "general";
           const showRoundHeader = stage !== lastStage;
           lastStage = stage;
 
@@ -2555,9 +2611,9 @@ function LiveDebateTimeline({
             <div key={`a-${i}`} className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-400">
               {showRoundHeader && (
                 <div className="flex items-center gap-2 pt-1">
-                  <div className={`h-px flex-1 ${stage === "recheck" ? "bg-emerald-200" : "bg-slate-200"}`} />
+                  <div className={`h-px flex-1 ${typeof stage === "number" && stage >= 2 ? "bg-emerald-200" : "bg-slate-200"}`} />
                   <span className={`rounded-full border px-2 py-0.5 text-[10px] ${
-                    stage === "recheck"
+                    typeof stage === "number" && stage >= 2
                       ? "border-emerald-300 bg-emerald-50 text-emerald-700"
                       : "border-slate-200 bg-slate-50 text-slate-600"
                   }`}>

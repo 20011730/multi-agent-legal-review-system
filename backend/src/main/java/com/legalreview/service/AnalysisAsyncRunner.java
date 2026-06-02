@@ -95,8 +95,18 @@ public class AnalysisAsyncRunner {
                 String label = switch (phase == null ? "" : phase) {
                     case "ROUND1_BIZ" -> "비즈니스 전략가가 사업 관점 리스크를 분석 중입니다.";
                     case "ROUND1_LEGAL" -> "법률 전문가가 관련 법령·판례 근거를 확인하고 있습니다.";
-                    case "ROUND2_BIZ" -> "비즈니스 측이 법률 측 지적에 대응 중입니다.";
-                    case "ROUND2_LEGAL" -> "법률 측이 비즈니스 측 대응을 반영해 보완 의견을 정리 중입니다.";
+                    case "ROUND2_BIZ" -> "비즈니스 전략가가 사실관계와 증빙자료를 보완 중입니다.";
+                    case "ROUND2_LEGAL" -> "법률 전문가가 보완된 자료의 의미를 정리 중입니다.";
+                    case "ROUND2_RISK" -> "리스크 검토자가 부족한 사실관계를 점검 중입니다.";
+                    case "ROUND3_BIZ" -> "비즈니스 전략가가 근거 검토의 사업 영향을 확인 중입니다.";
+                    case "ROUND3_LEGAL" -> "법률 전문가가 법령·판례 근거를 검토 중입니다.";
+                    case "ROUND3_RISK" -> "리스크 검토자가 근거 부족 부분을 정리 중입니다.";
+                    case "ROUND4_BIZ" -> "비즈니스 전략가가 반론과 실행 시나리오를 검토 중입니다.";
+                    case "ROUND4_LEGAL" -> "법률 전문가가 보수적 해석과 반론을 검토 중입니다.";
+                    case "ROUND4_RISK" -> "리스크 검토자가 최악의 상황과 대응 방안을 분석 중입니다.";
+                    case "ROUND5_BIZ" -> "비즈니스 전략가가 실행 체크리스트를 정리 중입니다.";
+                    case "ROUND5_LEGAL" -> "법률 전문가가 최종 법률 조건을 확인 중입니다.";
+                    case "ROUND5_RISK" -> "리스크 검토자가 최종 우선순위를 정리 중입니다.";
                     case "JUDGING" -> "최종 판정관이 합의된 권고안을 정리하고 있습니다.";
                     case "COLLECTING_EVIDENCE" -> "관련 법령·판례 근거를 확인하고 있습니다.";
                     default -> phase;
@@ -159,6 +169,8 @@ public class AnalysisAsyncRunner {
 
             boolean round1Only = "ROUND1_ONLY".equalsIgnoreCase(request.getAnalysisMode());
             boolean round2Only = "ROUND2_ONLY".equalsIgnoreCase(request.getAnalysisMode());
+            boolean round3Only = "ROUND3_ONLY".equalsIgnoreCase(request.getAnalysisMode());
+            boolean round4Only = "ROUND4_ONLY".equalsIgnoreCase(request.getAnalysisMode());
             if (round1Only) {
                 session.setStatus("WAITING_FOR_ROUND2_INPUT");
                 session.setAnalysisPhase(null);
@@ -173,17 +185,45 @@ public class AnalysisAsyncRunner {
                 return;
             }
             if (round2Only) {
-                session.setStatus("WAITING_FOR_FINAL_INPUT");
+                session.setStatus("WAITING_FOR_ROUND3_INPUT");
                 session.setAnalysisPhase(null);
                 updateFollowUpReanalyzeStatus(session, "reflected");
                 sessionRepository.save(session);
                 try {
-                    streamService.publishStatus(sessionId, "WAITING_FOR_FINAL_INPUT", 65,
-                            "Round 2 토론이 끝났습니다. 최종 라운드 전에 추가 질문이나 조건을 입력해 주세요.");
+                    streamService.publishStatus(sessionId, "WAITING_FOR_ROUND3_INPUT", 55,
+                            "Round 2 토론이 끝났습니다. 법령·판례 근거 검토 전에 추가 질문이나 조건을 입력해 주세요.");
                 } catch (Exception sseErr) {
                     log.debug("[SSE] final waiting publish 실패 (무시): {}", sseErr.getMessage());
                 }
-                log.info("Round 2 완료 후 최종 라운드 입력 대기 (sessionId={})", sessionId);
+                log.info("Round 2 완료 후 근거 검토 입력 대기 (sessionId={})", sessionId);
+                return;
+            }
+            if (round3Only) {
+                session.setStatus("WAITING_FOR_ROUND4_INPUT");
+                session.setAnalysisPhase(null);
+                updateFollowUpReanalyzeStatus(session, "reflected");
+                sessionRepository.save(session);
+                try {
+                    streamService.publishStatus(sessionId, "WAITING_FOR_ROUND4_INPUT", 70,
+                            "Round 3 근거 검토가 끝났습니다. 반론 검증 전에 추가 질문이나 조건을 입력해 주세요.");
+                } catch (Exception sseErr) {
+                    log.debug("[SSE] round4 waiting publish 실패 (무시): {}", sseErr.getMessage());
+                }
+                log.info("Round 3 완료 후 반론 검증 입력 대기 (sessionId={})", sessionId);
+                return;
+            }
+            if (round4Only) {
+                session.setStatus("WAITING_FOR_ROUND5_INPUT");
+                session.setAnalysisPhase(null);
+                updateFollowUpReanalyzeStatus(session, "reflected");
+                sessionRepository.save(session);
+                try {
+                    streamService.publishStatus(sessionId, "WAITING_FOR_ROUND5_INPUT", 82,
+                            "Round 4 반론 검증이 끝났습니다. 종합 의견 전에 마지막 질문이나 조건을 입력해 주세요.");
+                } catch (Exception sseErr) {
+                    log.debug("[SSE] round5 waiting publish 실패 (무시): {}", sseErr.getMessage());
+                }
+                log.info("Round 4 완료 후 종합 라운드 입력 대기 (sessionId={})", sessionId);
                 return;
             }
 
@@ -360,14 +400,15 @@ public class AnalysisAsyncRunner {
 
         // Phase 10.64 — source 별 evidence 분리:
         //   primary  : 법령(laws_e5) + 운영 판례(cases_e5) — dataSource null or "cases_e5"/"laws_e5"
-        //   extended : 확장 판례 샘플 — dataSource = "extended_case_sample"
+        //   extended : 확장 판례 — dataSource startsWith "extended_case"
         // case_number 기준 dedup → primary 가 이미 가지고 있는 사건은 extended 에서 제외.
         java.util.List<com.legalreview.dto.response.EvidenceDto> primary = new java.util.ArrayList<>();
         java.util.List<com.legalreview.dto.response.EvidenceDto> extended = new java.util.ArrayList<>();
         java.util.Set<String> seenCaseNumbers = new java.util.HashSet<>();
+        boolean fullOnlyCases = isFullOnlyCaseMode();
         for (var e : evs) {
-            boolean isExtended = "extended_case_sample".equalsIgnoreCase(e.getDataSource());
-            if (isExtended) {
+            boolean isExtended = isExtendedCaseEvidence(e);
+            if (isExtended && !fullOnlyCases) {
                 String cn = stringMeta(e.getMetadata(), "case_number");
                 if (!cn.isEmpty() && seenCaseNumbers.contains(cn)) continue; // dedup
                 if (!cn.isEmpty()) seenCaseNumbers.add(cn);
@@ -452,6 +493,11 @@ public class AnalysisAsyncRunner {
         return v == null ? "" : v.toString();
     }
 
+    private static boolean isExtendedCaseEvidence(com.legalreview.dto.response.EvidenceDto e) {
+        String ds = e == null ? null : e.getDataSource();
+        return ds != null && ds.toLowerCase().startsWith("extended_case");
+    }
+
     /**
      * BIZ/JUDGE 에이전트용 요약 evidence 블록 — 타이틀 위주, 짧게.
      */
@@ -460,8 +506,9 @@ public class AnalysisAsyncRunner {
         int maxItems = ragProperties.getPrompt().getMaxItemsCommon();
         // Phase 10.64 — BIZ/JUDGE 프롬프트에는 확장 판례 노이즈 제외 (운영 cases_e5/laws_e5 만)
         java.util.List<com.legalreview.dto.response.EvidenceDto> primaryOnly = new java.util.ArrayList<>();
+        boolean fullOnlyCases = isFullOnlyCaseMode();
         for (var e : evs) {
-            if ("extended_case_sample".equalsIgnoreCase(e.getDataSource())) continue;
+            if (isExtendedCaseEvidence(e) && !fullOnlyCases) continue;
             primaryOnly.add(e);
         }
         StringBuilder sb = new StringBuilder();
@@ -480,6 +527,13 @@ public class AnalysisAsyncRunner {
         return s.length() <= max ? s : s.substring(0, max) + "...";
     }
 
+    private boolean isFullOnlyCaseMode() {
+        String mode = ragProperties.getChroma().getCaseSearchMode();
+        if (mode == null) return false;
+        mode = mode.toLowerCase();
+        return "extended".equals(mode) || "full_only".equals(mode);
+    }
+
     // ========== Phase 10.44 — followUp 개별 reanalyzeStatus 갱신 ==========
 
     private boolean isPythonStepwiseMode(SessionCreateRequest request) {
@@ -487,6 +541,9 @@ public class AnalysisAsyncRunner {
         return mode != null && (
                 "ROUND1_ONLY".equalsIgnoreCase(mode)
                         || "ROUND2_ONLY".equalsIgnoreCase(mode)
+                        || "ROUND3_ONLY".equalsIgnoreCase(mode)
+                        || "ROUND4_ONLY".equalsIgnoreCase(mode)
+                        || "ROUND5_FINAL".equalsIgnoreCase(mode)
                         || "ROUND3_FINAL".equalsIgnoreCase(mode)
                         || "ROUND2_FINAL".equalsIgnoreCase(mode)
         );
@@ -502,10 +559,15 @@ public class AnalysisAsyncRunner {
         java.util.List<String> steps = switch (originalMode == null ? "" : originalMode.toUpperCase()) {
             case "ROUND1_ONLY" -> java.util.List.of("ROUND1_BUSINESS", "ROUND1_LEGAL", "ROUND1_RISK");
             case "ROUND2_ONLY" -> java.util.List.of("ROUND2_BUSINESS", "ROUND2_LEGAL", "ROUND2_RISK");
+            case "ROUND3_ONLY" -> java.util.List.of("ROUND3_BUSINESS", "ROUND3_LEGAL", "ROUND3_RISK");
+            case "ROUND4_ONLY" -> java.util.List.of("ROUND4_BUSINESS", "ROUND4_LEGAL", "ROUND4_RISK");
+            case "ROUND5_FINAL" -> java.util.List.of("ROUND5_BUSINESS", "ROUND5_LEGAL", "ROUND5_RISK", "ROUND5_JUDGE");
             case "ROUND3_FINAL" -> java.util.List.of("ROUND3_BUSINESS", "ROUND3_LEGAL", "ROUND3_RISK", "ROUND3_JUDGE");
             default -> java.util.List.of(
-                    "ROUND2_BUSINESS", "ROUND2_LEGAL", "ROUND2_RISK",
-                    "ROUND3_BUSINESS", "ROUND3_LEGAL", "ROUND3_RISK", "ROUND3_JUDGE"
+                "ROUND2_BUSINESS", "ROUND2_LEGAL", "ROUND2_RISK",
+                    "ROUND3_BUSINESS", "ROUND3_LEGAL", "ROUND3_RISK",
+                    "ROUND4_BUSINESS", "ROUND4_LEGAL", "ROUND4_RISK",
+                    "ROUND5_BUSINESS", "ROUND5_LEGAL", "ROUND5_RISK", "ROUND5_JUDGE"
             );
         };
 
@@ -541,7 +603,14 @@ public class AnalysisAsyncRunner {
             case "ROUND3_BUSINESS" -> "ROUND3_BIZ";
             case "ROUND3_LEGAL" -> "ROUND3_LEGAL";
             case "ROUND3_RISK" -> "ROUND3_RISK";
+            case "ROUND4_BUSINESS" -> "ROUND4_BIZ";
+            case "ROUND4_LEGAL" -> "ROUND4_LEGAL";
+            case "ROUND4_RISK" -> "ROUND4_RISK";
+            case "ROUND5_BUSINESS" -> "ROUND5_BIZ";
+            case "ROUND5_LEGAL" -> "ROUND5_LEGAL";
+            case "ROUND5_RISK" -> "ROUND5_RISK";
             case "ROUND3_JUDGE" -> "JUDGING";
+            case "ROUND5_JUDGE" -> "JUDGING";
             default -> step;
         };
         phaseCallback.accept(phase);
@@ -552,10 +621,17 @@ public class AnalysisAsyncRunner {
             case "ROUND2_BUSINESS" -> "비즈니스 전략가가 사용자 질문을 반영해 의견을 보완 중입니다.";
             case "ROUND2_LEGAL" -> "법률 전문가가 사용자 질문을 반영해 법률 쟁점을 보완 중입니다.";
             case "ROUND2_RISK" -> "리스크 검토자가 사용자 질문을 반영해 우선순위를 점검 중입니다.";
-            case "ROUND3_BUSINESS" -> "비즈니스 전략가가 최종 사업 관점 의견을 정리 중입니다.";
-            case "ROUND3_LEGAL" -> "법률 전문가가 최종 법률 관점 의견을 정리 중입니다.";
-            case "ROUND3_RISK" -> "리스크 검토자가 남은 리스크와 우선순위를 정리 중입니다.";
+            case "ROUND3_BUSINESS" -> "비즈니스 전략가가 법령·판례 근거의 사업 영향도를 확인 중입니다.";
+            case "ROUND3_LEGAL" -> "법률 전문가가 법령·판례 근거를 검토 중입니다.";
+            case "ROUND3_RISK" -> "리스크 검토자가 근거가 부족한 부분과 추가 확인 사항을 정리 중입니다.";
+            case "ROUND4_BUSINESS" -> "비즈니스 전략가가 낙관적 실행 시나리오와 반론을 검토 중입니다.";
+            case "ROUND4_LEGAL" -> "법률 전문가가 보수적 해석과 반론 가능성을 검토 중입니다.";
+            case "ROUND4_RISK" -> "리스크 검토자가 최악의 상황과 대응 우선순위를 분석 중입니다.";
+            case "ROUND5_BUSINESS" -> "비즈니스 전략가가 최종 실행 가능 조건을 정리 중입니다.";
+            case "ROUND5_LEGAL" -> "법률 전문가가 최종 법률 조건과 필요한 문서를 확인 중입니다.";
+            case "ROUND5_RISK" -> "리스크 검토자가 실행 체크리스트의 우선순위를 정리 중입니다.";
             case "ROUND3_JUDGE" -> "최종 판정관이 앞선 의견을 종합해 결론을 정리 중입니다.";
+            case "ROUND5_JUDGE" -> "최종 판정관이 5개 라운드와 사용자 의견을 종합해 최종 리포트를 정리 중입니다.";
             default -> "AI 검토팀이 다음 의견을 준비 중입니다.";
         };
         try {

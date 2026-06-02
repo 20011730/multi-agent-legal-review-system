@@ -4,7 +4,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Building2, Calendar, ExternalLink, MapPin, Sparkles, Target, Brain, Scale, Info } from "lucide-react";
+import { Building2, Calendar, ExternalLink, MapPin, Sparkles, Target, Brain, Scale, Info, Bookmark } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
@@ -14,6 +14,9 @@ import { StartupSupportDetailModal } from "./StartupSupportDetailModal";
 
 interface SupportCardProps {
   item: SupportItem;
+  saved?: boolean;
+  saving?: boolean;
+  onToggleSaved?: (item: SupportItem) => void;
 }
 
 function statusBadgeClass(status: SupportStatus | string): string {
@@ -88,7 +91,7 @@ function calcPosition(anchor: DOMRect): { top: number; left: number; placeBelow:
   return { top, left, placeBelow };
 }
 
-export function SupportCard({ item }: SupportCardProps) {
+export function SupportCard({ item, saved = false, saving = false, onToggleSaved }: SupportCardProps) {
   const insight = useMemo(() => buildStartupSupportInsight(item), [item]);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -216,6 +219,22 @@ export function SupportCard({ item }: SupportCardProps) {
             <Brain className="h-3 w-3" />
             추천도 {insight.level}
           </button>
+          {onToggleSaved && (
+            <button
+              type="button"
+              onClick={() => onToggleSaved(item)}
+              disabled={saving}
+              aria-label={saved ? "관심 공고에서 제거" : "관심 공고 저장"}
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition focus:outline-none focus:ring-2 focus:ring-[#1E3A8A]/30 disabled:opacity-60 ${
+                saved
+                  ? "border-[#1E3A8A]/35 bg-[#1E3A8A]/10 text-[#1E3A8A]"
+                  : "border-slate-200 bg-white text-slate-500 hover:border-[#1E3A8A]/30 hover:text-[#1E3A8A]"
+              }`}
+            >
+              <Bookmark className={`h-3 w-3 ${saved ? "fill-current" : ""}`} />
+              {saved ? "저장됨" : "저장"}
+            </button>
+          )}
         </div>
 
         {/* title */}
@@ -288,25 +307,38 @@ export function SupportCard({ item }: SupportCardProps) {
             <Info className="mr-1.5 h-3.5 w-3.5" />
             자세히 보기
           </Button>
-          <Button
-            asChild
-            variant="outline"
-            size="sm"
-            className={
-              closed
-                ? "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
-                : "border-[#1E3A8A]/30 text-[#1E3A8A] hover:bg-[#1E3A8A]/5"
-            }
-          >
-            <a href={item.applyUrl} target="_blank" rel="noopener noreferrer" aria-label={primaryActionLabel(item.status)}>
-              {primaryActionLabel(item.status)}
-              <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
-            </a>
-          </Button>
+          {item.applyUrl ? (
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className={
+                closed
+                  ? "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                  : "border-[#1E3A8A]/30 text-[#1E3A8A] hover:bg-[#1E3A8A]/5"
+              }
+            >
+              <a href={item.applyUrl} target="_blank" rel="noopener noreferrer" aria-label={primaryActionLabel(item.status)}>
+                {primaryActionLabel(item.status)}
+                <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
+              </a>
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" disabled className="border-slate-200 bg-white text-slate-400">
+              원문 URL 없음
+            </Button>
+          )}
         </div>
       </CardContent>
       {popover}
-      <StartupSupportDetailModal item={item} open={detailOpen} onClose={() => setDetailOpen(false)} />
+      <StartupSupportDetailModal
+        item={item}
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        saved={saved}
+        saving={saving}
+        onToggleSaved={onToggleSaved}
+      />
     </Card>
   );
 }

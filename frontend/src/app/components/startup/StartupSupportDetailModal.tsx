@@ -21,6 +21,7 @@ import {
   Brain,
   ArrowRight,
   Tag,
+  Bookmark,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -31,6 +32,9 @@ interface StartupSupportDetailModalProps {
   item: SupportItem | null;
   open: boolean;
   onClose: () => void;
+  saved?: boolean;
+  saving?: boolean;
+  onToggleSaved?: (item: SupportItem) => void;
 }
 
 function statusBadgeClass(status: SupportStatus | string): string {
@@ -90,7 +94,14 @@ function primaryActionLabel(status: SupportStatus | string): string {
   return "신청 페이지 열기";
 }
 
-export function StartupSupportDetailModal({ item, open, onClose }: StartupSupportDetailModalProps) {
+export function StartupSupportDetailModal({
+  item,
+  open,
+  onClose,
+  saved = false,
+  saving = false,
+  onToggleSaved,
+}: StartupSupportDetailModalProps) {
   const navigate = useNavigate();
   const insight = useMemo(() => (item ? buildStartupSupportInsight(item) : null), [item]);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -407,18 +418,41 @@ export function StartupSupportDetailModal({ item, open, onClose }: StartupSuppor
 
         {/* 하단 actions — Phase 10.1: primary 단일 강조 + 보조 outline. 닫기는 우상단 X / ESC / 백드롭 */}
         <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-white px-5 py-3 sm:flex-row sm:justify-end">
-          <Button
-            asChild
-            type="button"
-            size="sm"
-            variant="outline"
-            className="border-slate-300 text-slate-600 hover:border-[#1E3A8A]/30 hover:text-[#1E3A8A]"
-          >
-            <a href={item.applyUrl} target="_blank" rel="noopener noreferrer">
-              {primaryActionLabel(item.status)}
-              <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
-            </a>
-          </Button>
+          {onToggleSaved && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={saving}
+              onClick={() => onToggleSaved(item)}
+              className={
+                saved
+                  ? "border-[#1E3A8A]/35 bg-[#1E3A8A]/5 text-[#1E3A8A]"
+                  : "border-slate-300 text-slate-600 hover:border-[#1E3A8A]/30 hover:text-[#1E3A8A]"
+              }
+            >
+              <Bookmark className={`mr-1.5 h-3.5 w-3.5 ${saved ? "fill-current" : ""}`} />
+              {saved ? "관심 공고에서 제거" : "관심 공고 저장"}
+            </Button>
+          )}
+          {item.applyUrl ? (
+            <Button
+              asChild
+              type="button"
+              size="sm"
+              variant="outline"
+              className="border-slate-300 text-slate-600 hover:border-[#1E3A8A]/30 hover:text-[#1E3A8A]"
+            >
+              <a href={item.applyUrl} target="_blank" rel="noopener noreferrer">
+                {primaryActionLabel(item.status)}
+                <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
+              </a>
+            </Button>
+          ) : (
+            <Button type="button" size="sm" variant="outline" disabled className="border-slate-200 text-slate-400">
+              원문 URL 없음
+            </Button>
+          )}
           <Button
             type="button"
             size="sm"

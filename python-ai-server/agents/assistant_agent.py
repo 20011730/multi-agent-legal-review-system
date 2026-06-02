@@ -202,8 +202,13 @@ def _fallback_answer(request: AssistantRequest) -> str:
     )
     if not risk_hint:
         risk_hint = "현재 검토 결과만으로는 핵심 위험을 더 확인할 필요가 있습니다"
+    risk_sentence = f"가장 먼저 볼 부분은 {risk_hint}"
+    if not risk_sentence.rstrip().endswith(("다", "요", ".", "!", "?")):
+        risk_sentence += "입니다"
+    if not risk_sentence.rstrip().endswith((".", "!", "?")):
+        risk_sentence += "."
     return (
-        f"{prefix}가장 먼저 볼 부분은 {risk_hint}입니다. "
+        f"{prefix}{risk_sentence} "
         "관련 계약서, 지원금 정산 기준, 개인정보 수집·이용 동의 문구처럼 실제 문서에 적힌 조건을 확인해 주세요. "
         "근거 카드가 있다면 결론 자체보다 왜 그 쟁점이 중요하다고 판단했는지 이해하는 데 활용하면 좋습니다. "
         "확정적인 법률 판단이 필요한 부분은 변호사나 담당 기관 확인을 함께 받는 것을 권장합니다."
@@ -217,7 +222,8 @@ def _ensure_attachment_answer(answer: str, request: AssistantRequest) -> str:
     question = request.message or ""
     wants_budget = any(term in question for term in ("정산", "외주", "35", "승인", "비용"))
     wants_log = any(term in question for term in ("로그", "보관", "삭제", "90"))
-    wants_contract = any(term in question for term in ("계약", "제한", "소스코드", "권한", "첨부", "문서"))
+    wants_attachment_overview = any(term in question for term in ("첨부", "문서", "계약서"))
+    wants_contract = any(term in question for term in ("계약", "제한", "소스코드", "권한"))
 
     selected = []
     for category, note in notes:
@@ -225,10 +231,12 @@ def _ensure_attachment_answer(answer: str, request: AssistantRequest) -> str:
             selected.append(note)
         elif category == "log" and wants_log:
             selected.append(note)
-        elif category == "ip" and wants_contract and not (wants_budget or wants_log):
+        elif category == "ip" and (wants_contract or wants_attachment_overview) and not (wants_budget or wants_log):
             selected.append(note)
 
-    if not selected and wants_contract:
+    if wants_attachment_overview and not (wants_budget or wants_log or wants_contract):
+        selected = [note for _, note in notes]
+    if not selected and (wants_contract or wants_attachment_overview):
         selected = [note for _, note in notes]
     if not selected:
         return answer
@@ -308,8 +316,12 @@ def _status_label(status: str | None) -> str:
         return "최종 판정 완료"
     if value in {"WAITING_FOR_USER_INPUT", "WAITING_FOR_ROUND2_INPUT"}:
         return "Round 1 이후 사용자 입력 대기"
-    if value == "WAITING_FOR_FINAL_INPUT":
-        return "Round 2 이후 최종 라운드 입력 대기"
+    if value in {"WAITING_FOR_FINAL_INPUT", "WAITING_FOR_ROUND3_INPUT"}:
+        return "Round 2 이후 사용자 입력 대기"
+    if value == "WAITING_FOR_ROUND4_INPUT":
+        return "Round 3 이후 사용자 입력 대기"
+    if value == "WAITING_FOR_ROUND5_INPUT":
+        return "Round 4 이후 종합 라운드 입력 대기"
     if value in {"ANALYZING", "REANALYZING"}:
         return "분석 진행 중"
     if value == "FAILED":

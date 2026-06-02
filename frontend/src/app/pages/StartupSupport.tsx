@@ -9,9 +9,10 @@
  *   - 카드 tooltip은 SupportCard 내부 처리
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import {
   AlarmClock,
+  Bookmark,
   Filter,
   ListFilter,
   Loader2,
@@ -32,8 +33,13 @@ import { SupportFilterBar } from "../components/startup/SupportFilterBar";
 import { Input } from "../components/ui/input";
 import {
   fetchStartupSupportListResponse,
+  fetchSavedSupportPrograms,
+  fetchSavedSupportStatus,
+  saveStartupSupportProgram,
+  deleteSavedStartupSupportProgram,
   type StartupSupportFilters,
   type StartupSupportListResponse,
+  type SavedSupportProgram,
 } from "../utils/startupSupportApi";
 import type { SupportCategory, SupportItem, SupportStatus } from "../utils/mockStartupSupport";
 
@@ -106,6 +112,7 @@ function toBackendFilters(
 }
 
 export function StartupSupport() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const category = readCategoryParam(searchParams.get("category"));
@@ -123,6 +130,11 @@ export function StartupSupport() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState<number>(0);
+  const [savedPrograms, setSavedPrograms] = useState<SavedSupportProgram[]>([]);
+  const [savedStatus, setSavedStatus] = useState<Record<string, boolean>>({});
+  const [savingIds, setSavingIds] = useState<Record<string, boolean>>({});
+  const [savedError, setSavedError] = useState<string | null>(null);
+  const [showSavedOnly, setShowSavedOnly] = useState(searchParams.get("saved") === "1");
 
   const updateSearchParams = useCallback(
     (updates: Record<string, string | null>) => {
@@ -223,7 +235,68 @@ export function StartupSupport() {
     };
   }, [category, region, status, urlKeyword, sort, page, size, reloadKey]);
 
+  const loadSavedPrograms = useCallback(async () => {
+    try {
+      setSavedError(null);
+      const [list, statusMap] = await Promise.all([
+        fetchSavedSupportPrograms("deadline"),
+        fetchSavedSupportStatus(),
+      ]);
+      setSavedPrograms(list);
+      setSavedStatus(statusMap);
+    } catch {
+      setSavedError("관심 공고 정보를 불러오지 못했습니다.");
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSavedPrograms();
+  }, [loadSavedPrograms]);
+
   const handleRetry = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  const handleToggleSaved = useCallback(async (item: SupportItem) => {
+    if (!item?.id || savingIds[item.id]) return;
+    setSavingIds((prev) => ({ ...prev, [item.id]: true }));
+    setSavedError(null);
+    const wasSaved = Boolean(savedStatus[item.id]);
+    setSavedStatus((prev) => ({ ...prev, [item.id]: !wasSaved }));
+    try {
+      if (wasSaved) {
+        await deleteSavedStartupSupportProgram(item.id);
+      } else {
+        await saveStartupSupportProgram(item.id);
+      }
+      await loadSavedPrograms();
+    } catch {
+      setSavedStatus((prev) => ({ ...prev, [item.id]: wasSaved }));
+      setSavedError(wasSaved ? "관심 공고 제거에 실패했습니다." : "관심 공고 저장에 실패했습니다.");
+    } finally {
+      setSavingIds((prev) => ({ ...prev, [item.id]: false }));
+    }
+  }, [loadSavedPrograms, savedStatus, savingIds]);
+
+  const handleSavedLegalReview = useCallback((item: SavedSupportProgram) => {
+    const startupContext = {
+      id: item.programId,
+      title: item.title,
+      organization: item.organization ?? "",
+      category: item.category ?? "",
+      target: "",
+      fieldSummary: item.fieldSummary ?? "",
+      deadline: item.deadline ?? "",
+      applyUrl: item.applyUrl ?? "",
+      source: "saved-support",
+      aiInsightHint: item.fieldSummary ?? "",
+      legalReviewHint: "저장한 관심 공고를 기준으로 신청 자격, 협약, 정산, 지식재산권, 개인정보 리스크를 점검합니다.",
+    };
+    try {
+      sessionStorage.setItem("lexrex.startupContext", JSON.stringify(startupContext));
+    } catch {
+      /* ignore */
+    }
+    navigate("/input", { state: { startupContext } });
+  }, [navigate]);
 
   const urgentItems = useMemo(
     () => items.filter((i) => i.status === "마감임박"),
@@ -233,6 +306,16 @@ export function StartupSupport() {
     () => items.filter((i) => i.status !== "마감임박"),
     [items],
   );
+  const savedUpcoming = useMemo(
+    () => savedPrograms.filter((item) => item.daysLeft !== null && item.daysLeft >= 0 && item.daysLeft <= 7),
+    [savedPrograms],
+  );
+  const visibleRegularItems = showSavedOnly
+    ? regularItems.filter((item) => savedStatus[item.id])
+    : regularItems;
+  const visibleUrgentItems = showSavedOnly
+    ? urgentItems.filter((item) => savedStatus[item.id])
+    : urgentItems;
 
   const totalCount = envelope?.totalCount ?? items.length;
   const totalPages = envelope?.totalPages ?? 1;
@@ -263,6 +346,7 @@ export function StartupSupport() {
 
   const resetFilters = useCallback(() => {
     setKeywordInput("");
+    setShowSavedOnly(false);
     setSearchParams(new URLSearchParams(), { replace: false });
   }, [setSearchParams]);
 
@@ -392,6 +476,127 @@ export function StartupSupport() {
         </div>
       </div>
 
+      {/* 관심 공고 모아보기 */}
+      <section className="mb-6 rounded-lg border border-[#1E3A8A]/15 bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Bookmark className="h-4 w-4 text-[#1E3A8A]" />
+              관심 공고
+              <span className="rounded-full bg-[#1E3A8A]/8 px-2 py-0.5 text-[11px] text-[#1E3A8A]">
+                {savedPrograms.length}건 저장
+              </span>
+              {savedUpcoming.length > 0 && (
+                <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700">
+                  마감 예정 {savedUpcoming.length}건
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              저장한 지원사업을 마감 일정과 함께 다시 확인하고 바로 법률 리스크 진단을 시작할 수 있습니다.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setShowSavedOnly((v) => !v)}
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition ${
+                showSavedOnly
+                  ? "border-[#1E3A8A] bg-[#1E3A8A] text-white"
+                  : "border-slate-300 bg-white text-slate-600 hover:border-[#1E3A8A]/30 hover:text-[#1E3A8A]"
+              }`}
+            >
+              {showSavedOnly ? "전체 공고 보기" : "저장한 공고만 보기"}
+            </button>
+          </div>
+        </div>
+        {savedError && (
+          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {savedError}
+          </p>
+        )}
+        {savedPrograms.length > 0 ? (
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            {savedPrograms.slice(0, 4).map((item) => (
+              <div key={item.programId} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="line-clamp-1 text-sm font-medium text-slate-900">{item.title}</p>
+                    <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">
+                      {item.organization || "주관 기관 확인 필요"}
+                      {item.category && ` · ${item.category}`}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      item.deadlineStatus === "마감 임박"
+                        ? "bg-rose-50 text-rose-700"
+                        : item.deadlineStatus === "마감 예정"
+                          ? "bg-amber-50 text-amber-700"
+                          : item.deadlineStatus === "마감"
+                            ? "bg-slate-100 text-slate-500"
+                            : "bg-emerald-50 text-emerald-700"
+                    }`}
+                  >
+                    {item.deadlineLabel || "일정 미정"}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {item.applyUrl ? (
+                    <a
+                      href={item.applyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-600 hover:text-[#1E3A8A]"
+                    >
+                      원문 열기
+                    </a>
+                  ) : (
+                    <span className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-400">
+                      원문 URL 없음
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleSavedLegalReview(item)}
+                    className="rounded border border-[#1E3A8A]/30 bg-white px-2 py-1 text-[11px] font-medium text-[#1E3A8A] hover:bg-[#1E3A8A]/5"
+                  >
+                    법률 리스크 진단
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingIds[item.programId]}
+                    onClick={() =>
+                      handleToggleSaved({
+                        id: item.programId,
+                        title: item.title,
+                        organization: item.organization || "",
+                        category: (item.category || "사업화") as SupportCategory,
+                        region: item.region || "전국",
+                        target: "",
+                        fieldSummary: item.fieldSummary || "",
+                        maxAmount: "",
+                        status: (item.status || "확인 필요") as SupportStatus,
+                        deadline: item.deadline || "확인 필요",
+                        applyUrl: item.applyUrl || "",
+                        recommendReason: "",
+                      })
+                    }
+                    className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-500 hover:text-rose-600 disabled:opacity-60"
+                  >
+                    저장 취소
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
+            아직 저장한 공고가 없습니다. 공고 카드의 저장 버튼을 눌러 관심 목록에 추가해 보세요.
+          </p>
+        )}
+      </section>
+
       {/* 검색 입력 */}
       <div className="mb-4">
         <label className="mb-1.5 block text-xs font-medium text-slate-500">키워드 검색</label>
@@ -507,16 +712,22 @@ export function StartupSupport() {
       {/* 카드 목록 anchor (페이지 변경 시 스크롤 타겟) */}
       <div ref={listAnchorRef} className="scroll-mt-24" />
 
-      {urgentItems.length > 0 && (
+      {visibleUrgentItems.length > 0 && (
         <section className="mb-8">
           <div className="mb-3 flex items-center gap-2">
             <AlarmClock className="h-4 w-4 text-rose-600" />
             <h2 className="text-sm font-semibold text-rose-700">마감 임박 — 우선 확인</h2>
-            <span className="text-xs text-slate-500">({urgentItems.length}건)</span>
+            <span className="text-xs text-slate-500">({visibleUrgentItems.length}건)</span>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {urgentItems.map((item) => (
-              <SupportCard key={item.id} item={item} />
+            {visibleUrgentItems.map((item) => (
+              <SupportCard
+                key={item.id}
+                item={item}
+                saved={Boolean(savedStatus[item.id])}
+                saving={Boolean(savingIds[item.id])}
+                onToggleSaved={handleToggleSaved}
+              />
             ))}
           </div>
         </section>
@@ -566,14 +777,20 @@ export function StartupSupport() {
             </p>
           )}
         </div>
-      ) : regularItems.length > 0 ? (
+      ) : visibleRegularItems.length > 0 ? (
         <section>
-          {urgentItems.length > 0 && (
+          {visibleUrgentItems.length > 0 && (
             <h2 className="mb-3 text-sm font-semibold text-slate-700">전체 결과</h2>
           )}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {regularItems.map((item) => (
-              <SupportCard key={item.id} item={item} />
+            {visibleRegularItems.map((item) => (
+              <SupportCard
+                key={item.id}
+                item={item}
+                saved={Boolean(savedStatus[item.id])}
+                saving={Boolean(savingIds[item.id])}
+                onToggleSaved={handleToggleSaved}
+              />
             ))}
           </div>
         </section>

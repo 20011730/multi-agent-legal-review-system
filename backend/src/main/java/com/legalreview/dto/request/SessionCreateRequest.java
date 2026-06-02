@@ -58,7 +58,9 @@ public class SessionCreateRequest {
     /**
      * 분석 실행 범위.
      * ROUND1_ONLY: 첫 라운드만 실행하고 사용자 입력 대기
-     * ROUND2_FINAL: 사용자 입력 이후 두 번째 라운드와 최종 판정 실행
+     * ROUND2_ONLY / ROUND3_ONLY / ROUND4_ONLY: 해당 라운드만 실행하고 다음 사용자 입력 대기
+     * ROUND5_FINAL: 종합 라운드와 최종 판정 실행
+     * ROUND2_FINAL: 완료 후 추가 재검토 호환 모드
      */
     private String analysisMode;
 

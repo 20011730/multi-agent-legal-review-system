@@ -36,10 +36,23 @@ Round 2에서는 사용자 추가 질문을 반영해 다음 토론 의견을 �
 
 _RISK_ROUND_3 = """당신은 스타트업 운영 리스크를 점검하는 리스크 검토자입니다.
 
-Round 3에서는 최종 판정 전에 남은 리스크와 우선순위를 4~7문장으로 정리하세요.
-Round 1과 Round 2의 비즈니스·법무 의견을 모두 보고, 지금 가장 먼저 통제해야 할 위험 1개와 후순위로 관리할 위험 1개를 구분하세요.
-사용자 추가 질문이 있었다면 해당 질문이 위험 우선순위에 어떤 영향을 주는지 직접 언급하세요.
-새로운 쟁점 나열은 금지하고, 최종 판정관이 결론을 내릴 때 참고할 우선순위를 말하세요.
+Round 3에서는 법령·판례 근거와 첨부자료 근거를 기준으로 리스크의 강도를 재평가하세요.
+근거가 명확한 위험, 근거가 부족한 위험, 추가 자료가 있어야 판단할 수 있는 위험을 구분하세요.
+사용자 질문이 있었다면 해당 질문이 근거 검토에 어떤 영향을 주는지 직접 언급하세요.
+""" + _BUBBLE_STYLE
+
+_RISK_ROUND_4 = """당신은 스타트업 운영 리스크를 점검하는 리스크 검토자입니다.
+
+Round 4에서는 반론 검증과 리스크 시나리오 분석에 집중하세요.
+낙관적 해석과 보수적 해석이 충돌하는 지점, 최악의 상황, 대응 가능성, 우선순위를 구체적으로 말하세요.
+사용자가 최종 라운드 전에 마지막으로 확인해야 할 질문이나 조건을 1개 이상 제안하세요.
+""" + _BUBBLE_STYLE
+
+_RISK_ROUND_5 = """당신은 스타트업 운영 리스크를 점검하는 리스크 검토자입니다.
+
+Round 5에서는 종합 의견과 실행 체크리스트에 들어갈 위험 우선순위를 정리하세요.
+Round 1~4와 사용자 질문을 모두 반영하고, 즉시 조치할 위험, 관리 가능한 위험, 전문가 상담이 필요한 위험을 구분하세요.
+AI 검토 보조의 한계와 추가 확인 자료도 사용자 눈높이에 맞게 짚으세요.
 """ + _BUBBLE_STYLE
 
 
@@ -49,8 +62,12 @@ def run_risk_agent(context_history: str, current_issue: str, round_num: int = 1)
         system_instruction = _RISK_ROUND_1
     elif round_num == 2:
         system_instruction = _RISK_ROUND_2
-    else:
+    elif round_num == 3:
         system_instruction = _RISK_ROUND_3
+    elif round_num == 4:
+        system_instruction = _RISK_ROUND_4
+    else:
+        system_instruction = _RISK_ROUND_5
     prompt = (
         f"검토 대상 안건:\n{current_issue}\n\n"
         f"--- 직전까지의 토론 내용 ---\n{context_history}\n\n"

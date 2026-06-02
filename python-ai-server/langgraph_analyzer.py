@@ -402,6 +402,13 @@ _STEP_MODES: dict[str, tuple[int, str]] = {
     "ROUND3_LEGAL": (3, "legal"),
     "ROUND3_RISK": (3, "risk"),
     "ROUND3_JUDGE": (3, "judge"),
+    "ROUND4_BUSINESS": (4, "business"),
+    "ROUND4_LEGAL": (4, "legal"),
+    "ROUND4_RISK": (4, "risk"),
+    "ROUND5_BUSINESS": (5, "business"),
+    "ROUND5_LEGAL": (5, "legal"),
+    "ROUND5_RISK": (5, "risk"),
+    "ROUND5_JUDGE": (5, "judge"),
 }
 
 
@@ -678,7 +685,7 @@ def judge_node(state: DebateState) -> dict:
         agentName="최종 판정관",
         content=judge_display,
         type="recommendation",
-        round=3,
+        round=state.get("round_num", 5),
         stance="NEUTRAL",
         evidenceSummary="양측 주장을 종합한 최종 판정",
     )
@@ -869,12 +876,23 @@ def analyze_with_langgraph(request: AnalyzeRequest) -> AnalyzeResponse:
 
     if analysis_mode == "ROUND1_ONLY":
         start_round = 1
+        max_round = 1
         include_judge = False
     elif analysis_mode == "ROUND2_FINAL":
         start_round = 2
+        max_round = 5
+        include_judge = True
+    elif analysis_mode == "ROUND3_FINAL":
+        start_round = 3
+        max_round = 5
+        include_judge = True
+    elif analysis_mode == "ROUND5_FINAL":
+        start_round = 5
+        max_round = 5
         include_judge = True
     else:
         start_round = 2 if active_followups else 1
+        max_round = 5
         include_judge = True
 
     initial_state: DebateState = {
@@ -884,7 +902,7 @@ def analyze_with_langgraph(request: AnalyzeRequest) -> AnalyzeResponse:
         "situation": request.situation,
         "messages": [],
         "round_num": start_round,
-        "max_round": start_round,
+        "max_round": max_round,
         "include_judge": include_judge,
     }
 

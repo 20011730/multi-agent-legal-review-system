@@ -1248,7 +1248,7 @@ export function Verdict() {
             const lawEvidenceCount = evidences.filter((e) => e.sourceType === "LAW").length;
             const caseEvidenceCount = evidences.filter((e) => e.sourceType === "CASE").length;
             const extendedCaseCount = evidences.filter(
-              (e) => (e as { dataSource?: string }).dataSource === "extended_case_sample",
+              (e) => (e as { dataSource?: string }).dataSource?.toLowerCase().startsWith("extended_case"),
             ).length;
             const hasRichEvidence = lawEvidenceCount + caseEvidenceCount >= 4;
 

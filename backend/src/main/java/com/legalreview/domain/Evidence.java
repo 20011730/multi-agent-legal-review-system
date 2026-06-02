@@ -69,7 +69,7 @@ public class Evidence {
     /**
      * Phase 10.70 — 검색 source 태그. 예시 값:
      *   - "cases_e5" / "laws_e5"      : 운영 RAG 컬렉션
-     *   - "extended_case_sample"      : 확장 판례 (legal_case_chunks_full)
+     *   - "extended_case..."         : 확장 판례
      *   - null                        : 법제처 OPEN API 등 RAG 외 출처
      * EvidenceCard 의 "기존 판례 DB" / "확장 판례 DB" chip 라벨링용.
      * ddl-auto=update 환경에서 자동 ALTER TABLE — 기존 row 는 NULL.

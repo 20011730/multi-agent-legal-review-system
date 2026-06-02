@@ -273,10 +273,30 @@ function stanceLabel(stance?: string): string {
       return "긍정";
     case "CON":
       return "우려";
+    case "CAUTION":
+      return "주의";
     case "NEUTRAL":
       return "중립";
     default:
       return stance || "";
+  }
+}
+
+function targetAgentLabel(agent?: string): string {
+  switch ((agent || "").toLowerCase().trim()) {
+    case "all":
+      return "전체 에이전트";
+    case "business":
+      return "비즈니스 전략가";
+    case "legal":
+      return "법률 전문가";
+    case "risk":
+    case "ethics":
+      return "리스크 검토자";
+    case "judge":
+      return "최종 판정관";
+    default:
+      return agent || "";
   }
 }
 
@@ -295,9 +315,14 @@ function statusDisplay(status: string): { label: string; tone: string; descripti
       return { label: "최종 판정 완료", tone: "bg-emerald-100 text-emerald-700", description: "최종 판정과 근거, 상담 기록을 확인할 수 있습니다." };
     case "WAITING_FOR_USER_INPUT":
     case "WAITING_FOR_ROUND2_INPUT":
-      return { label: "Round 1 완료 · 사용자 입력 대기", tone: "bg-indigo-100 text-indigo-700", description: "Round 1 토론까지 저장되었습니다. 실시간 결과 화면에서 다음 라운드 질문을 입력할 수 있습니다." };
+      return { label: "Round 1 완료 · 사용자 입력 대기", tone: "bg-indigo-100 text-indigo-700", description: "사안 접수 및 초기 쟁점 식별까지 저장되었습니다. 실시간 결과 화면에서 다음 라운드 질문을 입력할 수 있습니다." };
+    case "WAITING_FOR_ROUND3_INPUT":
     case "WAITING_FOR_FINAL_INPUT":
-      return { label: "Round 2 완료 · 최종 라운드 입력 대기", tone: "bg-violet-100 text-violet-700", description: "최종 라운드 전 추가 질문을 입력할 수 있는 상태입니다." };
+      return { label: "Round 2 완료 · 사용자 입력 대기", tone: "bg-violet-100 text-violet-700", description: "사실관계 및 증빙자료 보완 후 법령·판례 근거 검토에 반영할 질문을 입력할 수 있습니다." };
+    case "WAITING_FOR_ROUND4_INPUT":
+      return { label: "Round 3 완료 · 사용자 입력 대기", tone: "bg-sky-100 text-sky-700", description: "법령·판례 근거 검토 후 반론 검증에 반영할 질문을 입력할 수 있습니다." };
+    case "WAITING_FOR_ROUND5_INPUT":
+      return { label: "Round 4 완료 · 사용자 입력 대기", tone: "bg-amber-100 text-amber-700", description: "반론 검증 후 종합 의견 및 실행 체크리스트에 반영할 마지막 질문을 입력할 수 있습니다." };
     case "ANALYZING":
     case "REANALYZING":
       return { label: status === "REANALYZING" ? "추가 재검토 진행 중" : "검토 진행 중", tone: "bg-blue-100 text-blue-700", description: "현재까지 생성된 토론 로그를 확인할 수 있습니다." };
@@ -446,9 +471,12 @@ export function ReviewDetailPage() {
   const followUps = activeFollowUps(detail.followUpQuestions);
   const round2Questions = followUpsFor(followUps, "2");
   const round3Questions = followUpsFor(followUps, "3");
+  const round4Questions = followUpsFor(followUps, "4");
+  const round5Questions = followUpsFor(followUps, "5");
   const reanalysisQuestions = followUpsFor(followUps, "reanalysis");
+  const hasFiveRoundLog = detail.messages.some((msg) => Number(msg.round) >= 4);
   const messagesByRound = (round: number) => detail.messages.filter((msg) => Number(msg.round) === round);
-  const reanalysisMessages = detail.messages.filter((msg) => Number(msg.round) > 3);
+  const reanalysisMessages = detail.messages.filter((msg) => Number(msg.round) > (hasFiveRoundLog ? 5 : 3));
   const attachments = Array.isArray(detail.attachments) ? detail.attachments : [];
   const reflectedAttachments = attachments.filter((att) => {
     const status = String(att.extractionStatus || "").toLowerCase();
@@ -465,11 +493,17 @@ export function ReviewDetailPage() {
   const pushQuestions = (key: string, label: string, questions: FollowUpQuestion[]) => {
     if (questions.length > 0) timelineItems.push({ kind: "questions", key, label, questions });
   };
-  pushMessages("round1", "Round 1 · 초기 검토", messagesByRound(1));
+  pushMessages("round1", hasFiveRoundLog ? "Round 1 · 사안 접수 및 초기 쟁점 식별" : "Round 1 · 초기 검토", messagesByRound(1));
   pushQuestions("user-round2", "사용자 추가 질문 1차", round2Questions);
-  pushMessages("round2", "Round 2 · 사용자 질문 반영 토론", messagesByRound(2));
+  pushMessages("round2", hasFiveRoundLog ? "Round 2 · 사실관계 및 증빙자료 보완" : "Round 2 · 사용자 질문 반영 토론", messagesByRound(2));
   pushQuestions("user-round3", "사용자 추가 질문 2차", round3Questions);
-  pushMessages("round3", "Round 3 · 최종 토론 및 판단", messagesByRound(3));
+  pushMessages("round3", hasFiveRoundLog ? "Round 3 · 법령·판례 근거 검토" : "Round 3 · 최종 토론 및 판단", messagesByRound(3));
+  if (hasFiveRoundLog) {
+    pushQuestions("user-round4", "사용자 추가 질문 3차", round4Questions);
+    pushMessages("round4", "Round 4 · 반론 검증 및 리스크 시나리오 분석", messagesByRound(4));
+    pushQuestions("user-round5", "사용자 추가 질문 4차", round5Questions);
+    pushMessages("round5", "Round 5 · 종합 의견 및 실행 체크리스트", messagesByRound(5));
+  }
   pushQuestions("user-reanalysis", "추가 재검토 요청", reanalysisQuestions);
   pushMessages("reanalysis", "추가 재검토 결과", reanalysisMessages);
   const statusInfo = statusDisplay(detail.status);
@@ -690,7 +724,7 @@ export function ReviewDetailPage() {
                       <div className="mb-2 flex items-center justify-end gap-2">
                         <Badge variant="outline" className="border-[#1E3A8A]/30 text-[#1E3A8A]">사용자 추가 질문</Badge>
                         {question.targetAgent && question.targetAgent !== "all" && (
-                          <Badge variant="outline" className="text-xs">대상: {question.targetAgent}</Badge>
+                          <Badge variant="outline" className="text-xs">대상: {targetAgentLabel(question.targetAgent)}</Badge>
                         )}
                       </div>
                       <p className="whitespace-pre-wrap break-keep text-sm leading-relaxed text-slate-800">

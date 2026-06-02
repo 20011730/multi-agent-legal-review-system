@@ -4,16 +4,23 @@ import com.legalreview.dto.startup.StartupSupportItem;
 import com.legalreview.dto.startup.StartupSupportItemView;
 import com.legalreview.dto.startup.StartupSupportListResponse;
 import com.legalreview.dto.startup.StartupSupportListResponse.AppliedFilters;
+import com.legalreview.dto.startup.SavedSupportProgramDto;
+import com.legalreview.domain.SavedSupportProgram;
+import com.legalreview.repository.SavedSupportProgramRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -34,6 +41,7 @@ import java.util.Optional;
 public class StartupSupportService {
 
     private final StartupSupportProvider provider;
+    private final SavedSupportProgramRepository savedSupportProgramRepository;
 
     public List<StartupSupportItem> findAll() {
         return provider.findAll();
@@ -42,6 +50,79 @@ public class StartupSupportService {
     /** 단건 조회 — id 검색은 provider 가 담당. */
     public Optional<StartupSupportItem> findById(String id) {
         return provider.findById(id);
+    }
+
+    @Transactional
+    public SavedSupportProgramDto saveProgram(Long userId, String programId) {
+        Long safeUserId = normalizeUserId(userId);
+        String safeProgramId = normalizeProgramId(programId);
+        Optional<SavedSupportProgram> existing =
+                savedSupportProgramRepository.findByUserIdAndProgramId(safeUserId, safeProgramId);
+        if (existing.isPresent()) {
+            return toSavedDto(existing.get());
+        }
+
+        StartupSupportItem item = findById(safeProgramId)
+                .orElseThrow(() -> new IllegalArgumentException("지원사업 공고를 찾을 수 없습니다."));
+        String inferred = StartupSupportEnricher.inferCategory(item);
+        String autoStatus = StartupSupportEnricher.autoStatus(item);
+
+        SavedSupportProgram saved = new SavedSupportProgram();
+        saved.setUserId(safeUserId);
+        saved.setProgramId(safeProgramId);
+        saved.setProgramTitle(blankToFallback(item.title(), "제목 미확인 공고"));
+        saved.setOrganizationName(blankToNull(item.organization()));
+        saved.setApplicationDeadline(blankToNull(item.deadline()));
+        saved.setSourceUrl(blankToNull(item.applyUrl()));
+        saved.setCategory(blankToNull(inferred != null ? inferred : item.category()));
+        saved.setStatus(blankToNull(autoStatus != null ? autoStatus : item.status()));
+        saved.setRegion(blankToNull(item.region()));
+        saved.setFieldSummary(blankToNull(item.fieldSummary()));
+        return toSavedDto(savedSupportProgramRepository.save(saved));
+    }
+
+    @Transactional
+    public boolean deleteSavedProgram(Long userId, String programId) {
+        Long safeUserId = normalizeUserId(userId);
+        String safeProgramId = normalizeProgramId(programId);
+        boolean existed = savedSupportProgramRepository.existsByUserIdAndProgramId(safeUserId, safeProgramId);
+        if (existed) {
+            savedSupportProgramRepository.deleteByUserIdAndProgramId(safeUserId, safeProgramId);
+        }
+        return existed;
+    }
+
+    @Transactional(readOnly = true)
+    public List<SavedSupportProgramDto> findSavedPrograms(Long userId, String sort) {
+        List<SavedSupportProgramDto> list = savedSupportProgramRepository
+                .findByUserIdOrderBySavedAtDesc(normalizeUserId(userId))
+                .stream()
+                .map(this::toSavedDto)
+                .toList();
+        if ("deadline".equalsIgnoreCase(sort)) {
+            return list.stream()
+                    .sorted(Comparator
+                            .comparing((SavedSupportProgramDto item) -> item.daysLeft() == null ? Integer.MAX_VALUE : item.daysLeft())
+                            .thenComparing(SavedSupportProgramDto::savedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                    .toList();
+        }
+        return list;
+    }
+
+    @Transactional(readOnly = true)
+    public List<SavedSupportProgramDto> findUpcomingSavedPrograms(Long userId) {
+        return findSavedPrograms(userId, "deadline").stream()
+                .filter(item -> item.daysLeft() != null && item.daysLeft() >= 0 && item.daysLeft() <= 7)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Boolean> savedStatus(Long userId) {
+        Map<String, Boolean> result = new LinkedHashMap<>();
+        for (SavedSupportProgram saved : savedSupportProgramRepository.findByUserIdOrderBySavedAtDesc(normalizeUserId(userId))) {
+            result.put(saved.getProgramId(), true);
+        }
+        return result;
     }
 
     /** 현재 데이터 출처 식별자. */
@@ -203,5 +284,47 @@ public class StartupSupportService {
             } catch (Exception ignored) { /* next */ }
         }
         return null;
+    }
+
+    private SavedSupportProgramDto toSavedDto(SavedSupportProgram saved) {
+        LocalDate deadline = parseDateForSort(saved.getApplicationDeadline());
+        Integer daysLeft = null;
+        String label = "일정 미정";
+        String status = "일정 미정";
+        if (deadline != null) {
+            long diff = ChronoUnit.DAYS.between(LocalDate.now(), deadline);
+            daysLeft = diff > Integer.MAX_VALUE ? Integer.MAX_VALUE : diff < Integer.MIN_VALUE ? Integer.MIN_VALUE : (int) diff;
+            if (diff < 0) {
+                label = "마감";
+                status = "마감";
+            } else if (diff == 0) {
+                label = "오늘 마감";
+                status = "마감 임박";
+            } else {
+                label = "D-" + diff;
+                status = diff <= 3 ? "마감 임박" : diff <= 7 ? "마감 예정" : "모집 중";
+            }
+        }
+        return SavedSupportProgramDto.of(saved, label, daysLeft, status);
+    }
+
+    private static Long normalizeUserId(Long userId) {
+        return userId == null || userId <= 0 ? 1L : userId;
+    }
+
+    private static String normalizeProgramId(String programId) {
+        if (programId == null || programId.isBlank()) {
+            throw new IllegalArgumentException("지원사업 ID가 필요합니다.");
+        }
+        return programId.trim();
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static String blankToFallback(String value, String fallback) {
+        String normalized = blankToNull(value);
+        return normalized == null ? fallback : normalized;
     }
 }

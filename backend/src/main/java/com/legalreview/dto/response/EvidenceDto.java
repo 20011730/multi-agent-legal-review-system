@@ -46,7 +46,7 @@ public class EvidenceDto {
     /**
      * Phase 10.63 — 검색 source 태그. 값 예시:
      *   - "cases_e5" / "laws_e5" : 운영 RAG 컬렉션 (기본)
-     *   - "extended_case_sample" : 확장 판례 샘플 (실험 단계)
+     *   - "extended_case..."    : 확장 판례 컬렉션
      *   - null                   : RAG 외 출처 (법제처 OPEN API 등)
      * EvidenceCard 의 chip 라벨링과 LEGAL prompt 블록 분리에 사용.
      */

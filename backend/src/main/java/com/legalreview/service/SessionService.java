@@ -251,10 +251,14 @@ public class SessionService {
                 log.warn("[reanalyze] followUpQuestions 역직렬화 실패: {}", ex.getMessage());
             }
         }
-        boolean waitingForRound2 = "WAITING_FOR_ROUND2_INPUT".equalsIgnoreCase(session.getStatus())
-                || "WAITING_FOR_USER_INPUT".equalsIgnoreCase(session.getStatus());
-        boolean waitingForFinal = "WAITING_FOR_FINAL_INPUT".equalsIgnoreCase(session.getStatus());
-        boolean isRoundIntervention = waitingForRound2 || waitingForFinal;
+        String currentStatus = session.getStatus() == null ? "" : session.getStatus().toUpperCase();
+        boolean waitingForRound2 = "WAITING_FOR_ROUND2_INPUT".equals(currentStatus)
+                || "WAITING_FOR_USER_INPUT".equals(currentStatus);
+        boolean waitingForRound3 = "WAITING_FOR_ROUND3_INPUT".equals(currentStatus)
+                || "WAITING_FOR_FINAL_INPUT".equals(currentStatus);
+        boolean waitingForRound4 = "WAITING_FOR_ROUND4_INPUT".equals(currentStatus);
+        boolean waitingForRound5 = "WAITING_FOR_ROUND5_INPUT".equals(currentStatus);
+        boolean isRoundIntervention = waitingForRound2 || waitingForRound3 || waitingForRound4 || waitingForRound5;
         java.util.List<java.util.Map<String, Object>> storedFollowUps = followUps;
         java.util.List<java.util.Map<String, Object>> requestFollowUps = storedFollowUps.stream()
                 .filter(SessionService::isUsableFollowUp)
@@ -304,21 +308,24 @@ public class SessionService {
 
         String analysisMode = waitingForRound2
                 ? "ROUND2_ONLY"
-                : waitingForFinal
-                    ? "ROUND3_FINAL"
-                    : "ROUND2_FINAL";
-        int applyingRound = waitingForRound2 ? 2 : waitingForFinal ? 3 : 0;
-        StringBuilder followBlock = new StringBuilder(waitingForFinal
-                ? "\n\n[Round 3 진행 조건]\n"
-                : "\n\n[Round 2 진행 조건]\n");
+                : waitingForRound3
+                    ? "ROUND3_ONLY"
+                    : waitingForRound4
+                        ? "ROUND4_ONLY"
+                        : waitingForRound5
+                            ? "ROUND5_FINAL"
+                            : "ROUND2_FINAL";
+        int applyingRound = waitingForRound2 ? 2 : waitingForRound3 ? 3 : waitingForRound4 ? 4 : waitingForRound5 ? 5 : 0;
+        String targetRoundLabel = applyingRound > 0 ? "Round " + applyingRound : "추가 재검토";
+        StringBuilder followBlock = new StringBuilder("\n\n[" + targetRoundLabel + " 진행 조건]\n");
         if (requestFollowUps.isEmpty()) {
-            followBlock.append(waitingForFinal
-                    ? "- 사용자가 추가 질문 없이 최종 라운드 진행을 선택했습니다.\n"
+            followBlock.append(waitingForRound5
+                    ? "- 사용자가 추가 질문 없이 종합 의견 및 실행 체크리스트 라운드 진행을 선택했습니다.\n"
                     : "- 사용자가 추가 질문 없이 다음 라운드 진행을 선택했습니다.\n");
         } else {
             followBlock.append(isRoundIntervention
-                    ? waitingForFinal
-                        ? "[사용자 추가 질문 — 최종 라운드 반영]\n"
+                    ? waitingForRound5
+                        ? "[사용자 추가 질문 — 종합 의견 및 실행 체크리스트 반영]\n"
                         : "[사용자 추가 질문 — 다음 라운드 반영]\n"
                     : "[사용자 후속 질문 — 재검토 요청]\n");
             for (var q : requestFollowUps) {
@@ -330,9 +337,9 @@ public class SessionService {
                         .append("\n");
             }
         }
-        followBlock.append(waitingForFinal
-                ? "위 조건을 Round 3 최종 토론과 최종 결과에 반영해 주세요.\n"
-                : "위 조건을 Round 2와 이후 최종 결과에 반영해 주세요.\n");
+        followBlock.append(applyingRound > 0
+                ? "위 조건을 " + targetRoundLabel + "와 이후 최종 결과에 반영해 주세요.\n"
+                : "위 조건을 추가 재검토 결과에 반영해 주세요.\n");
         // 기존 situation 의 [지원사업 기반 검토 컨텍스트] 블록은 그대로 둠
         req.setSituation(session.getSituation() + followBlock);
         req.setStartupContext(ctx);
@@ -383,11 +390,13 @@ public class SessionService {
             boolean hasNewFollowUps = !applyingFollowUps.isEmpty();
             streamService.publishStatus(sessionId, "REANALYZING", 40,
                     !hasNewFollowUps
-                            ? waitingForFinal
-                                ? "추가 질문 없이 최종 라운드를 진행하고 있습니다."
-                                : "추가 질문 없이 다음 라운드를 진행하고 있습니다."
-                            : waitingForFinal
-                                ? "추가 질문을 반영해 최종 라운드를 진행하고 있습니다."
+                            ? waitingForRound5
+                                ? "추가 질문 없이 종합 라운드를 진행하고 있습니다."
+                                : isRoundIntervention
+                                    ? "추가 질문 없이 다음 라운드를 진행하고 있습니다."
+                                    : "추가 질문 없이 재검토하고 있습니다."
+                            : waitingForRound5
+                                ? "추가 질문을 반영해 종합 라운드를 진행하고 있습니다."
                                 : isRoundIntervention
                                     ? "추가 질문을 반영해 다음 라운드를 진행하고 있습니다."
                                     : "추가 질문을 반영해 재검토하고 있습니다.");
@@ -396,11 +405,11 @@ public class SessionService {
             sysMsg.put("agentId", "system");
             sysMsg.put("agentName", "시스템");
             sysMsg.put("content", !hasNewFollowUps
-                    ? waitingForFinal
-                        ? "최종 라운드를 시작합니다. 추가 질문 없이 기존 토론 내용을 바탕으로 이어갑니다."
+                    ? waitingForRound5
+                        ? "종합 라운드를 시작합니다. 추가 질문 없이 기존 토론 내용을 바탕으로 최종 리포트를 정리합니다."
                         : "다음 라운드를 시작합니다. 추가 질문 없이 기존 검토 내용을 바탕으로 이어갑니다."
-                    : waitingForFinal
-                        ? "추가 질문 " + applyingFollowUps.size() + "건을 반영해 최종 라운드를 시작합니다."
+                    : waitingForRound5
+                        ? "추가 질문 " + applyingFollowUps.size() + "건을 반영해 종합 라운드를 시작합니다."
                         : isRoundIntervention
                             ? "추가 질문 " + applyingFollowUps.size() + "건을 반영해 다음 라운드를 시작합니다."
                             : "추가 질문 " + applyingFollowUps.size() + "건을 반영해 재검토를 시작합니다.");
@@ -426,8 +435,8 @@ public class SessionService {
                 "sessionId", sessionId,
                 "status", "REANALYZING",
                 "followUpCount", applyingFollowUps.size(),
-                "message", waitingForFinal
-                        ? "최종 라운드를 시작했습니다. 잠시 후 결과 페이지를 새로고침해 주세요."
+                "message", waitingForRound5
+                        ? "종합 라운드를 시작했습니다. 잠시 후 결과 페이지를 새로고침해 주세요."
                         : "다음 라운드를 시작했습니다. 잠시 후 결과 페이지를 새로고침해 주세요."
         );
     }

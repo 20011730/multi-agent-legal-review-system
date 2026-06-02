@@ -55,19 +55,26 @@ public class LegalRetrievalService {
         int kLaw = Math.max(0, ragProperties.getTopK().getLaw());
         int kCase = Math.max(0, ragProperties.getTopK().getCaze());
 
-        // Phase 10.65 — caseSearchMode 결정 + extended collection 존재 여부 가드.
-        //   legacy   : 기존 cases_e5 만
-        //   extended : extended-cases-collection 만 (없으면 legacy 로 fallback)
-        //   dual     : 둘 다 (없으면 legacy 단독)
+        // caseSearchMode 결정.
+        //   legacy    : 기존 cases_e5 만
+        //   extended  : extended-cases-collection 만
+        //   full_only : extended 와 동일한 full-only alias
+        //   dual      : 둘 다
         String mode = ragProperties.getChroma().getCaseSearchMode();
         if (mode == null || mode.isBlank()) mode = "legacy";
         mode = mode.toLowerCase();
+        if (!Set.of("legacy", "extended", "full_only", "dual").contains(mode)) {
+            log.warn("[RAG] 알 수 없는 caseSearchMode='{}' — legacy 로 처리", mode);
+            mode = "legacy";
+        }
         boolean hasExtended = ragProperties.getChroma().getExtendedCasesCollection() != null
                 && !ragProperties.getChroma().getExtendedCasesCollection().isBlank();
-        // extended 활성 가능 여부에 따라 모드 보정
-        boolean useLegacyCase = "legacy".equals(mode) || ("dual".equals(mode))
-                || ("extended".equals(mode) && !hasExtended); // fallback
-        boolean useExtendedCase = ("extended".equals(mode) || "dual".equals(mode)) && hasExtended;
+        boolean useLegacyCase = "legacy".equals(mode) || "dual".equals(mode);
+        boolean useExtendedCase = ("extended".equals(mode) || "full_only".equals(mode) || "dual".equals(mode))
+                && hasExtended;
+        if (("extended".equals(mode) || "full_only".equals(mode)) && !hasExtended) {
+            log.warn("[RAG] full-only 판례 검색 요청이지만 CHROMA_EXTENDED_CASES_COLLECTION 이 비어 있어 판례 검색을 건너뜀");
+        }
 
         List<RetrievedChunk> lawChunks = chromaSearchService.queryLaws(query, kLaw);
         // ── CASE over-fetch: 외부 시스템 case 가 score 마진(예: 0.003)으로 본문 풍부 case 를 누르고
@@ -101,20 +108,23 @@ public class LegalRetrievalService {
             caseChunks = new ArrayList<>(caseChunks.subList(0, kCase));
         }
 
-        // Phase 10.63 — 확장 판례 dual retrieval (config 활성화 시).
-        //   기존 cases_e5 결과와는 score 직접 비교 없이 source 별도 태그로 prompt/EvidenceCard 분리.
-        //   embedding 모델 mismatch 위험 → config 기본값은 비활성. 활성화 후 실패 시 graceful fallback.
+        // 확장 판례 retrieval. full-only 모드에서는 cases_e5 를 조회하지 않고 이 경로만 사용한다.
         int kExt = Math.max(0, ragProperties.getChroma().getExtendedCasesTopK());
-        // Phase 10.65 — caseSearchMode 가 extended/dual 일 때만 확장 retrieval. legacy 면 skip.
         List<RetrievedChunk> extendedChunks = List.of();
         if (useExtendedCase
                 && kExt > 0
                 && ragProperties.getChroma().getExtendedCasesCollection() != null
                 && !ragProperties.getChroma().getExtendedCasesCollection().isBlank()) {
             try {
-                extendedChunks = chromaSearchService.queryExtendedCases(query, kExt);
-                log.info("[RAG] 확장 판례 retrieval — collection={}, topK={}, hits={}",
-                        ragProperties.getChroma().getExtendedCasesCollection(), kExt, extendedChunks.size());
+                int extendedFetchK = Math.max(kExt, kExt * OVER_FETCH_MULTIPLIER);
+                extendedChunks = chromaSearchService.queryExtendedCases(query, extendedFetchK);
+                extendedChunks = reorderCaseChunks(extendedChunks);
+                extendedChunks = diversifyByCaseNumber(extendedChunks, kExt);
+                if (extendedChunks.size() > kExt) {
+                    extendedChunks = new ArrayList<>(extendedChunks.subList(0, kExt));
+                }
+                log.info("[RAG] 확장 판례 retrieval — collection={}, fetchK={}, finalK={}, hits={}",
+                        ragProperties.getChroma().getExtendedCasesCollection(), extendedFetchK, kExt, extendedChunks.size());
             } catch (Exception extErr) {
                 log.warn("[RAG] 확장 판례 retrieval 실패 — 무시: {}", extErr.getMessage());
                 extendedChunks = List.of();
@@ -128,10 +138,10 @@ public class LegalRetrievalService {
                 lawChunks.size() + caseChunks.size() + extendedChunks.size());
         evidences.addAll(evidenceAssembler.toEvidenceDtos(lawChunks));
         evidences.addAll(evidenceAssembler.toEvidenceDtos(caseChunks));
-        // Phase 10.63/10.64 — 확장 판례 evidence 에 dataSource 태그 부여 → prompt 블록 분리 + UI chip 표시
+        // 확장 판례 evidence 에 dataSource 태그 부여 → prompt 블록 분리 + UI chip 표시.
         for (RetrievedChunk ec : extendedChunks) {
             EvidenceDto dto = evidenceAssembler.toEvidenceDto(ec);
-            dto.setDataSource("extended_case_sample");
+            dto.setDataSource("extended_case_full");
             evidences.add(dto);
         }
         return evidences;
@@ -163,9 +173,23 @@ public class LegalRetrievalService {
     private static int caseTier(RetrievedChunk c) {
         String bs = c.metaString("body_status");
         String ds = c.metaString("data_source");
+        String section = c.metaFirstOf("text_type", "section", "section_type", "subsection_label");
+        String text = c.getChunkText() == null ? "" : c.getChunkText().trim();
         boolean bodyMissing = !bs.isEmpty() && !bs.equals("ok");
         boolean external = EXTERNAL_DATA_SOURCES.contains(ds);
-        return (bodyMissing || external) ? 0 : 1;
+        boolean textTooShort = text.length() < 80;
+        boolean metadataLike = isMetadataLikeSection(section);
+        return (bodyMissing || external || textTooShort || metadataLike) ? 0 : 1;
+    }
+
+    private static boolean isMetadataLikeSection(String section) {
+        if (section == null || section.isBlank()) return false;
+        String s = section.replaceAll("\\s+", "");
+        return Set.of(
+                "meta", "메타정보", "당사자", "피고인", "피고인들", "피고피상고인",
+                "원고", "원고들", "원고상고인", "원고피상고인", "당사자참가인",
+                "당사자참가인피상고인", "피고인수참가인", "원심판결"
+        ).contains(s);
     }
 
     /** caseChunks 를 tier 1(본문) → tier 0(메타) 순으로 안정 정렬. */
@@ -194,7 +218,7 @@ public class LegalRetrievalService {
         List<RetrievedChunk> picked = new ArrayList<>(kCase);
         picked.add(chunks.get(0));
         Set<String> usedCaseNumbers = new HashSet<>();
-        usedCaseNumbers.add(chunks.get(0).metaString("case_number"));
+        usedCaseNumbers.add(caseIdentity(chunks.get(0)));
         // remaining = chunks 의 slot 1 제외
         // slot 2..kCase: 다양화 적용
         for (int slot = 1; slot < kCase; slot++) {
@@ -211,7 +235,7 @@ public class LegalRetrievalService {
                 if (baseScore != null && sim != null && (baseScore - sim) > DIVERSITY_EPSILON) {
                     break;  // ε 초과 → 더 이상 다양화 후보 풀 없음
                 }
-                String cn = c.metaString("case_number");
+                String cn = caseIdentity(c);
                 if (cn.isEmpty() || !usedCaseNumbers.contains(cn)) {
                     chosenIdx = i;
                     break;
@@ -224,14 +248,14 @@ public class LegalRetrievalService {
                     for (int i = 1; i < chunks.size(); i++) {
                         if (!picked.contains(chunks.get(i))) {
                             picked.add(chunks.get(i));
-                            usedCaseNumbers.add(chunks.get(i).metaString("case_number"));
+                            usedCaseNumbers.add(caseIdentity(chunks.get(i)));
                             break;
                         }
                     }
                 }
             } else {
                 picked.add(chunks.get(chosenIdx));
-                usedCaseNumbers.add(chunks.get(chosenIdx).metaString("case_number"));
+                usedCaseNumbers.add(caseIdentity(chunks.get(chosenIdx)));
             }
         }
         // 남은 chunk 들은 원래 순서로 picked 뒤에 붙임 (over-fetch 잔여, subList 후 잘림)
@@ -241,6 +265,14 @@ public class LegalRetrievalService {
             if (!picked.contains(c)) result.add(c);
         }
         return result;
+    }
+
+    private static String caseIdentity(RetrievedChunk c) {
+        String id = c.metaFirstOf("case_number", "caseNumber");
+        if (!id.isBlank()) return id;
+        id = c.metaFirstOf("db_id");
+        if (!id.isBlank()) return "db:" + id;
+        return c.getChunkId() == null ? "" : c.getChunkId();
     }
 
     /**

@@ -71,6 +71,32 @@ export interface StartupSupportListResponse {
   loadedCount?: number;
 }
 
+export interface SavedSupportProgram {
+  id: number;
+  programId: string;
+  title: string;
+  organization?: string | null;
+  category?: string | null;
+  region?: string | null;
+  fieldSummary?: string | null;
+  status?: string | null;
+  deadline?: string | null;
+  applyUrl?: string | null;
+  savedAt: string;
+  deadlineLabel: string;
+  daysLeft: number | null;
+  deadlineStatus: string;
+}
+
+function userHeaders(): HeadersInit {
+  try {
+    const user = JSON.parse(localStorage.getItem("legalreview_currentUser") || "{}");
+    return user?.id ? { "X-User-Id": String(user.id) } : {};
+  } catch {
+    return {};
+  }
+}
+
 function buildQueryString(filters?: StartupSupportFilters): string {
   if (!filters) return "";
   const params = new URLSearchParams();
@@ -140,4 +166,44 @@ export async function fetchStartupSupportItem(
     throw new Error(`startup-support ${id} HTTP ${res.status}`);
   }
   return (await res.json()) as SupportItem;
+}
+
+export async function fetchSavedSupportPrograms(sort: "saved" | "deadline" = "saved"): Promise<SavedSupportProgram[]> {
+  const qs = sort === "deadline" ? "?sort=deadline" : "";
+  const res = await fetch(`${API_BASE}/startup-support/saved${qs}`, { headers: userHeaders() });
+  if (!res.ok) {
+    throw new Error(`saved startup-support HTTP ${res.status}`);
+  }
+  return (await res.json()) as SavedSupportProgram[];
+}
+
+export async function fetchSavedSupportStatus(): Promise<Record<string, boolean>> {
+  const res = await fetch(`${API_BASE}/startup-support/saved/status`, { headers: userHeaders() });
+  if (!res.ok) {
+    throw new Error(`saved startup-support status HTTP ${res.status}`);
+  }
+  return (await res.json()) as Record<string, boolean>;
+}
+
+export async function saveStartupSupportProgram(programId: string): Promise<SavedSupportProgram> {
+  const res = await fetch(`${API_BASE}/startup-support/${encodeURIComponent(programId)}/saved`, {
+    method: "POST",
+    headers: userHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error || "관심 공고 저장에 실패했습니다.");
+  }
+  return (await res.json()) as SavedSupportProgram;
+}
+
+export async function deleteSavedStartupSupportProgram(programId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/startup-support/${encodeURIComponent(programId)}/saved`, {
+    method: "DELETE",
+    headers: userHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error || "관심 공고 제거에 실패했습니다.");
+  }
 }
