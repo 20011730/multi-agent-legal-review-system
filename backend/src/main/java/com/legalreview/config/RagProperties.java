@@ -47,31 +47,43 @@ public class RagProperties {
     @Getter @Setter
     public static class Chroma {
         private String baseUrl = "http://localhost:8000";
-        // application.yml의 기본값과 일치 (2026-05-15 갱신):
-        //   laws-collection  = laws_e5  (E5 768차원, 운영 검색)
-        //   cases-collection = cases_e5 (E5 768차원, 판례)
-        // 단순 @ConfigurationProperties 로딩 실패 시 fallback 값과도 일관성 유지.
-        private String lawsCollection = "laws_e5";
+        // application.yml의 기본값과 일치:
+        //   laws-collection           = laws_e5_full
+        //   cases-collection          = cases_e5 (롤백용 legacy)
+        //   extended-cases-collection = legal_case_chunks_full
+        // 결과 화면 기본 검색은 full collection만 사용하고 legacy는 명시 설정 시에만 사용한다.
+        private String lawsCollection = "laws_e5_full";
         private String casesCollection = "cases_e5";
         /**
          * Phase 10.63 — 확장 판례 collection (legal_rag_export 기반 샘플).
          * 빈 값이면 dual retrieval 비활성 (기존 cases_e5 단일 검색 유지).
          * Phase 10.65 — E5 호환 확인됨 (운영 E5 query encoder 그대로 사용 가능).
          */
-        private String extendedCasesCollection = "";
+        private String extendedCasesCollection = "legal_case_chunks_full";
         /** 확장 판례 top-k. */
         private int extendedCasesTopK = 2;
         /**
          * Phase 10.65 — 판례 검색 source 선택자.
-         *   - "legacy"   : cases_e5 단일 검색 (기본, 운영 안정성 우선)
+         *   - "legacy"   : cases_e5 단일 검색 (명시 회귀용)
          *   - "extended" : extended-cases-collection 단일 검색 (sample 또는 full 1.86M)
          *   - "dual"     : 둘 다 검색하여 source 별 분리 prompt 블록 + chip 표시
-         * extended/dual 모드에서 extended collection 이 비어 있거나 호출 실패 시
-         * 자동으로 legacy(cases_e5) 만 사용하도록 LegalRetrievalService 가 graceful fallback.
+         * full_only 모드에서 extended collection 이 비어 있으면 판례 검색을 중단해
+         * 결과 화면에 legacy collection이 섞이지 않게 한다.
          */
-        private String caseSearchMode = "legacy";
+        private String caseSearchMode = "full_only";
+        private final Tax tax = new Tax();
         /** 요청 timeout(초). */
         private int timeoutSeconds = 15;
+
+        @Getter @Setter
+        public static class Tax {
+            private boolean enabled = false;
+            private boolean routingEnabled = false;
+            private String collection = "tax_tribunal_e5_full";
+            private int topK = 3;
+            private int candidateTopK = 15;
+            private int minBodyLength = 50;
+        }
     }
 
     @Getter @Setter

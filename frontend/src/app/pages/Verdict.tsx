@@ -321,6 +321,12 @@ export function Verdict() {
     const adj = Math.min(20, highCount * 4 + medCount * 2);
     return Math.min(100, Math.max(0, base + adj));
   })();
+  const riskLevelForDisplay = (() => {
+    const lvl = finalDecision?.riskLevel?.toUpperCase();
+    if (lvl === "HIGH") return { label: "높음", tone: "위험", cls: "border-red-300 bg-red-50 text-red-700", dot: "bg-red-500" };
+    if (lvl === "LOW") return { label: "낮음", tone: "안전", cls: "border-emerald-300 bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" };
+    return { label: "보통", tone: "주의", cls: "border-amber-300 bg-amber-50 text-amber-700", dot: "bg-amber-500" };
+  })();
 
   const handlePdfDownload = async () => {
     // PDF 전용 hidden 마크업을 캡처 (재검토/공유/유의사항 등 UI 제외, 콤팩트 레이아웃)
@@ -525,67 +531,48 @@ export function Verdict() {
             </div>
           )}
 
-          {/* 리스크 스코어 */}
+          {/* AI 종합 위험도 */}
           <Card className={`border-[#1E3A8A]/20 ${aiFailed ? "bg-slate-50 opacity-80" : "bg-[#1E3A8A]/5"}`}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                리스크 스코어
+                AI 종합 위험도
                 {aiFailed && (
                   <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-normal text-slate-500">
-                    임시 점수 / AI 분석 미완료
+                    AI 분석 미완료
                   </span>
                 )}
               </CardTitle>
-              <CardDescription>0~100 종합 지표</CardDescription>
+              <CardDescription>멀티 에이전트 토론 결과를 종합한 참고 등급입니다. 정량 계산 점수가 아닙니다.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-center justify-between gap-6">
-                <div className="flex items-baseline gap-3">
-                  <p className="text-4xl font-semibold text-[#1E3A8A]">{riskScore}</p>
-                  {/* Phase 10.6 — 신호등 색 + 텍스트 라벨 (색만으로 의미 전달 X, 접근성 보강) */}
+                <div className="flex flex-wrap items-center gap-3">
                   <span
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                      riskScore >= 70
-                        ? "border-red-300 bg-red-50 text-red-700"
-                        : riskScore >= 40
-                          ? "border-amber-300 bg-amber-50 text-amber-700"
-                          : "border-emerald-300 bg-emerald-50 text-emerald-700"
-                    }`}
-                    aria-label={`종합 리스크 ${riskScore >= 70 ? "높음(위험)" : riskScore >= 40 ? "보통(주의)" : "낮음(안전)"}`}
+                    className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${riskLevelForDisplay.cls}`}
+                    aria-label={`AI 종합 위험도 ${riskLevelForDisplay.label}(${riskLevelForDisplay.tone})`}
                   >
-                    <span aria-hidden>●</span>
-                    {riskScore >= 70 ? "높음 · 위험" : riskScore >= 40 ? "보통 · 주의" : "낮음 · 안전"}
+                    <span className={`h-2 w-2 rounded-full ${riskLevelForDisplay.dot}`} aria-hidden />
+                    {riskLevelForDisplay.label} · {riskLevelForDisplay.tone}
                   </span>
-                </div>
-                <div
-                  className="w-full max-w-[360px]"
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={riskScore}
-                  aria-label={`종합 리스크 점수 ${riskScore} 점`}
-                >
-                  <div className="h-3 rounded-full border border-slate-300 overflow-hidden">
-                    <div
-                      className={`h-full ${riskScore >= 70 ? "bg-red-500" : riskScore >= 40 ? "bg-amber-500" : "bg-emerald-500"}`}
-                      style={{ width: `${riskScore}%` }}
-                    />
+                  <div className="text-xs leading-relaxed text-slate-600">
+                    {aiFailed
+                      ? "최종 판정이 없어 임시 안내만 표시합니다."
+                      : "발생 가능성 × 영향도 공식으로 계산한 점수가 아니라, 에이전트 토론과 최종 판정관 판단을 요약한 등급입니다."}
                   </div>
                 </div>
               </div>
-              {/* Phase 10.22 — 점수 기준 범례 (신호등 정의를 명확히) */}
               <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
                 <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
-                  ● 0~39 낮음·안전
+                  ● 낮음·안전
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
-                  ● 40~69 보통·주의
+                  ● 보통·주의
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-red-700">
-                  ● 70~100 높음·위험
+                  ● 높음·위험
                 </span>
                 <span className="ml-1 text-slate-500">
-                  점수는 AI 판정의 riskLevel 과 토론에서 도출된 개별 리스크 가중치를 결합해 산출됩니다.
+                  숫자 점수는 사용자 화면에서 표시하지 않습니다.
                 </span>
               </div>
             </CardContent>
@@ -1422,22 +1409,15 @@ export function Verdict() {
               </div>
             )}
 
-            {/* 4. 리스크 스코어 (한 줄로 콤팩트) */}
+            {/* 4. AI 종합 위험도 (정량 점수 오해 방지) */}
             <div style={pdfCardStyle}>
-              <div style={pdfTitleStyle}>리스크 스코어</div>
+              <div style={pdfTitleStyle}>AI 종합 위험도</div>
               <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "4px" }}>
-                <div style={{ fontSize: "28px", fontWeight: 700, color: "#1E3A8A" }}>{riskScore}</div>
-                <div style={{ flex: 1, height: "8px", background: "#e2e8f0", borderRadius: "4px", overflow: "hidden" }}>
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${riskScore}%`,
-                      background: riskScore >= 70 ? "#ef4444" : riskScore >= 40 ? "#f59e0b" : "#10b981",
-                    }}
-                  />
+                <div style={{ fontSize: "20px", fontWeight: 700, color: "#1E3A8A" }}>
+                  {riskLevelForDisplay.label} · {riskLevelForDisplay.tone}
                 </div>
                 <div style={{ fontSize: "11px", color: "#64748b" }}>
-                  위험도: {finalDecision?.riskLevel ?? "MEDIUM"}
+                  멀티 에이전트 검토 결과를 종합한 참고 등급이며, 정량 계산 점수가 아닙니다.
                 </div>
               </div>
             </div>
@@ -1521,14 +1501,20 @@ export function Verdict() {
                 </div>
                 {evidences.map((ev, idx) => {
                   const m = ev.metadata ?? {};
+                  const isTaxTribunal = ev.sourceType === "TAX_TRIBUNAL";
                   const articleNo = m.articleNo != null ? String(m.articleNo) : "";
                   const articleTitle = m.articleTitle ? String(m.articleTitle) : "";
                   const articleLabel = articleNo
                     ? `제${articleNo}조${articleTitle ? `(${articleTitle})` : ""}`
                     : "";
-                  const dept = (m.deptName ? String(m.deptName) : ev.articleOrCourt) || "";
+                  const dept = isTaxTribunal
+                    ? (ev.articleOrCourt || "국세법령정보시스템 조세 심판례")
+                    : ((m.deptName ? String(m.deptName) : ev.articleOrCourt) || "");
                   const lawType = m.lawTypeName ? String(m.lawTypeName) : "";
                   const enforce = m.enforceDate ? String(m.enforceDate) : "";
+                  const badgeLabel = ev.sourceType === "LAW" ? "법령" : (isTaxTribunal ? "조세 심판례" : "판례");
+                  const badgeBg = ev.sourceType === "LAW" ? "#dbeafe" : (isTaxTribunal ? "#ccfbf1" : "#f3e8ff");
+                  const badgeColor = ev.sourceType === "LAW" ? "#1e40af" : (isTaxTribunal ? "#0f766e" : "#6b21a8");
                   // Phase 10.85 — PDF 에서도 벡터 유사도(관련도 %) 노출 제거.
                   const body = ev.quotedText || ev.summary || "";
 
@@ -1537,10 +1523,10 @@ export function Verdict() {
                       <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px", flexWrap: "wrap" }}>
                         <span style={{
                           fontSize: "9px", fontWeight: 700, padding: "1px 6px", borderRadius: "8px",
-                          background: ev.sourceType === "LAW" ? "#dbeafe" : "#f3e8ff",
-                          color: ev.sourceType === "LAW" ? "#1e40af" : "#6b21a8",
+                          background: badgeBg,
+                          color: badgeColor,
                         }}>
-                          {ev.sourceType === "LAW" ? "법령" : "판례"}
+                          {badgeLabel}
                         </span>
                         <div style={{ fontSize: "12px", fontWeight: 600, color: "#0f172a", flex: 1, minWidth: 0 }}>
                           {ev.title}

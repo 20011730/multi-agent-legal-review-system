@@ -211,7 +211,8 @@ export function ReviewHistory() {
             <div className="space-y-3">
               {visibleReviews.map((review) => {
                 const status = statusMeta(review.status);
-                const risk = riskLabel(review.riskLevel);
+                const isCompleted = review.status === "COMPLETED";
+                const risk = isCompleted ? riskLabel(review.riskLevel) : "";
                 return (
                   <button
                     key={review.sessionId}
@@ -222,12 +223,14 @@ export function ReviewHistory() {
                       <div className="min-w-0">
                         <p className="font-semibold text-slate-900 truncate">{review.companyName}</p>
                         <p className="text-sm text-slate-600 truncate">{review.situation}</p>
-                        {(review.riskSummary || risk) && (
+                        {isCompleted ? (review.riskSummary || risk) && (
                           <p className="mt-1 text-xs text-slate-500 truncate">
                             {risk && <span className="font-medium text-slate-700">{risk}</span>}
                             {risk && review.riskSummary ? " · " : ""}
                             {safeText(review.riskSummary)}
                           </p>
+                        ) : (
+                          <p className="mt-1 text-xs font-medium text-blue-700">검토 진행 중</p>
                         )}
                         <p className="text-xs text-slate-500 mt-2 flex items-center gap-1"><Clock className="w-3 h-3" />{new Date(review.createdAt).toLocaleString()}</p>
                         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -251,7 +254,7 @@ export function ReviewHistory() {
                       </div>
                       <div className="flex flex-col items-end gap-2 shrink-0">
                         <Badge variant="outline">{reviewTypeLabels[review.reviewType] || review.reviewType}</Badge>
-                        {review.verdict && <Badge className={verdictConfig[review.verdict]?.color || "bg-slate-100 text-slate-700"}>{verdictConfig[review.verdict]?.label || review.verdict}</Badge>}
+                        {isCompleted && review.verdict && <Badge className={verdictConfig[review.verdict]?.color || "bg-slate-100 text-slate-700"}>{verdictConfig[review.verdict]?.label || review.verdict}</Badge>}
                         <Badge className={status.color}>{status.label}</Badge>
                       </div>
                     </div>

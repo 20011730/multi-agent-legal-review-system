@@ -65,6 +65,8 @@ def _clean_timeline_message(text: str, max_chars: int = 1100) -> str:
     ]
     for pattern, repl in replacements:
         cleaned = re.sub(pattern, repl, cleaned, flags=re.IGNORECASE | re.MULTILINE)
+    cleaned = _strip_control_chars(cleaned)
+    cleaned = _remove_long_foreign_runs(cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     if len(cleaned) > max_chars:
@@ -79,6 +81,75 @@ def _clean_timeline_message(text: str, max_chars: int = 1100) -> str:
     return cleaned
 
 
+def _strip_control_chars(text: str) -> str:
+    """사용자 노출 발언에서 깨진 제어문자와 replacement char를 제거한다."""
+    if not text:
+        return ""
+    return "".join(
+        ch for ch in str(text).replace("\ufffd", "")
+        if ch in "\n\t" or ord(ch) >= 32
+    )
+
+
+def _remove_long_foreign_runs(text: str) -> str:
+    """
+    RAG 원문/모델 출력에 섞일 수 있는 외국어 장문을 사용자 말풍선에서 제거한다.
+    IP, RAG, VAT 같은 짧은 약어와 법령/기관 고유명사는 남기되, 긴 라틴/중일문 run은 숨긴다.
+    """
+    if not text:
+        return ""
+    cleaned = re.sub(r"[A-Za-z][A-Za-z0-9 ,.;:!?/()_\-]{70,}", " ", text)
+    cleaned = re.sub(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]{16,}", " ", cleaned)
+    cleaned = re.sub(r"[\u0400-\u04ff\u0600-\u06ff]{10,}", " ", cleaned)
+    return cleaned
+
+
+def _language_quality(text: str) -> dict[str, float]:
+    if not text:
+        return {"hangul": 0.0, "foreign": 0.0}
+    chars = [ch for ch in text if not ch.isspace()]
+    if not chars:
+        return {"hangul": 0.0, "foreign": 0.0}
+    hangul = sum(1 for ch in chars if "\uac00" <= ch <= "\ud7a3")
+    foreign = sum(
+        1 for ch in chars
+        if ("A" <= ch <= "Z") or ("a" <= ch <= "z")
+        or ("\u3040" <= ch <= "\u30ff")
+        or ("\u3400" <= ch <= "\u4dbf")
+        or ("\u4e00" <= ch <= "\u9fff")
+        or ("\u0400" <= ch <= "\u04ff")
+    )
+    return {"hangul": hangul / len(chars), "foreign": foreign / len(chars)}
+
+
+def _looks_invalid_language(text: str) -> bool:
+    if not text or len(text.strip()) < 20:
+        return True
+    if "\ufffd" in text or re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", text):
+        return True
+    if re.search(r"[A-Za-z][A-Za-z0-9 ,.;:!?/()_\-]{90,}", text):
+        return True
+    if re.search(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]{18,}", text):
+        return True
+    q = _language_quality(text)
+    return q["hangul"] < 0.18 or q["foreign"] > 0.42
+
+
+def _sanitize_agent_output(agent: str, round_num: int, response: str, topic: str) -> str:
+    """
+    모든 agent 말풍선의 마지막 관문.
+    외국어 장문/깨진 문자열/짧은 실패 응답은 round별 한국어 fallback으로 대체한다.
+    """
+    cleaned = _clean_timeline_message(response or "")
+    if _looks_invalid_language(cleaned):
+        logger.warning(
+            "agent output language fallback — agent=%s round=%d len=%d quality=%s",
+            agent, round_num, len(cleaned or ""), _language_quality(cleaned or ""),
+        )
+        cleaned = _fallback_agent_message(agent, round_num, topic)
+    return _clean_timeline_message(cleaned, max_chars=1100)
+
+
 def _attachment_facts(topic: str) -> dict[str, bool]:
     text = topic or ""
     return {
@@ -91,35 +162,57 @@ def _attachment_facts(topic: str) -> dict[str, bool]:
 
 def _fallback_agent_message(agent: str, round_num: int, topic: str) -> str:
     facts = _attachment_facts(topic)
+    round_focus = {
+        1: "Round 1에서는 사안 접수 단계이므로 핵심 쟁점과 추가 확인 조건을 먼저 분리합니다.",
+        2: "Round 2에서는 사실관계와 증빙 보완 단계이므로 누락 자료와 사용자 추가 질문의 영향을 확인합니다.",
+        3: "Round 3에서는 법령·판례 근거 검토 단계이므로 근거가 있는 쟁점과 근거가 부족한 쟁점을 나눕니다.",
+        4: "Round 4에서는 반론 검증 단계이므로 최악 상황, 반대 관점, 대응 가능성을 비교합니다.",
+        5: "Round 5에서는 종합 단계이므로 실행 체크리스트와 보류 조건을 정리합니다.",
+    }.get(round_num, "현재 라운드 목적에 맞춰 이전 발언을 반복하지 않고 새 판단을 보탭니다.")
     if agent == "business":
-        parts = ["사업 관점에서는 첨부자료 본문에 적힌 조건을 실행 계획과 계약 일정에 바로 반영해야 합니다."]
+        parts = [round_focus, "사업 관점에서는 첨부자료 본문에 적힌 조건을 실행 계획과 계약 일정에 바로 반영해야 합니다."]
         if facts["pdf_ip"] or facts["sourcecode_en"]:
             parts.append("공동개발 결과물의 해외 재판매 권한이 참여기업에 귀속되고, 협력사가 제3자에게 소스코드를 제공하려면 별도 서면 동의가 필요하다는 제한은 사업화 권한을 지키는 핵심 조건입니다.")
         if facts["docx_budget"]:
             parts.append("외주 개발비가 총사업비의 35퍼센트를 초과하면 사전 승인을 받아야 하고, 승인 없는 비용은 정산 대상에서 제외되므로 예산 집행 전에 승인 절차를 먼저 잡아야 합니다.")
         if facts["docx_log"]:
             parts.append("고객 설비 로그를 90일 보관한 뒤 복구 불가능하게 삭제해야 한다는 조건은 운영 정책과 고객 안내 문구에 함께 반영되어야 합니다.")
-        parts.append("따라서 다음 라운드에서는 IP 사용권, 정산 승인 기준, 로그 보관·삭제 정책을 각각 계약서 조항으로 분리해 확인하는 것이 좋습니다.")
+        if round_num >= 4:
+            parts.append("최악의 경우 사업비 환수와 일정 지연이 동시에 생길 수 있으므로, 비용이 들더라도 승인 기록과 권한 조항부터 확정하는 편이 안전합니다.")
+        elif round_num >= 2:
+            parts.append("사용자 추가 질문이 있다면 그 질문이 예산·권한·일정 중 어느 조건을 바꾸는지 확인해 다음 판단에 반영해야 합니다.")
+        else:
+            parts.append("따라서 다음 라운드에서는 IP 사용권, 정산 승인 기준, 로그 보관·삭제 정책을 각각 계약서 조항으로 분리해 확인하는 것이 좋습니다.")
         return " ".join(parts)
     if agent == "legal":
-        parts = ["법률 관점에서는 사용자 입력보다 첨부자료 본문에 적힌 구체 조건이 우선 확인 대상입니다."]
+        parts = [round_focus, "법률 관점에서는 사용자 입력보다 첨부자료 본문에 적힌 구체 조건이 우선 확인 대상입니다."]
         if facts["pdf_ip"] or facts["sourcecode_en"]:
             parts.append("해외 재판매 권한 귀속과 제3자 소스코드 제공 제한은 저작권 귀속, 사용권 범위, 재허락 금지 조항으로 명확히 써야 분쟁을 줄일 수 있습니다.")
         if facts["docx_budget"]:
             parts.append("외주 개발비 35퍼센트 초과 시 사전 승인과 미승인 비용의 정산 제외 조건은 협약서와 사업비 집행 지침에 맞는지 확인해야 합니다.")
         if facts["docx_log"]:
             parts.append("고객 설비 로그의 90일 보관 및 복구 불가능 삭제 조건은 개인정보·영업정보 보관 기간, 파기 방법, 위탁 처리 조항과 연결해 검토해야 합니다.")
-        parts.append("보완하지 않으면 지원금 환수, IP 사용 분쟁, 데이터 보관 위반이 동시에 발생할 수 있습니다.")
+        if round_num >= 4:
+            parts.append("상대방이나 감독기관은 승인 누락, 권리 귀속 불명확성, 파기 절차 부재를 문제 삼을 수 있으므로 양보 가능한 조건과 양보하면 안 되는 조건을 나눠야 합니다.")
+        elif round_num == 3:
+            parts.append("제공된 근거로 확인되는 범위와 추가 원문 확인이 필요한 범위를 구분해 EvidenceCard와 함께 보완해야 합니다.")
+        else:
+            parts.append("보완하지 않으면 지원금 환수, IP 사용 분쟁, 데이터 보관 위반이 동시에 발생할 수 있습니다.")
         return " ".join(parts)
     if agent == "risk":
-        parts = ["리스크 관점에서는 첨부자료의 조건들이 서로 연결될 때 위험이 커집니다."]
+        parts = [round_focus, "리스크 관점에서는 첨부자료의 조건들이 서로 연결될 때 위험이 커집니다."]
         if facts["pdf_ip"] or facts["sourcecode_en"]:
             parts.append("제3자 소스코드 제공에 별도 서면 동의가 필요한데 이 절차가 빠지면 협력사 관리 실패가 곧 IP 유출과 사업화 지연으로 이어질 수 있습니다.")
         if facts["docx_budget"]:
             parts.append("외주비가 35퍼센트를 넘는 순간 사전 승인과 정산 제외 문제가 생기므로, 개발 범위 변경이 생길 때마다 승인 기록을 남겨야 합니다.")
         if facts["docx_log"]:
             parts.append("로그 90일 보관 후 복구 불가능 삭제 조건은 보안 운영과 고객 문의 대응 기간을 함께 제한하므로 내부 운영 매뉴얼과 백업 정책을 맞춰야 합니다.")
-        parts.append("우선순위는 IP 동의 절차, 사업비 승인 증빙, 로그 삭제 이행 기록 순으로 잡는 것이 안전합니다.")
+        if round_num >= 5:
+            parts.append("최종 체크리스트에는 즉시 조치할 IP 동의 절차, 관리 가능한 사업비 증빙, 전문가 확인이 필요한 개인정보 보관 정책을 분리해 넣어야 합니다.")
+        elif round_num == 4:
+            parts.append("반론 검증 관점에서는 승인 기록이 없다는 주장, 소스코드 제공 동의가 없다는 주장, 로그 삭제 불이행 주장이 가장 큰 방어 포인트입니다.")
+        else:
+            parts.append("우선순위는 IP 동의 절차, 사업비 승인 증빙, 로그 삭제 이행 기록 순으로 잡는 것이 안전합니다.")
         return " ".join(parts)
     return ""
 
@@ -384,10 +477,10 @@ def _build_prior_messages_context(request: "AnalyzeRequest") -> str:
             continue
         agent = m.get("agentName") or m.get("agentId") or "에이전트"
         round_num = m.get("round") or ""
-        content = str(m.get("content") or "").strip()
+        content = _clean_timeline_message(str(m.get("content") or "").strip(), max_chars=650)
         if not content:
             continue
-        lines.append(f"- Round {round_num} / {agent}: {content[:900]}")
+        lines.append(f"- Round {round_num} / {agent}: {content[:650]}")
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
@@ -521,12 +614,12 @@ def biz_node(state: DebateState) -> dict:
         round_num, prev_count, len(state.get("history", "") or ""),
     )
     try:
-        response = _clean_timeline_message(run_biz_agent(state["history"], state["topic"], round_num=round_num))
+        response = run_biz_agent(state["history"], state["topic"], round_num=round_num)
     except Exception as e:
         logger.error("비즈니스 에이전트 실패: %s", e)
         response = _fallback_agent_message("business", round_num, f"{state['topic']}\n{state.get('history', '')}")
     response = _ensure_attachment_notes(response, f"{state['topic']}\n{state.get('history', '')}")
-    response = _clean_timeline_message(response)
+    response = _sanitize_agent_output("business", round_num, response, f"{state['topic']}\n{state.get('history', '')}")
 
     elapsed = time.time() - t0
     logger.info(
@@ -567,12 +660,12 @@ def legal_node(state: DebateState) -> dict:
         round_num, prev_count, len(state.get("history", "") or ""),
     )
     try:
-        response = _clean_timeline_message(run_legal_agent(state["history"], state["topic"], round_num=round_num))
+        response = run_legal_agent(state["history"], state["topic"], round_num=round_num)
     except Exception as e:
         logger.error("법무 에이전트 실패: %s", e)
         response = _fallback_agent_message("legal", round_num, f"{state['topic']}\n{state.get('history', '')}")
     response = _ensure_attachment_notes(response, f"{state['topic']}\n{state.get('history', '')}")
-    response = _clean_timeline_message(response)
+    response = _sanitize_agent_output("legal", round_num, response, f"{state['topic']}\n{state.get('history', '')}")
 
     elapsed = time.time() - t0
     logger.info(
@@ -613,12 +706,12 @@ def risk_node(state: DebateState) -> dict:
         round_num, prev_count, len(state.get("history", "") or ""),
     )
     try:
-        response = _clean_timeline_message(run_risk_agent(state["history"], state["topic"], round_num=round_num))
+        response = run_risk_agent(state["history"], state["topic"], round_num=round_num)
     except Exception as e:
         logger.error("리스크 검토자 실패: %s", e)
         response = _fallback_agent_message("risk", round_num, f"{state['topic']}\n{state.get('history', '')}")
     response = _ensure_attachment_notes(response, f"{state['topic']}\n{state.get('history', '')}")
-    response = _clean_timeline_message(response)
+    response = _sanitize_agent_output("risk", round_num, response, f"{state['topic']}\n{state.get('history', '')}")
 
     elapsed = time.time() - t0
     logger.info(
@@ -668,6 +761,17 @@ def judge_node(state: DebateState) -> dict:
         logger.error("판정 에이전트 실패: %s", e)
         response = _fallback_judge_json(f"{state['topic']}\n{state.get('history', '')}")
     response = _ensure_judge_attachment_notes(response, f"{state['topic']}\n{state.get('history', '')}")
+    judge_context = f"{state['topic']}\n{state.get('history', '')}"
+    parsed_for_display = parse_judge_response(response, context_text=judge_context)
+    if parsed_for_display.get("_fallbackUsed"):
+        logger.warning(
+            "FINAL_VERDICT_FALLBACK_USED reason=%s stage=judge_node",
+            parsed_for_display.get("_fallbackReason") or "UNKNOWN",
+        )
+    response = json.dumps(
+        {k: v for k, v in parsed_for_display.items() if not k.startswith("_")},
+        ensure_ascii=False,
+    )
 
     elapsed = time.time() - t0
     logger.info("[JUDGE] 완료 (response_len=%d, elapsed=%.1fs)", len(response or ""), elapsed)
@@ -782,7 +886,13 @@ def _analyze_single_step(
         if "[최종 판정]:" in history_text:
             judge_section = history_text.split("[최종 판정]:")[-1].strip()
         judge_raw = judge_section or (messages[-1].content if messages else "")
-        parsed = parse_judge_response(judge_raw)
+        parsed = parse_judge_response(judge_raw, context_text=topic)
+        if parsed.get("_fallbackUsed"):
+            logger.warning(
+                "FINAL_VERDICT_FALLBACK_USED reason=%s stage=single_step sessionId=%s",
+                parsed.get("_fallbackReason") or "UNKNOWN",
+                request.sessionId,
+            )
         risks = [
             RiskItem(
                 category=r.get("category", "기타"),
@@ -950,7 +1060,29 @@ def analyze_with_langgraph(request: AnalyzeRequest) -> AnalyzeResponse:
         if "[최종 판정]:" in history_text:
             judge_section = history_text.split("[최종 판정]:")[-1].strip()
 
-        parsed = parse_judge_response(judge_section if judge_section else judge_raw)
+        judge_context = f"{topic}\n\n{history_text}"
+        parsed = parse_judge_response(judge_section if judge_section else judge_raw, context_text=judge_context)
+        round_counts: dict[int, int] = {}
+        for m in all_messages:
+            if m.agentId in ("judge", "ethics"):
+                continue
+            round_counts[m.round] = round_counts.get(m.round, 0) + 1
+        logger.info(
+            "FINAL_JUDGE_INPUT_SUMMARY sessionId=%s rounds=%s followUps=%d historyLen=%d judgeRawLen=%d",
+            request.sessionId,
+            round_counts,
+            len(active_followups),
+            len(history_text or ""),
+            len((judge_section if judge_section else judge_raw) or ""),
+        )
+        logger.info(
+            "FINAL_JUDGE_PARSE_RESULT sessionId=%s fallbackUsed=%s reason=%s risks=%d recommendationLen=%d",
+            request.sessionId,
+            bool(parsed.get("_fallbackUsed")),
+            parsed.get("_fallbackReason") or "",
+            len(parsed.get("risks") or []),
+            len(parsed.get("recommendation") or ""),
+        )
 
         # FinalDecision 생성
         risks = [

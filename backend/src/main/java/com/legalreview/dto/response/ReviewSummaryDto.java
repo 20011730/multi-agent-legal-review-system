@@ -35,15 +35,28 @@ public class ReviewSummaryDto {
             long reanalysisQuestionCount,
             long assistantMessageCount
     ) {
+        return from(session, session.getFinalDecision(), messageCount, evidenceCount,
+                followUpQuestionCount, reanalysisQuestionCount, assistantMessageCount);
+    }
+
+    public static ReviewSummaryDto from(
+            ReviewSession session,
+            com.legalreview.domain.FinalDecision finalDecision,
+            long messageCount,
+            long evidenceCount,
+            long followUpQuestionCount,
+            long reanalysisQuestionCount,
+            long assistantMessageCount
+    ) {
         String verdict = null;
         String riskLevel = null;
         String riskSummary = null;
 
-        if (session.getFinalDecision() != null) {
-            verdict = session.getFinalDecision().getVerdict();
-            riskLevel = session.getFinalDecision().getRiskLevel();
-            if (session.getFinalDecision().getRisks() != null && !session.getFinalDecision().getRisks().isEmpty()) {
-                riskSummary = session.getFinalDecision().getRisks().get(0).getDescription();
+        if (finalDecision != null) {
+            verdict = finalDecision.getVerdict();
+            riskLevel = finalDecision.getRiskLevel();
+            if (finalDecision.getRisks() != null && !finalDecision.getRisks().isEmpty()) {
+                riskSummary = finalDecision.getRisks().get(0).getDescription();
                 if (riskSummary != null && riskSummary.length() > 90) {
                     riskSummary = riskSummary.substring(0, 90) + "...";
                 }

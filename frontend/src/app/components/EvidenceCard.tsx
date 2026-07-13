@@ -23,7 +23,7 @@ import { toast } from "sonner";
 
 /* ── 타입 ── */
 export interface EvidenceItem {
-  sourceType: string;        // "LAW" | "CASE"
+  sourceType: string;        // "LAW" | "CASE" | "TAX_TRIBUNAL"
   title: string;
   referenceId?: string;
   articleOrCourt?: string;
@@ -66,6 +66,10 @@ export interface EvidenceMetadata {
   ref_statutes?: string;
   ref_cases?: string;
   db_id?: string | number;
+  doc_number?: string;
+  tax_type?: string;
+  decision_type?: string;
+  attr_year?: string | number;
   // CASE: snake_case alias (Python adapter)
   case_number?: string;
   case_name?: string;
@@ -189,6 +193,8 @@ function humanizeBodyStatus(bodyStatus: string): string {
 function EvidenceRow({ ev }: { ev: EvidenceItem }) {
   const [open, setOpen] = useState(false);
   const isLaw = ev.sourceType === "LAW";
+  const isTaxTribunal = ev.sourceType === "TAX_TRIBUNAL";
+  const isCase = !isLaw && !isTaxTribunal;
 
   // RAG metadata 우선, 없으면 기본 필드 fallback
   const articleNo = metaStr(ev.metadata, "articleNo");
@@ -200,18 +206,26 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
   // Phase 10.85 — scoreLabel (벡터 유사도 %) 은 사용자 화면에서 노출하지 않음.
 
   // CASE 전용 상태 라벨 (카드 요약 행에 한눈에 보이도록 표시) — 닫힌 상태에서도 본문 vs 메타 구분
-  const caseTextType = !isLaw ? metaStrAny(ev.metadata, "text_type", "section", "section_type", "subsection_label") : "";
-  const caseBodyStatus = !isLaw ? metaStrAny(ev.metadata, "body_status") : "";
-  const caseDataSource = !isLaw ? metaStrAny(ev.metadata, "data_source") : "";
+  const caseTextType = isCase ? metaStrAny(ev.metadata, "text_type", "section", "section_type", "subsection_label") : "";
+  const caseBodyStatus = isCase ? metaStrAny(ev.metadata, "body_status") : "";
+  const caseDataSource = isCase ? metaStrAny(ev.metadata, "data_source") : "";
+  const taxDocNumber = isTaxTribunal ? metaStrAny(ev.metadata, "doc_number") || ev.referenceId || "" : "";
+  const taxType = isTaxTribunal ? metaStrAny(ev.metadata, "tax_type") : "";
+  const taxDecisionType = isTaxTribunal ? metaStrAny(ev.metadata, "decision_type") : "";
+  const taxAttrYear = isTaxTribunal ? metaStrAny(ev.metadata, "attr_year") : "";
+  const taxIssue = isTaxTribunal ? metaStrAny(ev.metadata, "subsection_label", "section_type") : "";
   // "참고용 메타" 판정 — 데이터 출처가 빈값('') 이거나 '대법원' 같은 법제처 직영이면 정상 본문 case.
   // 외부 시스템(예: 국세법령정보시스템) 또는 본문이 명시적으로 비어 있는 경우만 ref-only 로 표시.
   // (data_source 가 채워졌다는 사실만으로 ref-only 판정하지 않음 — 직전 버그 수정)
   const EXTERNAL_DATA_SOURCES = new Set<string>(["국세법령정보시스템"]);
   const caseBodyMissing = caseBodyStatus !== "" && caseBodyStatus !== "ok";
   const caseFromExternalSystem = caseDataSource !== "" && EXTERNAL_DATA_SOURCES.has(caseDataSource);
-  const caseIsReferenceOnly = !isLaw && (caseBodyMissing || caseFromExternalSystem);
-  const caseTextTypeLabel = !isLaw && !caseIsReferenceOnly ? humanizeTextType(caseTextType) : "";
-  const isExtendedCaseSource = !isLaw && Boolean(ev.dataSource?.toLowerCase().startsWith("extended_case"));
+  const caseIsReferenceOnly = isCase && (caseBodyMissing || caseFromExternalSystem);
+  const caseTextTypeLabel = isCase && !caseIsReferenceOnly ? humanizeTextType(caseTextType) : "";
+  const isExtendedCaseSource = isCase && Boolean(
+    ev.dataSource?.toLowerCase().startsWith("extended_case") ||
+    ev.dataSource?.toLowerCase() === "case_full"
+  );
 
   const articleLabel = articleNo
     ? `제${articleNo}조${articleTitle ? `(${articleTitle})` : ""}`
@@ -241,6 +255,9 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
       if (!lawName) return null;
       return `https://www.law.go.kr/법령/${encodeURIComponent(lawName)}`;
     }
+    if (isTaxTribunal) {
+      return null;
+    }
     const ref = (ev.referenceId || "").trim();
     // "서울고등법원-2022-누-56427" → "서울고등법원2022누56427" → 사건번호 "2022누56427"
     const cleaned = ref.replace(/[-\s]/g, "");
@@ -261,10 +278,10 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
       <div className="flex items-center gap-3 p-3">
         <Badge
           className={`text-xs flex-shrink-0 ${
-            isLaw ? "bg-blue-600" : "bg-purple-600"
+            isLaw ? "bg-blue-600" : isTaxTribunal ? "bg-amber-600" : "bg-purple-600"
           }`}
         >
-          {isLaw ? "법령" : "판례"}
+          {isLaw ? "법령" : isTaxTribunal ? "조세 심판례" : "판례"}
         </Badge>
         {/* Phase 10.64 — 검색 source 구분 chip (운영 vs 확장). 내부 collection 명은 노출하지 않음. */}
         {isExtendedCaseSource && (
@@ -276,7 +293,7 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
             확장 판례 DB
           </Badge>
         )}
-        {ev.dataSource && !isExtendedCaseSource && !isLaw && (
+        {ev.dataSource && !isExtendedCaseSource && isCase && (
           <Badge
             variant="outline"
             className="text-[10px] flex-shrink-0 border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -331,6 +348,15 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
               }
               return null;
             }
+            if (isTaxTribunal) {
+              const parts = [taxDocNumber, taxType, taxDecisionType, taxAttrYear ? `${taxAttrYear}년 귀속` : ""]
+                .filter(Boolean);
+              return parts.length === 0 ? null : (
+                <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
+                  {parts.join(" | ")}
+                </p>
+              );
+            }
             // CASE 흐름: 법원 / 사건번호 둘 다 비어 있으면 행 숨김
             const courtName = deptName; // CASE 의 articleOrCourt = court
             const caseNumber = ev.referenceId;
@@ -384,7 +410,7 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
             <Tag className="w-3.5 h-3.5 text-gray-400" />
             <span className="text-gray-500">유형:</span>
             <span className="font-medium text-gray-700">
-              {isLaw ? "법령" : "판례"}
+              {isLaw ? "법령" : isTaxTribunal ? "조세 심판례" : "판례"}
             </span>
           </div>
 
@@ -414,7 +440,7 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
               <Scale className="w-3.5 h-3.5 text-gray-400 mt-0.5" />
               <div>
                 <span className="text-gray-500">
-                  {isLaw ? "소관부처:" : "법원/사건번호:"}
+                  {isLaw ? "소관부처:" : isTaxTribunal ? "심판례 정보:" : "법원/사건번호:"}
                 </span>
                 <p className="font-medium text-gray-900 mt-0.5">
                   {deptName}
@@ -426,8 +452,34 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
             </div>
           )}
 
+          {/* TAX_TRIBUNAL 전용: 일부 metadata가 비어 있어도 안전하게 표시 */}
+          {isTaxTribunal && (
+            <div className="space-y-1">
+              {taxIssue && (
+                <div className="flex items-start gap-2 text-xs">
+                  <Tag className="w-3.5 h-3.5 text-gray-400 mt-0.5" />
+                  <div>
+                    <span className="text-gray-500">쟁점:</span>
+                    <span className="font-medium text-gray-700 ml-1">{taxIssue}</span>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-start gap-2 text-xs">
+                <Info className="w-3.5 h-3.5 text-amber-500 mt-0.5" />
+                <div>
+                  <span className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">
+                    조세 심판례
+                  </span>
+                  <span className="text-gray-600 ml-1.5">
+                    원문 링크가 제공되지 않는 경우 공식 사이트에서 사건번호로 추가 확인이 필요합니다.
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* CASE 전용: 선고일 + 참조조문 (snake_case/camelCase 양쪽 fallback) */}
-          {!isLaw && (() => {
+          {isCase && (() => {
             const decisionDate = metaStrAny(ev.metadata, "decision_date", "judgmentDate");
             const referencedLaws = metaStrAny(ev.metadata, "referenced_laws", "ref_statutes");
             const referencedCases = metaStrAny(ev.metadata, "ref_cases");
@@ -573,7 +625,7 @@ function EvidenceRow({ ev }: { ev: EvidenceItem }) {
               size="sm"
               className="h-7 text-xs"
               disabled={!searchUrl}
-              title={searchUrl ? "국가법령정보센터에서 검색" : "검색어가 없어 검색을 열 수 없습니다"}
+              title={searchUrl ? "국가법령정보센터에서 검색" : "공식 원문 링크가 제공되지 않습니다"}
               onClick={() => {
                 if (!searchUrl) return;
                 // Phase 10.85 — deep link 가 결과를 못 띄울 가능성에 대비해 검색어를 함께 복사.
@@ -607,15 +659,15 @@ export function EvidenceCardList({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-indigo-600" />
-            법령·판례 근거
+            법령·판례·조세 심판례 근거
           </CardTitle>
-          <CardDescription>분석에 매칭된 법령·판례 자료가 표시됩니다</CardDescription>
+          <CardDescription>분석에 매칭된 법령·판례·조세 심판례 자료가 표시됩니다</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-lg">
             <Info className="w-5 h-5 text-gray-400 mt-0.5 shrink-0" />
             <div className="text-sm text-gray-600">
-              <p>이 검토 건에 매칭된 법령·판례 근거가 없습니다.</p>
+              <p>이 검토 건에 매칭된 법령·판례·조세 심판례 근거가 없습니다.</p>
               <p className="mt-1 text-xs text-gray-400">
                 입력 내용에서 확인 가능한 법령·판례 근거가 충분하지 않은 경우입니다.
               </p>
@@ -631,10 +683,10 @@ export function EvidenceCardList({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <BookOpen className="w-5 h-5 text-indigo-600" />
-          법령·판례 근거
+          법령·판례·조세 심판례 근거
         </CardTitle>
         <CardDescription>
-          분석에 참조된 법령 및 판례 자료 — 상세 보기를 눌러 내용을 확인하세요
+          분석에 참조된 법령, 판례 및 조세 심판례 자료 — 상세 보기를 눌러 내용을 확인하세요
         </CardDescription>
       </CardHeader>
       <CardContent>

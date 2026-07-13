@@ -41,6 +41,7 @@ public class EvidenceAssembler {
 
     public EvidenceDto toEvidenceDto(RetrievedChunk c) {
         boolean isLaw = "LAW".equalsIgnoreCase(c.getSourceType());
+        boolean isTaxTribunal = "TAX_TRIBUNAL".equalsIgnoreCase(c.getSourceType());
 
         String title;
         String referenceId;
@@ -57,6 +58,18 @@ public class EvidenceAssembler {
                     ? c.metaString("lawId")
                     : ("제" + articleNo + "조");
             articleOrCourt = c.metaString("department");
+        } else if (isTaxTribunal) {
+            String docNumber = c.metaFirstOf("doc_number");
+            String section = c.metaFirstOf("section_type", "subsection_label");
+            String taxType = c.metaFirstOf("tax_type");
+            String decisionType = c.metaFirstOf("decision_type");
+            title = docNumber.isBlank() ? "조세 심판례" : docNumber;
+            if (!section.isBlank()) {
+                title += " · " + taxSectionLabel(section);
+            }
+            referenceId = docNumber;
+            articleOrCourt = String.join(" | ",
+                    nonBlankParts("국세법령정보시스템 조세 심판례", taxType, decisionType));
         } else {
             // ── CASE 매핑 (snake_case 우선 / camelCase fallback — 어댑터 호환) ──
             //   Python 적재(`ai/generate_rag/5-2.insert_cases_e5.py`) 는 snake_case 키를 쓴다:
@@ -98,7 +111,7 @@ public class EvidenceAssembler {
         String relevanceReason = formatRelevance(c.getDistance());
 
         EvidenceDto dto = new EvidenceDto(
-                isLaw ? "LAW" : "CASE",
+                isLaw ? "LAW" : (isTaxTribunal ? "TAX_TRIBUNAL" : "CASE"),
                 title,
                 referenceId,
                 articleOrCourt,
@@ -112,13 +125,15 @@ public class EvidenceAssembler {
         //   LegalRetrievalService 가 확장 collection 결과에 "extended_case..." 로 overwrite 하므로
         //   여기서는 default 로 운영 collection 명을 세팅 (이후 overwrite 안전).
         if (isLaw) {
-            dto.setDataSource("laws_e5");
+            dto.setDataSource("law");
+        } else if (isTaxTribunal) {
+            dto.setDataSource("tax_tribunal");
         } else {
-            dto.setDataSource("cases_e5");
+            dto.setDataSource("case");
         }
 
-        // ── RAG 부가 필드: score + metadata ──
-        // 응답에만 노출, DB 저장 X (Evidence 엔티티에는 컬럼 없음)
+        // ── RAG 내부 score + 공개 metadata ──
+        // score는 내부 정렬/진단용으로 DTO에 보관하되 @JsonIgnore로 사용자용 JSON에는 직렬화하지 않는다.
         Double dist = c.getDistance();
         if (dist != null) {
             double sim = Math.max(0.0, Math.min(1.0, 1.0 - dist / 2.0));
@@ -128,21 +143,19 @@ public class EvidenceAssembler {
         return dto;
     }
 
-    /**
-     * 화면/프롬프트에서 활용할 metadata만 추려 노출.
-     * Chroma 내부 키 일부(rowId 등)는 응답에 안 보이게 의도적으로 제외 가능 — 여기선 모두 패스스루.
-     */
+    /** 화면/프롬프트에서 활용할 공개 metadata만 추려 노출한다. */
     private static Map<String, Object> buildExposedMetadata(RetrievedChunk c) {
         Map<String, Object> src = c.getMetadata();
         Map<String, Object> out = new LinkedHashMap<>();
         if (src != null) {
-            // 우선순위 키만 정렬해서 응답에 일관된 순서로 노출
+            // 우선순위 공개 키만 정렬해서 응답에 일관된 순서로 노출.
+            // 제외 예: chunkIndex/chunk_id, embedding*, raw score/distance, collection, detail_root 등 내부 진단 값.
             String[] orderedKeys = {
                     // 공용
                     "sourceType", "source_type",
                     // LAW (camelCase 위주)
                     "lawMst", "lawId", "lawNameKr", "lawTypeName",
-                    "deptName", "deptCode", "enforceDate", "promulgateDate",
+                    "deptName", "enforceDate", "promulgateDate",
                     "articleNo", "articleTitle",
                     // CASE (camelCase + snake_case 둘 다 노출 — adapter 차이 대응)
                     "section", "text_type", "section_type", "subsection_label",
@@ -152,12 +165,9 @@ public class EvidenceAssembler {
                     "judgmentDate", "decision_date",
                     "caseType",
                     "referenced_laws", "ref_statutes", "ref_cases", "summary",
-                    // 본문 부재 case 진단용 (5-1/5-3/5-2 흐름이 넣어주는 메타)
-                    "body_status", "detail_root", "data_source", "case_type_name",
-                    "db_id",
-                    // 공통
-                    "chunkIndex", "chunk_index", "chunkingStrategy",
-                    "embeddingProvider", "embeddingModel",
+                    // TAX_TRIBUNAL
+                    "doc_number", "tax_type", "decision_type", "attr_year",
+                    // 공통 공개 표시용
                     "url",
                     "shortName", "revisionType", "referenceId"
             };
@@ -173,8 +183,17 @@ public class EvidenceAssembler {
                 out.put("source_url", maskOcInUrl(srcUrl.toString()));
             }
         }
-        out.put("chunkId", c.getChunkId());
         return out;
+    }
+
+    private static List<String> nonBlankParts(String... values) {
+        List<String> parts = new ArrayList<>();
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                parts.add(value);
+            }
+        }
+        return parts;
     }
 
     private static String sectionLabel(String section) {
@@ -194,6 +213,17 @@ public class EvidenceAssembler {
             case "meta" -> "메타정보";
             default -> "";
         };
+    }
+
+    private static String taxSectionLabel(String section) {
+        if (section == null || section.isBlank()) return "";
+        String compact = section.replaceAll("\\s+", "");
+        if (compact.equals("요지")) return "요지";
+        if (compact.equals("상세내용")) return "상세내용";
+        if (compact.equals("주문")) return "주문";
+        if (compact.equals("이유")) return "이유";
+        if (section.length() > 40) return section.substring(0, 40) + "…";
+        return section;
     }
 
     /**

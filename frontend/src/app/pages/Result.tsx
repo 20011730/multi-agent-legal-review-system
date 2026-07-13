@@ -33,12 +33,21 @@ interface Message {
 type FollowUpStatus = "pending" | "in-progress" | "completed" | "reflected" | "partial" | "failed" | "deleted";
 
 interface FollowUpQuestion {
+  id?: string | number;
   targetAgent?: string;
   message: string;
   createdAt?: string;
   updatedAt?: string;
   reanalyzeStatus?: FollowUpStatus;
   appliedRound?: number | string;
+  sourceRound?: number | string;
+  afterRound?: number | string;
+  round?: number | string;
+  roundNumber?: number | string;
+  nextRound?: number | string;
+  sequence?: number | string;
+  questionOrder?: number | string;
+  sender?: string;
 }
 
 type WaitingStage = "round2" | "round3" | "round4" | "round5";
@@ -394,6 +403,16 @@ function sanitizeAgentContent(content: string): string {
   if (replaced) {
     sanitized = "일부 AI 응답을 불러오지 못했습니다. 다시 시도하거나 관리자에게 문의해 주세요.";
   }
+  sanitized = sanitized
+    .replace(/\uFFFD/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+    .replace(/[A-Za-z][A-Za-z0-9 ,.;:!?/()_\-]{90,}/g, " ")
+    .replace(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]{18,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!sanitized) {
+    sanitized = "일부 AI 응답을 불러오지 못했습니다. 다시 시도하거나 관리자에게 문의해 주세요.";
+  }
   return sanitized;
 }
 
@@ -452,8 +471,8 @@ function bubblePreview(content: string, isJudge = false): { preview: string; det
     .split(/(?<=[.!?。！？다요니다까])\s+/)
     .map((part) => part.trim())
     .filter(Boolean);
-  const maxChars = isJudge ? 180 : 260;
-  const seed = sentenceParts.slice(0, isJudge ? 2 : 3).join(" ") || cleaned;
+  const maxChars = isJudge ? 320 : 420;
+  const seed = sentenceParts.slice(0, isJudge ? 3 : 5).join(" ") || cleaned;
   const preview = seed.length > maxChars ? seed.slice(0, maxChars).trim() + "..." : seed;
   const collapsed = cleaned.length > preview.length + 20;
   return { preview, detail: cleaned, collapsed };
@@ -676,17 +695,24 @@ export function Result() {
       // Phase 10.44 — followUp 의 reanalyzeStatus 를 backend 응답에서 hydrate.
       // backend 가 source of truth — sessionStorage 는 빠른 first-paint fallback 용도로만 유지.
       if (Array.isArray(result.followUpQuestions)) {
-        const fromBackend = (result.followUpQuestions as Array<{
-          targetAgent?: string; message?: string; createdAt?: string; updatedAt?: string; reanalyzeStatus?: string; appliedRound?: number | string;
-        }>)
+        const fromBackend = (result.followUpQuestions as FollowUpQuestion[])
           .filter((q) => q?.targetAgent !== "system" && q?.message)
           .map((q) => ({
+            id: q.id,
             targetAgent: q.targetAgent,
             message: q.message as string,
             createdAt: q.createdAt,
             updatedAt: q.updatedAt,
             reanalyzeStatus: (q.reanalyzeStatus as FollowUpStatus | undefined) ?? "pending",
             appliedRound: q.appliedRound,
+            sourceRound: q.sourceRound,
+            afterRound: q.afterRound,
+            round: q.round,
+            roundNumber: q.roundNumber,
+            nextRound: q.nextRound,
+            sequence: q.sequence,
+            questionOrder: q.questionOrder,
+            sender: q.sender,
           }));
         if (fromBackend.length > 0) {
           setUserFollowUps(fromBackend);
@@ -1315,118 +1341,45 @@ export function Result() {
         {/* ── 분석 진행 중 ── */}
         {isAnalyzing && (
           <>
-            {/* 실시간 중계 */}
             <Card className="border-slate-200 bg-white">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-[#1E3A8A]" />
-                  실시간 중계
+                <CardTitle className="flex flex-wrap items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-[#1E3A8A]" />
+                  현재 토론 진행
+                  <Badge variant="outline" className="text-[10px]">
+                    {currentPhase.progress}%
+                  </Badge>
+                  <StreamStatusBadge status={streamStatus} />
                 </CardTitle>
                 <CardDescription>{currentPhase.label}</CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-3">
                 <div className="rounded-xl border border-[#1E3A8A]/20 bg-[#1E3A8A]/5 p-4">
-                  <p className="text-sm text-slate-700">{currentPhase.description}</p>
-                </div>
-                <p className="text-xs text-slate-400 mt-2 italic">{ticker.text}</p>
-              </CardContent>
-            </Card>
-
-            {/* 대시보드 펄스 */}
-            <Card className="border-slate-200 bg-white">
-              <CardHeader>
-                <CardTitle>대시보드 펄스</CardTitle>
-                <CardDescription>현재 발언 중인 에이전트를 시각적으로 표시합니다.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-center gap-8 py-3">
-                  {dashboardAgents.map((agentId) => {
-                    const agent = agentMap[agentId];
-                    const Icon = agent.icon;
-                    const isActive = activeAgentId === agentId;
-                    return (
-                      <div key={agentId} className="relative text-center">
-                        {isActive && (
-                          <span className="absolute -inset-2 rounded-full border-2 border-[#1E3A8A]/35 animate-ping" />
-                        )}
-                        <div className={`relative w-16 h-16 rounded-full border flex items-center justify-center ${agent.bg} ${agent.border}`}>
-                          <Icon className={`w-6 h-6 ${agent.color}`} />
-                        </div>
-                        <p className="text-xs mt-2 text-slate-600">{agent.name}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-                {ticker.conflict && (
-                  <div className="mt-3 flex items-center justify-center gap-2 text-amber-700 text-sm">
-                    <Zap className="w-4 h-4" />
-                    에이전트 간 논쟁이 격화되고 있습니다.
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-[#1E3A8A]">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="font-medium">
+                      {liveStatus.roundLabel || currentPhase.humourLabel}
+                    </span>
+                    {liveStatus.speakingNow && (
+                      <span className="text-slate-600">
+                        · 지금 발언 중: {agentMap[liveStatus.speakingNow]?.name}
+                      </span>
+                    )}
                   </div>
-                )}
-                {/* Phase 10.32 — 현재 발언 중 안내 (사용자 친화 문구) */}
-                {liveStatus.speakingNow && (
-                  <p className="mt-3 text-center text-[12px] text-[#1E3A8A]">
-                    <Loader2 className="inline w-3 h-3 mr-1 animate-spin" />
-                    {liveStatus.roundDescription}
+                  <p className="mt-2 text-sm leading-relaxed text-slate-700">
+                    {liveStatus.roundDescription || currentPhase.description}
                   </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* 진행 게이지 — 실제 phase 기반 */}
-            <Card className="border-slate-200 bg-white">
-              <CardHeader>
-                <CardTitle>진행 게이지</CardTitle>
-                <CardDescription>{currentPhase.humourLabel}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between text-sm mb-2">
-                  <span>토론 진행률</span>
-                  <span className="font-medium">{currentPhase.progress}%</span>
                 </div>
-                <Progress value={currentPhase.progress} className="h-2" />
-                <div className="mt-3 text-sm text-slate-600 flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {currentPhase.description}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Phase 10.23 — SSE 연결 상태 배지 */}
-            <StreamStatusBadge status={streamStatus} />
-            {/* Phase 10.35 — 진행 중 provisional agent 말풍선.
-                10.33 의 messages.length === 0 조건이 너무 빨리 사라지던 문제 해결:
-                실제 서버 메시지가 3개 미만이거나 아직 분석 중일 때는 provisional 도 함께 표시 →
-                사용자가 끊김 없이 단계별 에이전트 검토 흐름을 인지 가능. */}
-            {(messages.length < 3 || (isAnalyzing && messages.length < 5)) && (() => {
+                {(() => {
               type ProvAgent = "business" | "legal" | "risk" | "judge";
-              // Phase 10.46 — 사용자 친화 문구로 정렬. 진행률 구간별로 다른 에이전트가 검토 중인 느낌을 명확히 노출.
               const provisional: Array<{ ag: ProvAgent; text: string; activeAt: number }> = [
                 { ag: "business", text: "비즈니스 전략가가 사업 관점 리스크를 검토 중입니다.", activeAt: 10 },
                 { ag: "legal", text: "법률 전문가가 협약 조건과 개인정보 처리 가능성을 확인 중입니다.", activeAt: 30 },
                 { ag: "risk", text: "리스크 검토자가 정산·환수·중복 수혜 가능성을 점검 중입니다.", activeAt: 60 },
                 { ag: "judge", text: "최종 판정관이 검토 의견을 종합하고 있습니다.", activeAt: 85 },
               ];
-              // Phase 10.35 — 실제 메시지 존재 시 제목 보정 (provisional + 실시간 메시지 병존 안내)
-              const hasRealMsgs = messages.length > 0;
-              const titleByProgress =
-                hasRealMsgs ? "AI 검토팀 진행 단계 (실제 토론은 아래에 표시)" :
-                currentPhase.progress >= 80 ? "AI 검토팀이 마무리 검토 중" :
-                currentPhase.progress >= 25 ? "AI 검토팀이 순차 검토 중" :
-                "AI 검토팀 준비 중";
               return (
-                <Card className="border-slate-200 bg-white">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <MessageSquare className="w-5 h-5 text-[#1E3A8A]" />
-                      {titleByProgress}
-                    </CardTitle>
-                    <CardDescription>
-                      검토 진행 상황이 실시간으로 업데이트됩니다. AI 검토팀의 의견이 순차적으로 표시됩니다.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2.5">
+                    <div className="grid gap-2 md:grid-cols-4">
                       {provisional.map((p, i) => {
                         const ag = agentMap[p.ag];
                         const Icon = ag.icon;
@@ -1435,35 +1388,35 @@ export function Result() {
                         return (
                           <div
                             key={i}
-                            className={`flex justify-start ${active ? "opacity-100" : "opacity-40"}`}
+                            className={`rounded-lg border px-3 py-2 ${isSpeaking ? "border-[#1E3A8A]/35 bg-[#1E3A8A]/5" : active ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200 bg-slate-50 opacity-60"}`}
                           >
-                            <div className={`max-w-[88%] rounded-2xl rounded-tl-sm border px-3 py-2 ${ag.bg} ${ag.border} shadow-sm`}>
-                              <div className={`text-xs font-medium flex flex-wrap items-center gap-1.5 ${ag.color}`}>
-                                <Icon className="w-3.5 h-3.5" />
-                                <span>{ag.name}</span>
-                                {isSpeaking && (
-                                  <span className="flex items-center gap-0.5 text-[10px] text-slate-500">
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                    검토 중
-                                  </span>
-                                )}
-                                {active && !isSpeaking && (
-                                  <span className="text-[10px] text-emerald-700">✓ 1차 정리 완료</span>
-                                )}
-                              </div>
-                              <p className="mt-1 text-[13px] text-slate-700 leading-relaxed">{p.text}</p>
+                            <div className={`flex items-center gap-1.5 text-xs font-medium ${ag.color}`}>
+                              <Icon className="w-3.5 h-3.5" />
+                              <span>{ag.name}</span>
+                              {isSpeaking ? (
+                                <span className="ml-auto flex items-center gap-0.5 text-[10px] text-[#1E3A8A]">
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  진행 중
+                                </span>
+                              ) : active ? (
+                                <span className="ml-auto text-[10px] text-emerald-700">완료</span>
+                              ) : (
+                                <span className="ml-auto text-[10px] text-slate-400">예정</span>
+                              )}
                             </div>
+                            <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-slate-600">{p.text}</p>
                           </div>
                         );
                       })}
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        💡 검토 중에도 아래에서 추가 질문을 남길 수 있습니다. 실제 토론 내용은 곧 이 영역에 순차적으로 표시됩니다.
-                      </p>
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })()}
+                );
+                })()}
+                <p className="text-[11px] text-slate-500">
+                  검토 중에도 아래에서 추가 질문을 남길 수 있습니다. 실제 에이전트 발언은 아래 토론 로그에 순차적으로 표시됩니다.
+                </p>
+              </CardContent>
+            </Card>
+
             {/* Phase 10.20/10.21 — 실시간 토론 메시지 타임라인 (staged reveal + 채팅 UX) */}
             {messages.length > 0 && (
               <LiveDebateTimeline
@@ -1618,11 +1571,15 @@ export function Result() {
 
         {/* Phase 10.11 — 사용자 추가 질문 말풍선 영역 */}
         {!isAnalyzing && userFollowUps.some((q) => q.targetAgent !== "system") && (
-          <Card className="border-slate-200 bg-white">
-            <CardContent className="space-y-2 py-4">
-              <div className="mb-1 text-sm font-semibold text-slate-700">
-                사용자 추가 질문 ({userFollowUps.filter((q) => q.targetAgent !== "system" && q.reanalyzeStatus !== "deleted").length}건)
-              </div>
+          <details className="rounded-xl border border-slate-200 bg-white">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">
+              사용자 추가 질문 관리 ({userFollowUps.filter((q) => q.targetAgent !== "system" && q.reanalyzeStatus !== "deleted").length}건)
+              <span className="ml-2 text-[11px] font-normal text-slate-500">
+                질문 내용은 위 토론 타임라인에 말풍선으로 표시됩니다.
+              </span>
+            </summary>
+            <Card className="border-0 bg-white shadow-none">
+              <CardContent className="space-y-2 px-4 pb-4 pt-0">
               {userFollowUps.map((q, originalIdx) => ({ q, originalIdx })).filter(({ q }) => q.targetAgent !== "system").map(({ q, originalIdx }) => {
                 // Phase 10.56 — 질문별 상태 chip (반영 완료 / 일부 반영 / 재검토 반영 대기 / 다시 시도 필요 / 재검토 중)
                 const rs = q.reanalyzeStatus;
@@ -1748,8 +1705,9 @@ export function Result() {
                   </>
                 )}
               </p>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </details>
         )}
 
         {/* Phase 10.6/10.11/10.31 — 라운드 사이 사용자 개입 영역. 분석 중/완료 상태 전달. */}
@@ -1867,6 +1825,12 @@ function RoundInterventionBlock({
   const isCompletedReview = mode === "completed";
   const isFinalIntervention = mode === "round5";
   const targetRound = mode === "completed" ? null : stageTargetRound(mode);
+  const activeUserFollowUps = existingFollowUps.filter((q) =>
+    q.targetAgent !== "system" && q.reanalyzeStatus !== "deleted" && q.message.trim(),
+  );
+  const sourceRoundForNewQuestion = targetRound
+    ? Math.min(4, Math.max(1, targetRound - 1))
+    : undefined;
 
   useEffect(() => {
     setSubmitted(false);
@@ -2065,6 +2029,7 @@ function RoundInterventionBlock({
     setFollowUpStatusMsg("질문 저장 중...");
     // Phase 10.9 — 백엔드에 영구 저장 시도 (sessionId 가 있을 때만)
     const createdAt = new Date().toISOString();
+    const questionOrder = activeUserFollowUps.length + 1;
     const sessionId = sessionStorage.getItem("sessionId");
     let saveOk = true;
     if (sessionId) {
@@ -2076,6 +2041,10 @@ function RoundInterventionBlock({
             targetAgent: target,
             message: trimmed,
             createdAt,
+            sourceRound: sourceRoundForNewQuestion,
+            questionOrder,
+            sequence: questionOrder,
+            sender: "user",
           }),
         });
         saveOk = res.ok;
@@ -2102,7 +2071,16 @@ function RoundInterventionBlock({
     }
     // Phase 10.11 — 부모 컴포넌트에 알림 → 채팅 로그 말풍선으로 즉시 렌더
     if (onQuestionSaved) {
-      onQuestionSaved({ targetAgent: target, message: trimmed, createdAt, reanalyzeStatus: "pending" });
+      onQuestionSaved({
+        targetAgent: target,
+        message: trimmed,
+        createdAt,
+        reanalyzeStatus: "pending",
+        sourceRound: sourceRoundForNewQuestion,
+        questionOrder,
+        sequence: questionOrder,
+        sender: "user",
+      });
     }
     setSubmitted(true);
     // 전송 후 textarea 비우기 (다음 질문 입력 가능)
@@ -2326,10 +2304,11 @@ function LiveDebateTimeline({
   onJumpToBottom: () => void;
 }) {
   // 라운드 + 시간순으로 메시지/유저질문을 통합한 타임라인 항목 만들기
+  type TimelineQuestion = FollowUpQuestion & { questionOrder: number; sourceRound: number };
   type Item =
     | { kind: "agent"; msg: Message; idx: number }
     | { kind: "user"; q: FollowUpQuestion; idx: number }
-    | { kind: "userGroup"; questions: FollowUpQuestion[]; idx: number; label: string };
+    | { kind: "userGroup"; questions: TimelineQuestion[]; idx: number; afterRound: number; label: string };
   type TimelineStage = number | "intervention" | "reanalysis" | "general";
   const stageLabel = (stage: TimelineStage) => {
     if (typeof stage === "number") return `Round ${stage} · ${roundTitle(stage)}`;
@@ -2342,16 +2321,44 @@ function LiveDebateTimeline({
   const activeFollowUps = userFollowUps.filter((q) =>
     q.targetAgent !== "system" && q.reanalyzeStatus !== "deleted" && q.message.trim(),
   );
-  const followUpsByRound = new Map<number, FollowUpQuestion[]>();
-  for (const round of [2, 3, 4, 5]) {
-    followUpsByRound.set(round, activeFollowUps.filter((q) =>
-      String(q.appliedRound ?? "") === String(round)
-      || (round === 2 && !q.appliedRound && q.reanalyzeStatus !== "pending")
-    ));
-  }
   // Phase 10.21 — staged reveal: 부모가 계산한 visibleCount 만큼만 표시.
   // 재검토 세션에서는 이전 최종 판정관의 긴 결론은 타임라인에서 숨기고, 최신 최종 판단만 Round 3에 표시한다.
   const rawVisibleMessages = messages.slice(0, visibleCount);
+  const toRoundNumber = (v: unknown): number | null => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 1 && n <= 4 ? n : null;
+  };
+  const sortedFollowUps: TimelineQuestion[] = activeFollowUps
+    .map((q, originalIndex) => ({ q, originalIndex }))
+    .sort((a, b) => {
+      const ao = Number(a.q.questionOrder ?? a.q.sequence);
+      const bo = Number(b.q.questionOrder ?? b.q.sequence);
+      if (Number.isFinite(ao) && Number.isFinite(bo) && ao !== bo) return ao - bo;
+      if (Number.isFinite(ao) && !Number.isFinite(bo)) return -1;
+      if (!Number.isFinite(ao) && Number.isFinite(bo)) return 1;
+      const at = a.q.createdAt ? Date.parse(a.q.createdAt) : Number.NaN;
+      const bt = b.q.createdAt ? Date.parse(b.q.createdAt) : Number.NaN;
+      if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return at - bt;
+      return a.originalIndex - b.originalIndex;
+    })
+    .map(({ q }, orderIndex) => {
+      const questionOrder = orderIndex + 1;
+      const explicitSourceRound =
+        toRoundNumber(q.sourceRound)
+        ?? toRoundNumber(q.afterRound)
+        ?? toRoundNumber(q.round)
+        ?? toRoundNumber(q.roundNumber);
+      // Older saved questions did not carry sourceRound. In the 4-step demo flow,
+      // question order is the stable source of truth for both label and insertion point.
+      const sourceRound = explicitSourceRound ?? Math.min(4, questionOrder);
+      return { ...q, questionOrder, sourceRound };
+    });
+  const followUpsByAfterRound = new Map<number, TimelineQuestion[]>();
+  for (const q of sortedFollowUps) {
+    const list = followUpsByAfterRound.get(q.sourceRound) || [];
+    list.push(q);
+    followUpsByAfterRound.set(q.sourceRound, list);
+  }
   const judgeIndexes = rawVisibleMessages
     .map((m, idx) => (resolveAgentKey(m.agentId, m.agentName, m.type) === "judge" && m.type === "recommendation") ? idx : -1)
     .filter((idx) => idx >= 0);
@@ -2364,37 +2371,47 @@ function LiveDebateTimeline({
       })
     : rawVisibleMessages.map((m, idx) => ({ msg: m, originalIdx: idx })));
   const visibleMessages = visibleMessageItems.map((item) => item.msg);
-  const systemFollowUps = userFollowUps.filter((q) => q.targetAgent === "system");
+  const systemFollowUps = userFollowUps
+    .filter((q) => q.targetAgent === "system")
+    .slice(-1);
   const items: Item[] = [];
   const insertedQuestionBlocks = new Set<number>();
-  let prevAgentRound = 0;
-  let prevAgentWasJudge = false;
   visibleMessageItems.forEach(({ msg: m, originalIdx }, i) => {
     const agKey = resolveAgentKey(m.agentId, m.agentName, m.type);
     const isSystem = m.agentId === "system" || m.type === "system" || m.type === "error";
-    const isJudge = agKey === "judge";
     const msgRound = Number(m.round || 0);
-    const roundQuestions = followUpsByRound.get(msgRound) || [];
-    const firstRoundMessageWithQuestions = msgRound >= 2 && roundQuestions.length > 0 && !isSystem;
     const afterInitialJudge = activeFollowUps.length > 0
       && firstJudgeIndex >= 0
       && originalIdx > firstJudgeIndex
       && !isSystem
-      && !isJudge;
-    const roundReset = !isSystem && i > 0 && (firstRoundMessageWithQuestions || afterInitialJudge || m.round < prevAgentRound || (prevAgentWasJudge && !isJudge));
-    if (roundReset && firstRoundMessageWithQuestions && !insertedQuestionBlocks.has(msgRound)) {
-      items.push({ kind: "userGroup", questions: roundQuestions, idx: i, label: `사용자 추가 질문 ${msgRound - 1}차` });
-      insertedQuestionBlocks.add(msgRound);
-    }
+      && agKey !== "judge";
     items.push({ kind: "agent", msg: m, idx: i });
-    if (!isSystem) {
-      prevAgentRound = m.round;
-      prevAgentWasJudge = isJudge;
+
+    if (!isSystem && msgRound >= 1 && msgRound <= 4 && !insertedQuestionBlocks.has(msgRound)) {
+      const nextMessage = visibleMessageItems.slice(i + 1).find(({ msg }) => {
+        const nextIsSystem = msg.agentId === "system" || msg.type === "system" || msg.type === "error";
+        return !nextIsSystem;
+      })?.msg;
+      const nextRound = nextMessage ? Number(nextMessage.round || 0) : null;
+      const isRoundBoundary = nextRound == null || nextRound > msgRound || nextRound < msgRound || afterInitialJudge;
+      const questions = followUpsByAfterRound.get(msgRound) || [];
+      if (isRoundBoundary && questions.length > 0) {
+        items.push({
+          kind: "userGroup",
+          questions,
+          idx: i,
+          afterRound: msgRound,
+          label: questions.length === 1
+            ? `사용자 추가 질문 ${questions[0].questionOrder}차`
+            : `사용자 추가 질문 ${questions[0].questionOrder}~${questions[questions.length - 1].questionOrder}차`,
+        });
+        insertedQuestionBlocks.add(msgRound);
+      }
     }
   });
-  for (const round of [2, 3, 4, 5]) {
-    const questions = followUpsByRound.get(round) || [];
-    if (insertedQuestionBlocks.has(round) || questions.length === 0) continue;
+  for (const afterRound of [1, 2, 3, 4]) {
+    const questions = followUpsByAfterRound.get(afterRound) || [];
+    if (insertedQuestionBlocks.has(afterRound) || questions.length === 0) continue;
     const hasApplied = questions.some((q) =>
       q.reanalyzeStatus === "in-progress"
       || q.reanalyzeStatus === "completed"
@@ -2402,9 +2419,17 @@ function LiveDebateTimeline({
       || q.reanalyzeStatus === "partial"
       || q.reanalyzeStatus === "failed"
     );
-    if (hasApplied || visibleMessages.some((m) => Number(m.round) >= round - 1)) {
-      items.push({ kind: "userGroup", questions, idx: visibleMessages.length, label: `사용자 추가 질문 ${round - 1}차` });
-      insertedQuestionBlocks.add(round);
+    if (hasApplied || visibleMessages.some((m) => Number(m.round) >= afterRound)) {
+      items.push({
+        kind: "userGroup",
+        questions,
+        idx: visibleMessages.length,
+        afterRound,
+        label: questions.length === 1
+          ? `사용자 추가 질문 ${questions[0].questionOrder}차`
+          : `사용자 추가 질문 ${questions[0].questionOrder}~${questions[questions.length - 1].questionOrder}차`,
+      });
+      insertedQuestionBlocks.add(afterRound);
     }
   }
   systemFollowUps.forEach((q, i) => items.push({ kind: "user", q, idx: visibleMessages.length + i }));
@@ -2498,14 +2523,20 @@ function LiveDebateTimeline({
                   </span>
                   <div className="h-px flex-1 bg-emerald-200" />
                 </div>
-                <div className="ml-auto max-w-[86%] rounded-2xl rounded-tr-sm bg-[#1E3A8A] px-4 py-3 text-sm text-white shadow-sm">
-                  <div className="mb-1 text-[10.5px] opacity-80">
-                    {item.label.includes("4차") ? "종합 라운드에 반영합니다" : "다음 라운드에 반영합니다"} · {item.questions.length}건
+                <div className="ml-auto max-w-[74%] rounded-2xl rounded-tr-sm bg-[#1E3A8A] px-4 py-3 text-sm text-white shadow-sm">
+                  <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[10.5px] opacity-85">
+                    <span>Round {item.afterRound} 이후</span>
+                    <span>·</span>
+                    <span>{item.label.includes("4차") ? "종합 라운드에 반영합니다" : "다음 라운드에 반영합니다"}</span>
+                    <span>· {item.questions.length}건</span>
+                    {item.questions[0]?.createdAt && (
+                      <span>· {new Date(item.questions[0].createdAt).toLocaleTimeString("ko-KR")}</span>
+                    )}
                   </div>
                   <ol className="list-decimal space-y-1 pl-4">
                     {item.questions.map((q, qi) => (
                       <li key={`${q.createdAt || qi}-${q.message}`} className="break-keep whitespace-pre-wrap">
-                        <span className="opacity-80">[{targetAgentLabel(q.targetAgent)}] </span>
+                        <span className="opacity-80">[{targetAgentLabel(q.targetAgent)}에게 질문] </span>
                         {q.message}
                       </li>
                     ))}
@@ -2619,7 +2650,7 @@ function LiveDebateTimeline({
                   }`}>
                     {stageLabel(stage)}
                   </span>
-                  <div className={`h-px flex-1 ${stage === "recheck" ? "bg-emerald-200" : "bg-slate-200"}`} />
+                  <div className={`h-px flex-1 ${stage === "reanalysis" ? "bg-emerald-200" : "bg-slate-200"}`} />
                 </div>
               )}
               <div className="flex justify-start">

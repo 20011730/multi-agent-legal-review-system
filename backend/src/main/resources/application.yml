@@ -53,23 +53,29 @@ app:
     enabled: ${APP_RAG_ENABLED:false}
     chroma:
       base-url: ${CHROMA_BASE_URL:http://localhost:8000}
-      # 기본 검색 컬렉션은 E5 768차원 'laws_e5' (intfloat/multilingual-e5-base).
-      # 기존 'laws' (384차원, simple-hash) 컬렉션은 fallback/비교용으로 보존되어 있음 — 삭제 금지.
-      # 'laws_e5' 검색이 실제로 동작하려면 embedding provider/dimension/external URL 이
+      # 기본 검색 컬렉션은 E5 768차원 전체 현행 법령 'laws_e5_full' (intfloat/multilingual-e5-base).
+      # 기존 'laws' / 'laws_e5' 컬렉션은 fallback/비교용으로 보존되어 있음 — 삭제 금지.
+      # 'laws_e5_full' 검색이 실제로 동작하려면 embedding provider/dimension/external URL 이
       # 아래 embedding 섹션의 기본값(external/768/localhost:9100)과 정합되어야 한다.
       # 즉 외부 E5 임베딩 서비스(`ai/generate_rag/embedding_server.py`)가 반드시 기동 중이어야 함.
-      laws-collection: ${CHROMA_LAWS_COLLECTION:laws_e5}
-      # 판례 컬렉션 기본값을 ``cases_e5`` (E5 768차원) 로 전환 — laws_e5 와 동일 임베딩 차원/모델.
-      # 기존 ``cases`` (384차원, 미사용 fallback) 컬렉션은 보존되며 ENV로 회귀 가능:
-      #   CHROMA_CASES_COLLECTION=cases
+      laws-collection: ${CHROMA_LAWS_COLLECTION:laws_e5_full}
+      # legacy 판례 컬렉션은 명시 회귀용으로만 보존한다.
       cases-collection: ${CHROMA_CASES_COLLECTION:cases_e5}
       # Phase 10.65/10.66 — 확장 판례 collection (legal_rag_export 기반).
       #   비어 있으면 dual/extended 모드여도 legacy cases_e5 로 자동 fallback.
       #   샘플(910건) → legal_case_chunks_sample, 부분 적재 → legal_case_chunks_full, 전체 1.86M 도 동일 이름 권장.
-      extended-cases-collection: ${CHROMA_EXTENDED_CASES_COLLECTION:}
+      extended-cases-collection: ${CHROMA_EXTENDED_CASES_COLLECTION:legal_case_chunks_full}
       extended-cases-top-k: ${CHROMA_EXTENDED_CASES_TOPK:2}
-      # case-search-mode: legacy | extended | dual (기본 legacy — 운영 안정)
-      case-search-mode: ${CASE_SEARCH_MODE:legacy}
+      # case-search-mode: legacy | extended | full_only | dual
+      # 최종 결과 화면 기본값은 full_only — legal_case_chunks_full만 사용해 legacy cases_e5가 섞이지 않게 한다.
+      case-search-mode: ${CASE_SEARCH_MODE:full_only}
+      tax:
+        enabled: ${TAX_RAG_ENABLED:false}
+        routing-enabled: ${TAX_RAG_ROUTING_ENABLED:false}
+        collection: ${CHROMA_TAX_COLLECTION:tax_tribunal_e5_full}
+        top-k: ${CHROMA_TAX_TOPK:3}
+        candidate-top-k: ${CHROMA_TAX_CANDIDATE_TOPK:15}
+        min-body-length: ${CHROMA_TAX_MIN_BODY_LENGTH:50}
       timeout-seconds: ${CHROMA_TIMEOUT_SECONDS:15}
     top-k:
       law: ${RAG_TOPK_LAW:3}

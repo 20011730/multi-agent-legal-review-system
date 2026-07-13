@@ -88,6 +88,20 @@ public class ChromaSearchService {
         }
     }
 
+    public List<RetrievedChunk> queryTaxTribunals(String queryText, int topK) {
+        if (!ragProperties.isEnabled()) return List.of();
+        RagProperties.Chroma.Tax tax = ragProperties.getChroma().getTax();
+        if (tax == null || !tax.isEnabled() || !tax.isRoutingEnabled()) return List.of();
+        String coll = tax.getCollection();
+        if (coll == null || coll.isBlank()) return List.of();
+        try {
+            return query(coll, "TAX_TRIBUNAL", queryText, topK);
+        } catch (Exception e) {
+            log.warn("[RAG] 조세 심판례 검색 실패 — 해당 컬렉션 결과 제외 (msg={})", e.getMessage());
+            return List.of();
+        }
+    }
+
     // ─────────────────────── Ingestion-side ───────────────────────
 
     /**

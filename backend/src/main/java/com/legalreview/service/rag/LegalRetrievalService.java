@@ -13,6 +13,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -36,6 +37,7 @@ public class LegalRetrievalService {
     private final RagProperties ragProperties;
     private final ChromaSearchService chromaSearchService;
     private final EvidenceAssembler evidenceAssembler;
+    private final TaxQueryRouter taxQueryRouter;
 
     /**
      * 세션 입력 기반 retrieval 1회.
@@ -131,17 +133,37 @@ public class LegalRetrievalService {
             }
         }
 
-        log.info("[RAG] retrieval 완료 — query='{}', lawTopK={}, caseTopK={}, lawHits={}, caseHits={}, extHits={}",
-                truncate(query, 80), kLaw, kCase, lawChunks.size(), caseChunks.size(), extendedChunks.size());
+        List<RetrievedChunk> taxChunks = List.of();
+        RagProperties.Chroma.Tax tax = ragProperties.getChroma().getTax();
+        boolean taxSearchEnabled = tax != null && tax.isEnabled() && tax.isRoutingEnabled();
+        boolean taxRelated = taxSearchEnabled && taxQueryRouter.isTaxRelated(query);
+        if (taxRelated) {
+            int taxTopK = Math.max(0, tax.getTopK());
+            int taxCandidateK = Math.max(taxTopK, tax.getCandidateTopK());
+            if (taxTopK > 0 && taxCandidateK > 0) {
+                taxChunks = chromaSearchService.queryTaxTribunals(query, taxCandidateK);
+                taxChunks = selectTaxTribunalChunks(taxChunks, taxTopK, Math.max(0, tax.getMinBodyLength()));
+                log.info("[RAG] 조세 심판례 retrieval — candidateK={}, finalK={}, hits={}",
+                        taxCandidateK, taxTopK, taxChunks.size());
+            }
+        }
+
+        log.info("[RAG] retrieval 완료 — query='{}', lawTopK={}, caseTopK={}, lawHits={}, caseHits={}, extHits={}, taxHits={}",
+                truncate(query, 80), kLaw, kCase, lawChunks.size(), caseChunks.size(), extendedChunks.size(), taxChunks.size());
 
         List<EvidenceDto> evidences = new ArrayList<>(
-                lawChunks.size() + caseChunks.size() + extendedChunks.size());
+                lawChunks.size() + caseChunks.size() + extendedChunks.size() + taxChunks.size());
         evidences.addAll(evidenceAssembler.toEvidenceDtos(lawChunks));
         evidences.addAll(evidenceAssembler.toEvidenceDtos(caseChunks));
         // 확장 판례 evidence 에 dataSource 태그 부여 → prompt 블록 분리 + UI chip 표시.
         for (RetrievedChunk ec : extendedChunks) {
             EvidenceDto dto = evidenceAssembler.toEvidenceDto(ec);
-            dto.setDataSource("extended_case_full");
+            dto.setDataSource("case_full");
+            evidences.add(dto);
+        }
+        for (RetrievedChunk tc : taxChunks) {
+            EvidenceDto dto = evidenceAssembler.toEvidenceDto(tc);
+            dto.setDataSource("tax_tribunal");
             evidences.add(dto);
         }
         return evidences;
@@ -273,6 +295,50 @@ public class LegalRetrievalService {
         id = c.metaFirstOf("db_id");
         if (!id.isBlank()) return "db:" + id;
         return c.getChunkId() == null ? "" : c.getChunkId();
+    }
+
+    private static List<RetrievedChunk> selectTaxTribunalChunks(List<RetrievedChunk> chunks, int finalK, int minBodyLength) {
+        if (chunks == null || chunks.isEmpty() || finalK <= 0) return List.of();
+        List<RetrievedChunk> sorted = new ArrayList<>(chunks);
+        sorted.sort(Comparator
+                .comparingInt((RetrievedChunk c) -> -taxBodyTier(c, minBodyLength))
+                .thenComparing(c -> c.getDistance() == null ? Double.MAX_VALUE : c.getDistance()));
+
+        List<RetrievedChunk> picked = new ArrayList<>(Math.min(finalK, sorted.size()));
+        Set<String> used = new HashSet<>();
+        for (RetrievedChunk c : sorted) {
+            String id = taxIdentity(c);
+            if (!id.isBlank() && used.contains(id)) continue;
+            picked.add(c);
+            if (!id.isBlank()) used.add(id);
+            if (picked.size() >= finalK) return picked;
+        }
+        for (RetrievedChunk c : sorted) {
+            if (!picked.contains(c)) {
+                picked.add(c);
+                if (picked.size() >= finalK) break;
+            }
+        }
+        return picked;
+    }
+
+    private static int taxBodyTier(RetrievedChunk c, int minBodyLength) {
+        String text = c.getChunkText() == null ? "" : c.getChunkText().trim();
+        String section = c.metaFirstOf("section_type", "subsection_label").replaceAll("\\s+", "");
+        boolean tooShort = text.length() < minBodyLength;
+        boolean labelOnly = Set.of("끝.", "이유", "주문").contains(text.replaceAll("\\s+", ""));
+        boolean tableTail = text.replaceAll("\\s+", "").matches("\\[(표|그림)](끝\\.|이유)?");
+        boolean metadataLike = isMetadataLikeSection(section);
+        return (tooShort || labelOnly || tableTail || metadataLike) ? 0 : 1;
+    }
+
+    private static String taxIdentity(RetrievedChunk c) {
+        String id = c.metaFirstOf("doc_number");
+        if (!id.isBlank()) return id;
+        String chunkId = c.getChunkId();
+        if (chunkId == null || chunkId.isBlank()) return "";
+        int idx = chunkId.indexOf("_p");
+        return idx > 0 ? chunkId.substring(0, idx) : chunkId;
     }
 
     /**
@@ -456,6 +522,21 @@ public class LegalRetrievalService {
         // situation 은 보조적이므로 너무 긴 경우만 제외
         if (situation != null && situation.length() < 200) {
             tokens.add(situation);
+        }
+        // Phase 10.82 — 라운드 사이 사용자 추가 질문도 retrieval query 에 반영.
+        // 예: 최초 입력에는 세무 키워드가 없고 Round 3 개입에서 "VAT/매입세액/환수"가
+        // 등장하는 경우, tax_tribunal_e5_full 보조 검색이 빠지는 회귀를 막는다.
+        if (request.getFollowUpQuestions() != null) {
+            int added = 0;
+            for (Map<String, Object> q : request.getFollowUpQuestions()) {
+                if (q == null) continue;
+                Object raw = q.get("message");
+                String msg = raw == null ? "" : raw.toString().trim();
+                if (msg.isBlank()) continue;
+                tokens.add(msg.length() > 220 ? msg.substring(0, 220) : msg);
+                added++;
+                if (added >= 4) break;
+            }
         }
         // 도메인 reformulation 보조어 추가 (content 에 이미 포함된 토큰은 dedup).
         // - 의료/학폭/행정/임대차 4개 도메인 모두 동일 정책.

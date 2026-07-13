@@ -26,9 +26,12 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  CalendarDays,
+  Eye,
 } from "lucide-react";
 import { MarketingLayout } from "../components/MarketingLayout";
 import { SupportCard } from "../components/startup/SupportCard";
+import { StartupSupportDetailModal } from "../components/startup/StartupSupportDetailModal";
 import { SupportFilterBar } from "../components/startup/SupportFilterBar";
 import { Input } from "../components/ui/input";
 import {
@@ -67,6 +70,67 @@ const DEFAULT_SORT: SortKey = "activeFirst";
 const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const DEFAULT_SIZE = 20;
 const KEYWORD_DEBOUNCE_MS = 300;
+
+type SavedViewMode = "list" | "calendar";
+
+function normalizeSupportStatus(status?: string | null, deadlineStatus?: string | null): SupportStatus {
+  const raw = deadlineStatus || status || "";
+  if (raw.includes("임박")) return "마감임박";
+  if (raw.includes("마감") && !raw.includes("예정") && !raw.includes("오늘")) return "모집마감";
+  if (raw.includes("상시")) return "상시모집";
+  if (raw.includes("모집중") || raw.includes("예정") || raw.includes("오늘")) return "모집중";
+  return "확인 필요";
+}
+
+function normalizeCategory(category?: string | null): SupportCategory {
+  return (VALID_CATEGORIES as ReadonlyArray<string>).includes(category || "")
+    ? (category as SupportCategory)
+    : "사업화";
+}
+
+function savedToSupportItem(item: SavedSupportProgram): SupportItem {
+  return {
+    id: item.programId,
+    title: item.title || "제목 확인 필요",
+    organization: item.organization || "주관 기관 확인 필요",
+    category: normalizeCategory(item.category),
+    region: item.region || "전국",
+    target: "저장된 공고 원문에서 확인 필요",
+    fieldSummary: item.fieldSummary || "공고 상세 내용은 원문에서 추가 확인이 필요합니다.",
+    maxAmount: "공고문 참고",
+    status: normalizeSupportStatus(item.status, item.deadlineStatus),
+    deadline: item.deadline || item.deadlineLabel || "확인 필요",
+    applyUrl: item.applyUrl || "",
+    recommendReason: "저장한 관심 공고입니다. 신청 자격, 협약, 정산, 개인정보, 지식재산권 조건을 함께 확인하세요.",
+    itemSource: "saved-support",
+  };
+}
+
+function parseSavedDeadline(value?: string | null): Date | null {
+  if (!value) return null;
+  const normalized = value.trim().replace(/\./g, "-").replace(/\//g, "-");
+  const match = normalized.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+
+function ymd(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function daysBetweenToday(date: Date): number {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  return Math.round((target - start) / 86400000);
+}
 
 function readCategoryParam(raw: string | null): SupportCategory | "전체" {
   if (!raw) return "전체";
@@ -135,6 +199,12 @@ export function StartupSupport() {
   const [savingIds, setSavingIds] = useState<Record<string, boolean>>({});
   const [savedError, setSavedError] = useState<string | null>(null);
   const [showSavedOnly, setShowSavedOnly] = useState(searchParams.get("saved") === "1");
+  const [savedView, setSavedView] = useState<SavedViewMode>("list");
+  const [savedCalendarMonth, setSavedCalendarMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [selectedSavedProgram, setSelectedSavedProgram] = useState<SupportItem | null>(null);
 
   const updateSearchParams = useCallback(
     (updates: Record<string, string | null>) => {
@@ -310,6 +380,35 @@ export function StartupSupport() {
     () => savedPrograms.filter((item) => item.daysLeft !== null && item.daysLeft >= 0 && item.daysLeft <= 7),
     [savedPrograms],
   );
+  const savedByDate = useMemo(() => {
+    const map = new Map<string, SavedSupportProgram[]>();
+    for (const item of savedPrograms) {
+      const date = parseSavedDeadline(item.deadline);
+      if (!date) continue;
+      const key = ymd(date);
+      map.set(key, [...(map.get(key) || []), item]);
+    }
+    return map;
+  }, [savedPrograms]);
+  const savedCalendarDays = useMemo(() => {
+    const year = savedCalendarMonth.getFullYear();
+    const month = savedCalendarMonth.getMonth();
+    const first = new Date(year, month, 1);
+    const firstDay = first.getDay();
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const cells: Array<{ date: Date | null; key: string }> = [];
+    for (let i = 0; i < firstDay; i += 1) {
+      cells.push({ date: null, key: `empty-start-${i}` });
+    }
+    for (let d = 1; d <= totalDays; d += 1) {
+      const date = new Date(year, month, d);
+      cells.push({ date, key: ymd(date) });
+    }
+    while (cells.length % 7 !== 0) {
+      cells.push({ date: null, key: `empty-end-${cells.length}` });
+    }
+    return cells;
+  }, [savedCalendarMonth]);
   const visibleRegularItems = showSavedOnly
     ? regularItems.filter((item) => savedStatus[item.id])
     : regularItems;
@@ -496,10 +595,29 @@ export function StartupSupport() {
               저장한 지원사업을 마감 일정과 함께 다시 확인하고 바로 법률 리스크 진단을 시작할 수 있습니다.
             </p>
           </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setShowSavedOnly((v) => !v)}
+	          <div className="flex flex-wrap gap-2">
+	            <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5">
+	              {([
+	                ["list", "리스트 보기"],
+	                ["calendar", "캘린더 보기"],
+	              ] as const).map(([value, label]) => (
+	                <button
+	                  key={value}
+	                  type="button"
+	                  onClick={() => setSavedView(value)}
+	                  className={`rounded px-2.5 py-1 text-xs font-medium ${
+	                    savedView === value
+	                      ? "bg-white text-[#1E3A8A] shadow-sm"
+	                      : "text-slate-500 hover:text-[#1E3A8A]"
+	                  }`}
+	                >
+	                  {label}
+	                </button>
+	              ))}
+	            </div>
+	            <button
+	              type="button"
+	              onClick={() => setShowSavedOnly((v) => !v)}
               className={`rounded-md border px-3 py-1.5 text-xs font-medium transition ${
                 showSavedOnly
                   ? "border-[#1E3A8A] bg-[#1E3A8A] text-white"
@@ -515,10 +633,10 @@ export function StartupSupport() {
             {savedError}
           </p>
         )}
-        {savedPrograms.length > 0 ? (
-          <div className="mt-4 grid gap-2 md:grid-cols-2">
-            {savedPrograms.slice(0, 4).map((item) => (
-              <div key={item.programId} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+	        {savedPrograms.length > 0 ? savedView === "list" ? (
+	          <div className="mt-4 grid gap-2 md:grid-cols-2">
+	            {savedPrograms.map((item) => (
+	              <div key={item.programId} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="line-clamp-1 text-sm font-medium text-slate-900">{item.title}</p>
@@ -541,8 +659,16 @@ export function StartupSupport() {
                     {item.deadlineLabel || "일정 미정"}
                   </span>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {item.applyUrl ? (
+	                <div className="mt-2 flex flex-wrap gap-1.5">
+	                  <button
+	                    type="button"
+	                    onClick={() => setSelectedSavedProgram(savedToSupportItem(item))}
+	                    className="rounded border border-[#1E3A8A]/30 bg-white px-2 py-1 text-[11px] font-medium text-[#1E3A8A] hover:bg-[#1E3A8A]/5"
+	                  >
+	                    <Eye className="mr-1 inline h-3 w-3" />
+	                    자세히 보기
+	                  </button>
+	                  {item.applyUrl ? (
                     <a
                       href={item.applyUrl}
                       target="_blank"
@@ -589,9 +715,94 @@ export function StartupSupport() {
                 </div>
               </div>
             ))}
-          </div>
-        ) : (
-          <p className="mt-4 rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
+	          </div>
+	        ) : (
+	          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+	            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+	              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+	                <CalendarDays className="h-4 w-4 text-[#1E3A8A]" />
+	                {savedCalendarMonth.getFullYear()}년 {savedCalendarMonth.getMonth() + 1}월 마감 일정
+	              </div>
+	              <div className="flex gap-1">
+	                <button
+	                  type="button"
+	                  onClick={() => setSavedCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
+	                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:text-[#1E3A8A]"
+	                >
+	                  이전 달
+	                </button>
+	                <button
+	                  type="button"
+	                  onClick={() => setSavedCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))}
+	                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:text-[#1E3A8A]"
+	                >
+	                  다음 달
+	                </button>
+	              </div>
+	            </div>
+	            <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-medium text-slate-500">
+	              {["일", "월", "화", "수", "목", "금", "토"].map((d) => <div key={d} className="py-1">{d}</div>)}
+	            </div>
+	            <div className="grid grid-cols-7 gap-1">
+	              {savedCalendarDays.map((cell) => {
+	                const dateKey = cell.date ? ymd(cell.date) : cell.key;
+	                const dayItems = cell.date ? (savedByDate.get(dateKey) || []) : [];
+	                const today = cell.date && ymd(cell.date) === ymd(new Date());
+	                return (
+	                  <div
+	                    key={cell.key}
+	                    className={`min-h-[92px] rounded-md border p-1.5 text-left ${
+	                      cell.date
+	                        ? today
+	                          ? "border-[#1E3A8A]/40 bg-[#1E3A8A]/5"
+	                          : "border-slate-200 bg-white"
+	                        : "border-transparent bg-transparent"
+	                    }`}
+	                  >
+	                    {cell.date && (
+	                      <>
+	                        <div className={`mb-1 text-[11px] font-medium ${today ? "text-[#1E3A8A]" : "text-slate-500"}`}>
+	                          {cell.date.getDate()}
+                          {dayItems.length > 0 && <span className="ml-1 text-[10px] text-rose-600">{dayItems.length}건</span>}
+	                        </div>
+	                        <div className="space-y-1">
+	                          {dayItems.slice(0, 3).map((item) => {
+	                            const deadline = parseSavedDeadline(item.deadline);
+	                            const daysLeft = deadline ? daysBetweenToday(deadline) : null;
+	                            const tone = daysLeft === null
+	                              ? "border-slate-200 bg-slate-50 text-slate-500"
+	                              : daysLeft < 0
+	                                ? "border-slate-200 bg-slate-100 text-slate-500"
+	                                : daysLeft === 0
+	                                  ? "border-rose-300 bg-rose-50 text-rose-700"
+	                                  : daysLeft <= 7
+	                                    ? "border-amber-300 bg-amber-50 text-amber-700"
+	                                    : "border-emerald-200 bg-emerald-50 text-emerald-700";
+	                            return (
+	                              <button
+	                                key={item.programId}
+	                                type="button"
+	                                onClick={() => setSelectedSavedProgram(savedToSupportItem(item))}
+	                                className={`block w-full truncate rounded border px-1.5 py-1 text-left text-[10.5px] ${tone}`}
+	                                title={`${item.title} · ${item.deadlineLabel || item.deadline || "일정 미정"}`}
+	                              >
+	                                {item.title}
+	                              </button>
+	                            );
+	                          })}
+	                          {dayItems.length > 3 && (
+	                            <div className="text-[10px] text-slate-400">+{dayItems.length - 3}건 더 있음</div>
+	                          )}
+	                        </div>
+	                      </>
+	                    )}
+	                  </div>
+	                );
+	              })}
+	            </div>
+	          </div>
+	        ) : (
+	          <p className="mt-4 rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
             아직 저장한 공고가 없습니다. 공고 카드의 저장 버튼을 눌러 관심 목록에 추가해 보세요.
           </p>
         )}
@@ -849,14 +1060,22 @@ export function StartupSupport() {
       )}
 
       {/* 안내 */}
-      <div className="mt-8 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-600">
-        <p className="font-medium text-slate-700">⚠ 본 페이지 안내</p>
-        <p className="mt-1">
-          본 큐레이션은 K-Startup · 중소벤처기업부 등 공공데이터 OpenAPI 와 mock 데이터를 결합한 결과입니다.
-          실제 신청 자격·금액·마감일은 각 기관 공식 페이지에서 반드시 확인해 주세요.
-          카드의 추천도/요약은 공고 키워드 기반 사전 분석이며, 실제 법률 진단은 "법률 리스크 진단" 단계에서 멀티 에이전트 토론으로 진행됩니다.
-        </p>
-      </div>
-    </MarketingLayout>
-  );
-}
+	      <div className="mt-8 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-600">
+	        <p className="font-medium text-slate-700">⚠ 본 페이지 안내</p>
+	        <p className="mt-1">
+	          본 큐레이션은 K-Startup · 중소벤처기업부 등 공공데이터 OpenAPI 와 mock 데이터를 결합한 결과입니다.
+	          실제 신청 자격·금액·마감일은 각 기관 공식 페이지에서 반드시 확인해 주세요.
+	          카드의 추천도/요약은 공고 키워드 기반 사전 분석이며, 실제 법률 진단은 "법률 리스크 진단" 단계에서 멀티 에이전트 토론으로 진행됩니다.
+	        </p>
+	      </div>
+	      <StartupSupportDetailModal
+	        item={selectedSavedProgram}
+	        open={Boolean(selectedSavedProgram)}
+	        onClose={() => setSelectedSavedProgram(null)}
+	        saved={selectedSavedProgram ? Boolean(savedStatus[selectedSavedProgram.id]) : false}
+	        saving={selectedSavedProgram ? Boolean(savingIds[selectedSavedProgram.id]) : false}
+	        onToggleSaved={handleToggleSaved}
+	      />
+	    </MarketingLayout>
+	  );
+	}

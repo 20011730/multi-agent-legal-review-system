@@ -37,8 +37,10 @@ public class ReviewService {
                             .filter(ReviewService::isVisibleFollowUp)
                             .filter(q -> "reanalysis".equalsIgnoreCase(String.valueOf(q.getOrDefault("appliedRound", ""))))
                             .count();
+                    FinalDecision latestFinalDecision = finalDecisionRepository.findBySessionId(session.getId()).orElse(null);
                     return ReviewSummaryDto.from(
                             session,
+                            latestFinalDecision,
                             messageRepository.countBySessionId(session.getId()),
                             evidenceRepository.findBySessionIdOrderByIdAsc(session.getId()).size(),
                             activeFollowUps,

@@ -362,13 +362,28 @@ public class RagDevController {
         resp.put("casesCollection", ragProperties.getChroma().getCasesCollection());
         // Phase 10.71 — 개발자 가시성: 확장 collection / case-search-mode 진단 정보 노출 (사용자 화면 X)
         String extColl = ragProperties.getChroma().getExtendedCasesCollection();
+        RagProperties.Chroma.Tax tax = ragProperties.getChroma().getTax();
+        String taxColl = tax == null ? "" : tax.getCollection();
         resp.put("caseSearchMode", ragProperties.getChroma().getCaseSearchMode());
         resp.put("extendedCasesCollection", extColl == null ? "" : extColl);
+        resp.put("taxRagEnabled", tax != null && tax.isEnabled());
+        resp.put("taxRoutingEnabled", tax != null && tax.isRoutingEnabled());
+        resp.put("taxCollectionConfigured", taxColl != null && !taxColl.isBlank());
+        resp.put("taxCollectionName", taxColl == null || taxColl.isBlank() ? null : "조세 심판례");
         if (ragProperties.isEnabled()) {
             resp.put("lawsCount", chromaSearchService.countCollection(ragProperties.getChroma().getLawsCollection()));
             resp.put("casesCount", chromaSearchService.countCollection(ragProperties.getChroma().getCasesCollection()));
             if (extColl != null && !extColl.isBlank()) {
                 resp.put("extendedCasesCount", chromaSearchService.countCollection(extColl));
+            }
+            if (tax != null && tax.isEnabled() && tax.isRoutingEnabled()
+                    && taxColl != null && !taxColl.isBlank()) {
+                int taxCount = chromaSearchService.countCollection(taxColl);
+                resp.put("taxCollectionAvailable", taxCount >= 0);
+                resp.put("taxCollectionCount", taxCount);
+            } else {
+                resp.put("taxCollectionAvailable", false);
+                resp.put("taxCollectionCount", null);
             }
         }
         return ResponseEntity.ok(resp);
