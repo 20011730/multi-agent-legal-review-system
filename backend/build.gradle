@@ -28,6 +28,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     runtimeOnly 'org.postgresql:postgresql'
+    runtimeOnly 'com.h2database:h2'
 
     // BCrypt 비밀번호 암호화 (spring-security-crypto만 사용, 전체 Security 미도입)
     implementation 'org.springframework.security:spring-security-crypto'

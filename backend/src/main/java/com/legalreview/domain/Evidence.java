@@ -66,6 +66,17 @@ public class Evidence {
     @Column(length = 50)
     private String agentName;
 
+    /**
+     * Phase 10.70 — 검색 source 태그. 예시 값:
+     *   - "cases_e5" / "laws_e5"      : 운영 RAG 컬렉션
+     *   - "extended_case..."         : 확장 판례
+     *   - null                        : 법제처 OPEN API 등 RAG 외 출처
+     * EvidenceCard 의 "기존 판례 DB" / "확장 판례 DB" chip 라벨링용.
+     * ddl-auto=update 환경에서 자동 ALTER TABLE — 기존 row 는 NULL.
+     */
+    @Column(name = "data_source", length = 64)
+    private String dataSource;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 }

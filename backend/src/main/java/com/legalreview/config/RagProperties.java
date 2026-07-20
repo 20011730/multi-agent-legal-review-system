@@ -1,0 +1,156 @@
+package com.legalreview.config;
+
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * 법령/판례 RAG (Chroma) 관련 설정.
+ *
+ * application.yml 예시:
+ * <pre>
+ * app:
+ *   rag:
+ *     enabled: false
+ *     chroma:
+ *       base-url: http://localhost:8000
+ *       laws-collection: laws
+ *       cases-collection: cases
+ *     top-k:
+ *       law: 3
+ *       case: 2
+ *     embedding:
+ *       model: BAAI/bge-m3
+ *       dimension: 1024
+ * </pre>
+ *
+ * 모든 값은 환경변수로도 주입 가능 (e.g. APP_RAG_ENABLED=true).
+ * 추후 top-k 실험(law3+case2 vs law5+case3)을 위해 하드코딩을 피하고 설정값으로 분리.
+ */
+@Configuration
+@ConfigurationProperties(prefix = "app.rag")
+@Getter
+@Setter
+public class RagProperties {
+
+    /** RAG 사용 여부 (false면 기존 LawSearchService 흐름만 사용). */
+    private boolean enabled = false;
+
+    private final Chroma chroma = new Chroma();
+    private final TopK topK = new TopK();
+    private final Embedding embedding = new Embedding();
+    private final Prompt prompt = new Prompt();
+    private final Ingestion ingestion = new Ingestion();
+    private final Experiment experiment = new Experiment();
+
+    @Getter @Setter
+    public static class Chroma {
+        private String baseUrl = "http://localhost:8000";
+        // application.yml의 기본값과 일치:
+        //   laws-collection           = laws_e5_full
+        //   cases-collection          = cases_e5 (롤백용 legacy)
+        //   extended-cases-collection = legal_case_chunks_full
+        // 결과 화면 기본 검색은 full collection만 사용하고 legacy는 명시 설정 시에만 사용한다.
+        private String lawsCollection = "laws_e5_full";
+        private String casesCollection = "cases_e5";
+        /**
+         * Phase 10.63 — 확장 판례 collection (legal_rag_export 기반 샘플).
+         * 빈 값이면 dual retrieval 비활성 (기존 cases_e5 단일 검색 유지).
+         * Phase 10.65 — E5 호환 확인됨 (운영 E5 query encoder 그대로 사용 가능).
+         */
+        private String extendedCasesCollection = "legal_case_chunks_full";
+        /** 확장 판례 top-k. */
+        private int extendedCasesTopK = 2;
+        /**
+         * Phase 10.65 — 판례 검색 source 선택자.
+         *   - "legacy"   : cases_e5 단일 검색 (명시 회귀용)
+         *   - "extended" : extended-cases-collection 단일 검색 (sample 또는 full 1.86M)
+         *   - "dual"     : 둘 다 검색하여 source 별 분리 prompt 블록 + chip 표시
+         * full_only 모드에서 extended collection 이 비어 있으면 판례 검색을 중단해
+         * 결과 화면에 legacy collection이 섞이지 않게 한다.
+         */
+        private String caseSearchMode = "full_only";
+        private final Tax tax = new Tax();
+        /** 요청 timeout(초). */
+        private int timeoutSeconds = 15;
+
+        @Getter @Setter
+        public static class Tax {
+            private boolean enabled = false;
+            private boolean routingEnabled = false;
+            private String collection = "tax_tribunal_e5_full";
+            private int topK = 3;
+            private int candidateTopK = 15;
+            private int minBodyLength = 50;
+        }
+    }
+
+    @Getter @Setter
+    public static class TopK {
+        /** 법령 검색 top-k (조문 chunk 단위). */
+        private int law = 3;
+        /** 판례 검색 top-k (판시사항/판단이유 chunk 단위). */
+        private int caze = 2; // "case"는 Java 예약어
+    }
+
+    @Getter @Setter
+    public static class Embedding {
+        /**
+         * 임베딩 provider 선택자.
+         * 지원 값:
+         *   - "simple"   : SimpleHashEmbeddingService (기본 / fallback / 의존성 0)
+         *   - "external" : ExternalEmbeddingService (HTTP 마이크로서비스 — sentence-transformers 등)
+         *   - "e5"       : E5 계열 (현재는 stub — 향후 ONNX/HTTP 어댑터로 교체)
+         */
+        private String provider = "simple";
+
+        /** 임베딩 모델 이름 (메타데이터/식별용). Chroma chunk metadata에 함께 기록. */
+        private String model = "simple-hash-v1";
+
+        /** 임베딩 차원수. SimpleHash=384, MiniLM-L6=384, bge-m3=1024 등. */
+        private int dimension = 384;
+
+        private final External external = new External();
+
+        @Getter @Setter
+        public static class External {
+            /** 외부 임베딩 마이크로서비스 base URL. */
+            private String baseUrl = "http://localhost:9100";
+            /** 임베딩 endpoint path. body: {"texts":[...]} → {"embeddings":[[...]]} */
+            private String embedPath = "/embed";
+            /** HTTP timeout(초). */
+            private int timeoutSeconds = 30;
+        }
+    }
+
+    @Getter @Setter
+    public static class Prompt {
+        /** evidence 1건당 프롬프트에 들어갈 본문 최대 글자수 (토큰 폭증 방지). */
+        private int maxEvidenceChars = 220;
+        /** 프롬프트에 주입할 evidence 총 건수 상한 (legal 우선). */
+        private int maxItemsLegal = 5;
+        /** BIZ/JUDGE에 전달할 요약(타이틀만) 항목 수. */
+        private int maxItemsCommon = 3;
+    }
+
+    @Getter @Setter
+    public static class Ingestion {
+        /** 운영 endpoint와 충돌 방지용 dev controller 활성화 여부. enabled=true 시에만 동작. */
+        private boolean devEndpointEnabled = true;
+        /** 시드 적재 시 기존 chunk를 덮어쓸지(true) 건너뛸지(false). */
+        private boolean overwriteExisting = false;
+    }
+
+    /**
+     * 실험 추적 설정.
+     * - enabled=true 면 각 세션 분석 시 실험 메타(experimentTag, ragTopkLaw 등)와 타이밍을 ReviewSession에 기록한다.
+     * - tag는 사람이 읽을 수 있는 실험 식별자 (e.g. "rag-law3-case2-v1", "baseline-openapi-v1").
+     * - app.rag.enabled와 독립 — RAG가 꺼져 있어도 실험 태그만 켜서 baseline 측정 가능.
+     */
+    @Getter @Setter
+    public static class Experiment {
+        private boolean enabled = false;
+        private String tag = "default";
+    }
+}

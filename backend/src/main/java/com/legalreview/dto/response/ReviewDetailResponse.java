@@ -32,4 +32,8 @@ public class ReviewDetailResponse {
 
     // 법령/판례 근거
     private List<EvidenceDto> evidences;
+
+    private List<java.util.Map<String, Object>> followUpQuestions;
+    private List<java.util.Map<String, Object>> attachments;
+    private long assistantMessageCount;
 }

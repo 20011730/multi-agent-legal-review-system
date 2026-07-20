@@ -20,6 +20,109 @@ spring:
       hibernate:
         format_sql: true
 
+logging:
+  level:
+    com.legalreview.service.LawApiClient: ${LAW_API_LOG_LEVEL:INFO}
+    com.legalreview.service.LawSearchService: ${LAW_API_LOG_LEVEL:INFO}
+
 app:
   ai:
+    # engine: python → 기존 Python FastAPI 호출, ollama → 로컬 Ollama 직접 호출
+    engine: ${AI_ENGINE:python}
     base-url: ${AI_SERVER_URL:http://localhost:8001}
+    # Python AI Server 호출 timeout (LangGraph + RunPod/Ollama 호출이 길어질 수 있어 넉넉히)
+    connect-timeout-seconds: ${AI_CONNECT_TIMEOUT_SECONDS:30}
+    read-timeout-seconds: ${AI_READ_TIMEOUT_SECONDS:900}   # 기본 15분 — 필요 시 환경변수로 조정
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      model: ${OLLAMA_MODEL:glm-4.7-flash:q4_K_M}
+      timeout-seconds: ${OLLAMA_TIMEOUT:300}
+  law-api:
+    base-url: https://www.law.go.kr/DRF/lawSearch.do
+    oc: ${LAW_API_OC:}
+    # ── RAG 수집(LawApiProperties) 신규 키 ──
+    search-url: ${LAW_API_SEARCH_URL:http://www.law.go.kr/DRF/lawSearch.do}
+    service-url: ${LAW_API_SERVICE_URL:http://www.law.go.kr/DRF/lawService.do}
+    default-display: ${LAW_API_DEFAULT_DISPLAY:100}
+    request-delay-ms: ${LAW_API_REQUEST_DELAY_MS:150}
+    max-pages: ${LAW_API_MAX_PAGES:1}
+
+  # 법령/판례 RAG (Chroma) 설정
+  # 기본은 비활성. APP_RAG_ENABLED=true 환경변수로만 켠다.
+  rag:
+    enabled: ${APP_RAG_ENABLED:false}
+    chroma:
+      base-url: ${CHROMA_BASE_URL:http://localhost:8000}
+      # 기본 검색 컬렉션은 E5 768차원 전체 현행 법령 'laws_e5_full' (intfloat/multilingual-e5-base).
+      # 기존 'laws' / 'laws_e5' 컬렉션은 fallback/비교용으로 보존되어 있음 — 삭제 금지.
+      # 'laws_e5_full' 검색이 실제로 동작하려면 embedding provider/dimension/external URL 이
+      # 아래 embedding 섹션의 기본값(external/768/localhost:9100)과 정합되어야 한다.
+      # 즉 외부 E5 임베딩 서비스(`ai/generate_rag/embedding_server.py`)가 반드시 기동 중이어야 함.
+      laws-collection: ${CHROMA_LAWS_COLLECTION:laws_e5_full}
+      # legacy 판례 컬렉션은 명시 회귀용으로만 보존한다.
+      cases-collection: ${CHROMA_CASES_COLLECTION:cases_e5}
+      # Phase 10.65/10.66 — 확장 판례 collection (legal_rag_export 기반).
+      #   비어 있으면 dual/extended 모드여도 legacy cases_e5 로 자동 fallback.
+      #   샘플(910건) → legal_case_chunks_sample, 부분 적재 → legal_case_chunks_full, 전체 1.86M 도 동일 이름 권장.
+      extended-cases-collection: ${CHROMA_EXTENDED_CASES_COLLECTION:legal_case_chunks_full}
+      extended-cases-top-k: ${CHROMA_EXTENDED_CASES_TOPK:2}
+      # case-search-mode: legacy | extended | full_only | dual
+      # 최종 결과 화면 기본값은 full_only — legal_case_chunks_full만 사용해 legacy cases_e5가 섞이지 않게 한다.
+      case-search-mode: ${CASE_SEARCH_MODE:full_only}
+      tax:
+        enabled: ${TAX_RAG_ENABLED:false}
+        routing-enabled: ${TAX_RAG_ROUTING_ENABLED:false}
+        collection: ${CHROMA_TAX_COLLECTION:tax_tribunal_e5_full}
+        top-k: ${CHROMA_TAX_TOPK:3}
+        candidate-top-k: ${CHROMA_TAX_CANDIDATE_TOPK:15}
+        min-body-length: ${CHROMA_TAX_MIN_BODY_LENGTH:50}
+      timeout-seconds: ${CHROMA_TIMEOUT_SECONDS:15}
+    top-k:
+      law: ${RAG_TOPK_LAW:3}
+      caze: ${RAG_TOPK_CASE:2}     # "case"는 Java 예약어 → 설정 키도 caze로 통일
+    embedding:
+      # provider: simple | external (default — E5 외부 임베딩 서비스) | e5(stub)
+      # 기본 검색 경로를 laws_e5(768차원)에 맞추기 위해 external + dim=768 을 기본값으로 둔다.
+      # 외부 서비스 다운 시 ExternalEmbeddingService 는 SimpleHashEmbeddingService(384차원)로
+      # graceful-fallback 하지만, 그 결과 laws_e5(768)와 dim mismatch 가 발생해 검색은 실패한다.
+      # 따라서 RAG 활성 환경에서는 `embedding_server.py` 가 반드시 함께 떠 있어야 한다.
+      provider: ${APP_RAG_EMBEDDING_PROVIDER:external}
+      model: ${RAG_EMBEDDING_MODEL:intfloat/multilingual-e5-base}
+      dimension: ${RAG_EMBEDDING_DIM:768}
+      external:
+        base-url: ${RAG_EMBEDDING_EXTERNAL_URL:http://localhost:9100}
+        embed-path: ${RAG_EMBEDDING_EXTERNAL_PATH:/embed}
+        timeout-seconds: ${RAG_EMBEDDING_EXTERNAL_TIMEOUT:30}
+    # 실험 추적 — RAG enabled와 독립적으로 ON 가능 (baseline 측정용)
+    experiment:
+      enabled: ${RAG_EXPERIMENT_ENABLED:false}
+      tag: ${RAG_EXPERIMENT_TAG:default}
+
+# ── 스타트업 지원사업 (Phase 9: K-Startup 2개 API 키 분리) ──────────────
+# provider: mock (기본) | k-startup (외부 OpenAPI)
+# 공공데이터포털에서 승인받은 API 2개를 각각 service/news 로 분리하여 관리.
+#   1) service: 창업진흥원_K-Startup(사업소개/사업공고/콘텐츠 등) 조회서비스
+#   2) news:    중소벤처기업부_K STARTUP 창업소식
+#
+# 환경변수 우선순위 (각 키마다):
+#   새 변수 → 구 변수 (STARTUP_API_KEY/STARTUP_BASE_URL) → 빈 문자열
+# 키가 비어있거나 외부 호출 실패 시 enable-mock-fallback=true 면 mock 데이터로 fallback.
+startup-support:
+  provider: ${STARTUP_SUPPORT_PROVIDER:mock}
+  # mock fallback 활성화 (외부 API 미설정/실패 시 mock 15건 반환).
+  # envelope source 가 "mock(fallback)" 으로 변경되어 운영자가 인지 가능.
+  enable-mock-fallback: ${STARTUP_MOCK_FALLBACK:false}
+  k-startup:
+    service:
+      # 창업진흥원 K-Startup 조회서비스 (Phase 9.10 — service01 신규 게이트웨이로 교체).
+      # 기존 kisedKstartupService 는 게이트웨이 측 응답 비정상(500 Unexpected errors) — 신규 service01 게이트웨이 정상.
+      # 파라미터: page / perPage / returnType (pageNo/numOfRows/type 아님).
+      api-key: ${KSTARTUP_SERVICE_API_KEY:${STARTUP_API_KEY:}}
+      base-url: ${KSTARTUP_SERVICE_BASE_URL:${STARTUP_BASE_URL:https://apis.data.go.kr/B552735/kisedKstartupService01}}
+      operation-path: ${KSTARTUP_SERVICE_OPERATION_PATH:/getAnnouncementInformation01}
+    news:
+      # 중소벤처기업부_K STARTUP 창업소식 — odcloud(데이터파일) 형식.
+      # 동일 서비스 ID(15122759) 아래 여러 uddi(데이터셋 스냅샷) 존재. 정상 응답 확인된 uddi 를 기본값으로 둠.
+      api-key: ${KSTARTUP_NEWS_API_KEY:}
+      base-url: ${KSTARTUP_NEWS_BASE_URL:https://api.odcloud.kr/api}
+      operation-path: ${KSTARTUP_NEWS_OPERATION_PATH:/15122759/v1/uddi:4113b9df-32f4-4eaf-ba4b-ef50bd2b4bee}
